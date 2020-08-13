@@ -72,6 +72,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast_mail_parser"
+version = "0.1.0"
+dependencies = [
+ "mailparse",
+ "pyo3",
+]
+
+[[package]]
 name = "ghost"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -157,14 +165,6 @@ dependencies = [
  "base64 0.12.3",
  "charset",
  "quoted_printable",
-]
-
-[[package]]
-name = "nc_mail_parser"
-version = "0.1.6"
-dependencies = [
- "mailparse",
- "pyo3",
 ]
 
 [[package]]

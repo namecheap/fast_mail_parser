@@ -87,7 +87,7 @@ pub fn parse_email(py: Python, payload: PyObject) -> PyResult<PyMail> {
 }
 
 #[pymodule]
-fn nc_mail_parser(py: Python, m: &PyModule) -> PyResult<()> {
+fn fast_mail_parser(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(parse_email))?;
     m.add_class::<PyMail>()?;
     m.add_class::<PyAttachment>()?;

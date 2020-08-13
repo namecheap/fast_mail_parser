@@ -1,9 +1,9 @@
 import pytest
 
-from nc_mail_parser import parse_email, ParseError
+from fast_mail_parser import parse_email, ParseError
 
 
-class TestNcMailParser:
+class TestFastMailParser:
     @pytest.fixture
     def valid_message(self) -> str:
         with open('tests/data/valid_message.eml', 'r') as f:

@@ -27,4 +27,4 @@ def parse_email(payload: Union[str, bytes]) -> PyMail:
     ...
 
 
-from .nc_mail_parser import parse_email, ParseError
+from .fast_mail_parser import parse_email, ParseError

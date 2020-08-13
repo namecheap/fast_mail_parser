@@ -1,6 +1,6 @@
 [package]
-name = "nc_mail_parser"
-version = "0.1.6"
+name = "fast_mail_parser"
+version = "0.1.0"
 authors = ["Andrey Sokirko <andrey.sokirko@namecheap.com>"]
 readme = "Readme.md"
 license = "Apache-2.0"
@@ -31,8 +31,8 @@ opt-level = 3
 debug = false
 
 [lib]
-name = "nc_mail_parser"
-path = "src/nc_mail_parser.rs"
+name = "fast_mail_parser"
+path = "src/fast_mail_parser.rs"
 crate-type = ["cdylib"]
 
 [dependencies]

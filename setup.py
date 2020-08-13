@@ -34,10 +34,10 @@ install_requires = ["toml~=0.10.0"]
 tests_require = install_requires + ["pytest"]
 
 setup(
-    name="nc_mail_parser",
+    name="fast_mail_parser",
     version=version,
-    packages=["nc_mail_parser"],
-    rust_extensions=[RustExtension("nc_mail_parser.nc_mail_parser", debug=False)],
+    packages=["fast_mail_parser"],
+    rust_extensions=[RustExtension("fast_mail_parser.fast_mail_parser", debug=False)],
     install_requires=install_requires,
     tests_require=tests_require,
     setup_requires=setup_requires,
