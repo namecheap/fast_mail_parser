@@ -8,7 +8,7 @@ description = "This is a fast Python library for .eml files parsing (mail parser
 
 [package.metadata.maturin]
 classifier = [
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Programming Language :: Python",
