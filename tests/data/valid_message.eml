@@ -1,0 +1,2283 @@
+Delivered-To: wartwvister@gmail.com
+Received: by 2002:ad4:5567:0:0:0:0:0 with SMTP id w7csp199345qvy;
+        Tue, 30 Jun 2020 22:39:50 -0700 (PDT)
+X-Google-Smtp-Source: ABdhPJx1ThX8le0touadBy/BdCwGffeaOKkb0vDiV7FnQerlyN7QQIFY9tuNJcqBNN0CUlkxly0G
+X-Received: by 2002:a25:9341:: with SMTP id g1mr41201176ybo.57.1593581990195;
+        Tue, 30 Jun 2020 22:39:50 -0700 (PDT)
+ARC-Seal: i=1; a=rsa-sha256; t=1593581990; cv=none;
+        d=google.com; s=arc-20160816;
+        b=HfNeTb4naH+My1HBWbLAUoWr+4MFMu7/hFWyoFDuH0TPjck83kLlcddJb7Gw/SISYU
+         zmyM0DUeH2msPxn+SbY0TPQEZaT91N3km5J2Bl3BURLgGgzk7wT1mrEvwnbNoKIpPSOv
+         zyvGbG68omVBxh6PQnmFr/Llw5/H5/YPZH4tuLMeLdQvzDUlV2WOEX9hvdWStha411zG
+         yrw00643ZbqLm7GNMU0Rb7ZyGUhOu6afmDYrUo/oijn2JoWbiWfNRcSECJf0M8nSYAp9
+         qHP8d9wRF37EhOTUvVKJQCwCMQ04TkbWlViSq2ItcZQEpUzpd8yCaHfKORsTXbLdFuGx
+         7sww==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20160816;
+        h=mime-version:list-unsubscribe-post:list-unsubscribe:list-id
+         :feedback-id:message-id:date:to:reply-to:from:subject:dkim-signature
+         :dkim-signature;
+        bh=cOfb8wQtSJK+/KjAtLmpI5aKTqUa7xgGHWlqdXMGj8k=;
+        b=OGwsRV8uqjAHBW9gyw7EHWZn3g3OF8pbNR2XNnh8nE4I4+8Fv3AlLK7OHIMSgWjhdV
+         ozslxdU19/HSWwB0jOoLqLheg/Be6/rRoPFlBrDr7cnRF35vFJBnSEJ1jHMGWjkA0OsF
+         ILU8G/tuTvUe+R8lnSuK52SCWCNpOOE/TPgr51qT08msd2HXZKS6eBPR3CCgVtFtkkKO
+         Y60foBPetkWb4j8M1wNXXM71+ZY4b1wMjgDrOfy8EdDU0CgFDv0S5XRwG561qEkXZfQ1
+         AO2hLO/2lip9LmMo9mQSG7zFd3Mt++ZzQ3IXH/g/qBT+vy2isV1Wb7IuLsHwoizq3kXC
+         C9Cw==
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@gmail.mcsv.net header.s=k1 header.b=acwbjhNZ;
+       dkim=pass header.i=@openshift.com header.s=k1 header.b=Eihu1MP4;
+       spf=pass (google.com: domain of bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net designates 205.201.130.253 as permitted sender) smtp.mailfrom=bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net
+Return-Path: <bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net>
+Received: from mail253.wdc02.mcdlv.net (mail253.wdc02.mcdlv.net. [205.201.130.253])
+        by mx.google.com with ESMTPS id d93si4829705ybi.258.2020.06.30.22.39.49
+        for <wartwvister@gmail.com>
+        (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);
+        Tue, 30 Jun 2020 22:39:50 -0700 (PDT)
+Received-SPF: pass (google.com: domain of bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net designates 205.201.130.253 as permitted sender) client-ip=205.201.130.253;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@gmail.mcsv.net header.s=k1 header.b=acwbjhNZ;
+       dkim=pass header.i=@openshift.com header.s=k1 header.b=Eihu1MP4;
+       spf=pass (google.com: domain of bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net designates 205.201.130.253 as permitted sender) smtp.mailfrom=bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=gmail.mcsv.net; s=k1; t=1593581635; bh=cOfb8wQtSJK+/KjAtLmpI5aKTqUa7xgGHWlqdXMGj8k=; h=Subject:From:Reply-To:To:Date:Message-ID:Feedback-ID:List-ID:
+	 List-Unsubscribe:Content-Type:MIME-Version; b=acwbjhNZelGldqXi7LxDynis56b0EVQEwb/QZ4zHD6S5HxbrUh+rTlS+ch1vPU2RC
+	 /3Lz1pmUiOZ4C3wqYmDuL65avDcoWOkMSORzQuF8oFV972GqyLuVzflr7HLChYrXi2
+	 5CeRYkCyM4KK2hNlkgnWHIJBGjLkFRDfZb/gtLik=
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=openshift.com; s=k1; t=1593581635; i=noreply@openshift.com; bh=cOfb8wQtSJK+/KjAtLmpI5aKTqUa7xgGHWlqdXMGj8k=; h=Subject:From:Reply-To:To:Date:Message-ID:List-ID:List-Unsubscribe:
+	 Content-Type:MIME-Version; b=Eihu1MP4q/msO3NstvNljEBi/N9O8JCyxXwV3odNXyva2mYQPa+gT8/+Upv0zTkmO
+	 97OF0q68/5iZ094GlBeTZEgVS+v+InDSyuU0t3bhkb5ktRINRr+X4VASXboa4MDSlD
+	 wrCieYRwqqq14FHvHHRxkkZ7HwUaRGHm4v2VvbW4=
+Received: from localhost (localhost [127.0.0.1]) by mail253.wdc02.mcdlv.net (Mailchimp) with ESMTP id 49xVJg029szRDc for <wartwvister@gmail.com>; Wed,
+  1 Jul 2020 05:33:55 +0000 (GMT)
+Subject: Your June OpenShift Update
+From: Red Hat OpenShift <noreply@openshift.com>
+Reply-To: Red Hat OpenShift <noreply@openshift.com>
+To: <wartwvister@gmail.com>
+Date: Wed,
+  1 Jul 2020 05:33:42 +0000
+Message-ID: <979c70339150d05eec1531104.def745e273.20200701053326.66f48780af.4a62601a@mail253.wdc02.mcdlv.net>
+X-Mailer: MailChimp Mailer - **CID66f48780afdef745e273**
+X-Campaign: mailchimp979c70339150d05eec1531104.66f48780af
+X-campaignid: mailchimp979c70339150d05eec1531104.66f48780af
+X-Report-Abuse: Please report abuse for this campaign here: https://mailchimp.com/contact/abuse/?u=979c70339150d05eec1531104&id=66f48780af&e=def745e273
+X-MC-User: 979c70339150d05eec1531104
+Feedback-ID: 24172875:24172875.286746:us3:mc
+List-ID: 979c70339150d05eec1531104mc list <979c70339150d05eec1531104.249681.list-id.mcsv.net>
+X-Accounttype: pd
+List-Unsubscribe: <https://openshift.us3.list-manage.com/unsubscribe?u=979c70339150d05eec1531104&id=c528e5e48e&e=def745e273&c=66f48780af>, <mailto:unsubscribe-mc.us3_979c70339150d05eec1531104.66f48780af-def745e273@mailin.mcsv.net?subject=unsubscribe>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+Content-Type: multipart/alternative; boundary="_----------=_MCPart_1735325173"
+MIME-Version: 1.0
+
+--_----------=_MCPart_1735325173
+Content-Type: text/plain; charset="utf-8"; format="fixed"
+Content-Transfer-Encoding: quoted-printable
+
+
+
+View this email in your browser (https://mailchi.mp/openshift/your-june-ope=
+nshift-update?e=3Ddef745e273)
+
+
+** What's New?
+------------------------------------------------------------
+https://www.openshift.com/streaming?utm_source=3DOpenShift+Online&utm_campa=
+ign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_ter=
+m=3D0_c528e5e48e-66f48780af-108459181
+Red Hat OpenShift Streaming
+
+Experience live, unfiltered demos (with no safety nets), and meet Red Hatte=
+rs, OpenShift experts, and other special guests during our livestreams on T=
+witch, YouTube Live, and Facebook Live. Check out the stream calendar & fol=
+low us on Twitch (https://www.openshift.com/streaming?utm_source=3DOpenShif=
+t+Online&utm_campaign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medi=
+um=3Demail&utm_term=3D0_c528e5e48e-66f48780af-108459181) .
+
+Announcing Microsoft SQL Server 2019 Big Data Clusters on Red Hat OpenShift
+
+Microsoft SQL Server 2019 Big Data Clusters now supports (https://www.opens=
+hift.com/blog/announcing-microsoft-sql-server-2019-big-data-clusters-on-red=
+-hat-openshift?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAI=
+L_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f4=
+8780af-108459181) Red Hat OpenShift Container Platform and Azure Red Hat Op=
+enshift (a fully managed service of OpenShift on Azure), as its first fully=
+ supported container and Kubernetes platform.
+
+OpenShift 4.4 Playground now Available
+
+Deploy your own container image, or set up a pipeline to build your applica=
+tion from source, then monitor it with Prometheus as it runs. Use an Operat=
+or to deploy and manage a database backend for your web app. Try out OpenSh=
+ift 4.4 on learn.openshift.com (https://learn.openshift.com/playgrounds/ope=
+nshift44/?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_CAM=
+PAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f48780a=
+f-108459181) .
+
+
+** Recent Blogs
+------------------------------------------------------------
+Windows Tools for OpenShift
+
+This post will show one method of making the OpenShift admin and developer =
+CLI tools easily accessible on your Windows 10 workstation (https://www.ope=
+nshift.com/blog/installing-oc-tools-windows?utm_source=3DOpenShift+Online&u=
+tm_campaign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail=
+&utm_term=3D0_c528e5e48e-66f48780af-108459181) so that you can interact wit=
+h and manage OpenShift clusters and features without having to rely on tool=
+s which are not Windows native.
+
+Monitoring Services like an SRE in OpenShift ServiceMesh
+
+In this article, we will examine how to implement monitoring like an SRE (h=
+ttps://www.openshift.com/blog/monitoring-services-like-an-sre-in-openshift-=
+servicemesh?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_C=
+AMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f4878=
+0af-108459181) with a service deployed in the OpenShift ServiceMesh (Istio)=
+. This allows us to rely on automatically collected and uniform metrics for=
+ all services in the mesh, and that, in turn, enables automation.
+
+OpenShift End-to-End: Plan and Deploy
+
+This blog post is the first in a series, focusing on the design and deploym=
+ent phases (https://www.openshift.com/blog/openshift-end-to-end-plan-and-de=
+ploy?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_CAMPAIGN=
+_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f48780af-108=
+459181) of deploying an OpenShift cluster.
+
+Monitoring Services like an SRE in OpenShift ServiceMesh Part 2: Collecting=
+ Standard Metrics
+
+This article addresses which metrics are generally relevant to collect (htt=
+ps://www.openshift.com/blog/monitoring-services-like-an-sre-in-openshift-se=
+rvicemesh-part-2-collecting-standard-metrics-3?utm_source=3DOpenShift+Onlin=
+e&utm_campaign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Dem=
+ail&utm_term=3D0_c528e5e48e-66f48780af-108459181) , based on some industry =
+standard monitoring approaches and how it is possible to create dashboards =
+with those metrics.
+
+
+** In Case you Missed It
+------------------------------------------------------------
+https://youtu.be/zUJTGqWZtq0?utm_source=3DOpenShift+Online&utm_campaign=3D6=
+6f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c=
+528e5e48e-66f48780af-108459181
+Happy 6th Birthday, Kubernetes
+
+With the recent celebration of 6 years of Kubernetes, Red Hat=E2=80=99s Bur=
+r Sutter sat down with Clayton Coleman to talk about where Kubernetes came =
+from and how it developed from a container orchestration project inside Goo=
+gle, to a world-wide open source phenomenon. Check out the video (https://y=
+outu.be/zUJTGqWZtq0?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af=
+-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e=
+-66f48780af-108459181) .
+
+On Demand: OpenShift Commons Gathering on Community Development
+
+We recently hosted a day-long virtual OpenShift Commons Gathering on Twitch=
+. With speakers from Microsoft, Bitergia, University of Nebrasks at Omaha, =
+Layer5, Zalando, and Salesforce. Watch the talks on-demand now (https://www=
+.openshift.com/blog/full-days-video-from-openshift-commons-gathering?utm_so=
+urce=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30=
+_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f48780af-108459181) .
+
+Upcoming Webinar - July 29: Gain Insights with SQL Server 2019 Big Data Clu=
+sters on OpenShift
+
+Register for this webinar (https://info.microsoft.com/ww-landing-sql-server=
+-webinar-series-gain-insights-with-sql-server-2019-big-data-clusters-on-ope=
+nshift.html?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_C=
+AMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f4878=
+0af-108459181) to learn how SQL Server 2019 Big Data Clusters, now supporte=
+d on the Red Hat OpenShift container platform, help you extract insights fr=
+om your data to drive business decisions.
+
+
+** Upcoming Events
+------------------------------------------------------------
+Connect with the OpenShift team at an upcoming event (https://www.openshift=
+.com/events?utm_source=3DOpenShift+Online&utm_campaign=3D66f48780af-EMAIL_C=
+AMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_c528e5e48e-66f4878=
+0af-108459181) .
+https://twitter.com/openshift?utm_source=3DOpenShift+Online&utm_campaign=3D=
+66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=3D0_=
+c528e5e48e-66f48780af-108459181
+https://www.facebook.com/openshift/?utm_source=3DOpenShift+Online&utm_campa=
+ign=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_ter=
+m=3D0_c528e5e48e-66f48780af-108459181
+https://www.youtube.com/openshift?utm_source=3DOpenShift+Online&utm_campaig=
+n=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=
+=3D0_c528e5e48e-66f48780af-108459181
+https://www.openshift.com/blog?utm_source=3DOpenShift+Online&utm_campaign=
+=3D66f48780af-EMAIL_CAMPAIGN_2020_06_30_02_10&utm_medium=3Demail&utm_term=
+=3D0_c528e5e48e-66f48780af-108459181
+
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D=
+=3D=3D=3D=3D=3D=3D=3D=3D=3D=3D
+Copyright =C2=A9 2020 Red Hat OpenShift, All rights reserved.
+ You joined this list when you signed up for an OpenShift Online account or=
+ requested to be added.
+
+Our mailing address is:
+Red Hat OpenShift
+100 East Davie Street
+Raleigh, NC 27601
+USA
+Want to change how you receive these emails?
+You can ** update your preferences (https://openshift.us3.list-manage.com/p=
+rofile?u=3D979c70339150d05eec1531104&id=3Dc528e5e48e&e=3Ddef745e273)
+or ** unsubscribe from this list (https://openshift.us3.list-manage.com/uns=
+ubscribe?u=3D979c70339150d05eec1531104&id=3Dc528e5e48e&e=3Ddef745e273&c=3D6=
+6f48780af)
+.
+ Email Marketing Powered by Mailchimp
+http://www.mailchimp.com/email-referral/?utm_source=3Dfreemium_newsletter&u=
+tm_medium=3Demail&utm_campaign=3Dreferral_marketing&aid=3D979c70339150d05ee=
+c1531104&afl=3D1
+--_----------=_MCPart_1735325173
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+
+<!doctype html>
+<html xmlns=3D"http://www.w3.org/1999/xhtml" xmlns:v=3D"urn:schemas-microso=
+ft-com:vml" xmlns:o=3D"urn:schemas-microsoft-com:office:office">
+    <head>
+    =09<!-- NAME: FLYER -->
+        <!--[if gte mso 15]>
+=09=09<xml>
+=09=09=09<o:OfficeDocumentSettings>
+=09=09=09<o:AllowPNG/>
+=09=09=09<o:PixelsPerInch>96</o:PixelsPerInch>
+=09=09=09</o:OfficeDocumentSettings>
+=09=09</xml>
+=09=09<![endif]-->
+=09=09<meta charset=3D"UTF-8">
+        <meta http-equiv=3D"X-UA-Compatible" content=3D"IE=3Dedge">
+        <meta name=3D"viewport" content=3D"width=3Ddevice-width, initial-sc=
+ale=3D1">
+=09=09<title>Your June OpenShift Update</title>
+
+    <style type=3D"text/css">
+=09=09p{
+=09=09=09margin:10px 0;
+=09=09=09padding:0;
+=09=09}
+=09=09table{
+=09=09=09border-collapse:collapse;
+=09=09}
+=09=09h1,h2,h3,h4,h5,h6{
+=09=09=09display:block;
+=09=09=09margin:0;
+=09=09=09padding:0;
+=09=09}
+=09=09img,a img{
+=09=09=09border:0;
+=09=09=09height:auto;
+=09=09=09outline:none;
+=09=09=09text-decoration:none;
+=09=09}
+=09=09body,#bodyTable,#bodyCell{
+=09=09=09height:100%;
+=09=09=09margin:0;
+=09=09=09padding:0;
+=09=09=09width:100%;
+=09=09}
+=09=09.mcnPreviewText{
+=09=09=09display:none !important;
+=09=09}
+=09=09#outlook a{
+=09=09=09padding:0;
+=09=09}
+=09=09img{
+=09=09=09-ms-interpolation-mode:bicubic;
+=09=09}
+=09=09table{
+=09=09=09mso-table-lspace:0pt;
+=09=09=09mso-table-rspace:0pt;
+=09=09}
+=09=09.ReadMsgBody{
+=09=09=09width:100%;
+=09=09}
+=09=09.ExternalClass{
+=09=09=09width:100%;
+=09=09}
+=09=09p,a,li,td,blockquote{
+=09=09=09mso-line-height-rule:exactly;
+=09=09}
+=09=09a[href^=3Dtel],a[href^=3Dsms]{
+=09=09=09color:inherit;
+=09=09=09cursor:default;
+=09=09=09text-decoration:none;
+=09=09}
+=09=09p,a,li,td,body,table,blockquote{
+=09=09=09-ms-text-size-adjust:100%;
+=09=09=09-webkit-text-size-adjust:100%;
+=09=09}
+=09=09.ExternalClass,.ExternalClass p,.ExternalClass td,.ExternalClass div,=
+.ExternalClass span,.ExternalClass font{
+=09=09=09line-height:100%;
+=09=09}
+=09=09a[x-apple-data-detectors]{
+=09=09=09color:inherit !important;
+=09=09=09text-decoration:none !important;
+=09=09=09font-size:inherit !important;
+=09=09=09font-family:inherit !important;
+=09=09=09font-weight:inherit !important;
+=09=09=09line-height:inherit !important;
+=09=09}
+=09=09a.mcnButton{
+=09=09=09display:block;
+=09=09}
+=09=09.mcnImage,.mcnRetinaImage{
+=09=09=09vertical-align:bottom;
+=09=09}
+=09=09.mcnTextContent{
+=09=09=09word-break:break-word;
+=09=09}
+=09=09.mcnTextContent img{
+=09=09=09height:auto !important;
+=09=09}
+=09=09.mcnDividerBlock{
+=09=09=09table-layout:fixed !important;
+=09=09}
+=09=09body,#bodyTable{
+=09=09=09background-color:#363636;
+=09=09}
+=09=09#bodyCell{
+=09=09=09border-top:0;
+=09=09}
+=09=09h1{
+=09=09=09color:#543680 !important;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:40px;
+=09=09=09font-style:normal;
+=09=09=09font-weight:bold;
+=09=09=09line-height:100%;
+=09=09=09letter-spacing:-1px;
+=09=09=09text-align:center;
+=09=09}
+=09=09h2{
+=09=09=09color:#404040 !important;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:26px;
+=09=09=09font-style:normal;
+=09=09=09font-weight:bold;
+=09=09=09line-height:125%;
+=09=09=09letter-spacing:-.75px;
+=09=09=09text-align:left;
+=09=09}
+=09=09h3{
+=09=09=09color:#606060 !important;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:18px;
+=09=09=09font-style:normal;
+=09=09=09font-weight:bold;
+=09=09=09line-height:125%;
+=09=09=09letter-spacing:-.5px;
+=09=09=09text-align:left;
+=09=09}
+=09=09h4{
+=09=09=09color:#808080 !important;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:16px;
+=09=09=09font-style:normal;
+=09=09=09font-weight:bold;
+=09=09=09line-height:125%;
+=09=09=09letter-spacing:normal;
+=09=09=09text-align:left;
+=09=09}
+=09=09#templatePreheader{
+=09=09=09background-color:#FFFFFF;
+=09=09=09border-top:0;
+=09=09=09border-bottom:1px solid #D5D5D5;
+=09=09}
+=09=09.preheaderContainer .mcnTextContent,.preheaderContainer .mcnTextConte=
+nt p{
+=09=09=09color:#606060;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:11px;
+=09=09=09line-height:125%;
+=09=09=09text-align:left;
+=09=09}
+=09=09.preheaderContainer .mcnTextContent a{
+=09=09=09color:#26ABE2;
+=09=09=09font-weight:normal;
+=09=09=09text-decoration:underline;
+=09=09}
+=09=09#templateHeader{
+=09=09=09background-color:#EEEEEE;
+=09=09=09border-top:0;
+=09=09=09border-bottom:0;
+=09=09}
+=09=09.headerContainer .mcnTextContent,.headerContainer .mcnTextContent p{
+=09=09=09color:#606060;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:15px;
+=09=09=09line-height:150%;
+=09=09=09text-align:left;
+=09=09}
+=09=09.headerContainer .mcnTextContent a{
+=09=09=09color:#26ABE2;
+=09=09=09font-weight:normal;
+=09=09=09text-decoration:underline;
+=09=09}
+=09=09#templateBody{
+=09=09=09background-color:#EEEEEE;
+=09=09=09border-top:0;
+=09=09=09border-bottom:0;
+=09=09}
+=09=09#bodyBackground{
+=09=09=09background-color:#FFFFFF;
+=09=09=09border:1px solid #D5D5D5;
+=09=09}
+=09=09.bodyContainer .mcnTextContent,.bodyContainer .mcnTextContent p{
+=09=09=09color:#606060;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:15px;
+=09=09=09line-height:150%;
+=09=09=09text-align:left;
+=09=09}
+=09=09.bodyContainer .mcnTextContent a{
+=09=09=09color:#26ABE2;
+=09=09=09font-weight:normal;
+=09=09=09text-decoration:underline;
+=09=09}
+=09=09#templateFooter{
+=09=09=09background-color:#363636;
+=09=09=09border-top:1px solid #000000;
+=09=09=09border-bottom:0;
+=09=09}
+=09=09.footerContainer .mcnTextContent,.footerContainer .mcnTextContent p{
+=09=09=09color:#CCCCCC;
+=09=09=09font-family:Helvetica;
+=09=09=09font-size:11px;
+=09=09=09line-height:125%;
+=09=09=09text-align:center;
+=09=09}
+=09=09.footerContainer .mcnTextContent a{
+=09=09=09color:#CCCCCC;
+=09=09=09font-weight:normal;
+=09=09=09text-decoration:underline;
+=09=09}
+=09@media only screen and (max-width: 480px){
+=09=09body,table,td,p,a,li,blockquote{
+=09=09=09-webkit-text-size-adjust:none !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09body{
+=09=09=09width:100% !important;
+=09=09=09min-width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.templateContainer{
+=09=09=09max-width:600px !important;
+=09=09=09width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnRetinaImage{
+=09=09=09max-width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImage{
+=09=09=09height:auto !important;
+=09=09=09width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnCartContainer,.mcnCaptionTopContent,.mcnRecContentContainer,.mcnC=
+aptionBottomContent,.mcnTextContentContainer,.mcnBoxedTextContentContainer,=
+.mcnImageGroupContentContainer,.mcnCaptionLeftTextContentContainer,.mcnCapt=
+ionRightTextContentContainer,.mcnCaptionLeftImageContentContainer,.mcnCapti=
+onRightImageContentContainer,.mcnImageCardLeftTextContentContainer,.mcnImag=
+eCardRightTextContentContainer,.mcnImageCardLeftImageContentContainer,.mcnI=
+mageCardRightImageContentContainer{
+=09=09=09max-width:100% !important;
+=09=09=09width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnBoxedTextContentContainer{
+=09=09=09min-width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageGroupContent{
+=09=09=09padding:9px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnCaptionLeftContentOuter .mcnTextContent,.mcnCaptionRightContentOu=
+ter .mcnTextContent{
+=09=09=09padding-top:9px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageCardTopImageContent,.mcnCaptionBottomContent:last-child .mcn=
+CaptionBottomImageContent,.mcnCaptionBlockInner .mcnCaptionTopContent:last-=
+child .mcnTextContent{
+=09=09=09padding-top:18px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageCardBottomImageContent{
+=09=09=09padding-bottom:9px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageGroupBlockInner{
+=09=09=09padding-top:0 !important;
+=09=09=09padding-bottom:0 !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageGroupBlockOuter{
+=09=09=09padding-top:9px !important;
+=09=09=09padding-bottom:9px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnTextContent,.mcnBoxedTextContentColumn{
+=09=09=09padding-right:18px !important;
+=09=09=09padding-left:18px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnImageCardLeftImageContent,.mcnImageCardRightImageContent{
+=09=09=09padding-right:18px !important;
+=09=09=09padding-bottom:0 !important;
+=09=09=09padding-left:18px !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcpreview-image-uploader{
+=09=09=09display:none !important;
+=09=09=09width:100% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09h1{
+=09=09=09font-size:24px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09h2{
+=09=09=09font-size:20px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09h3{
+=09=09=09font-size:18px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09h4{
+=09=09=09font-size:16px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.mcnBoxedTextContentContainer .mcnTextContent,.mcnBoxedTextContentCon=
+tainer .mcnTextContent p{
+=09=09=09font-size:18px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09#templatePreheader{
+=09=09=09display:block !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.preheaderContainer .mcnTextContent,.preheaderContainer .mcnTextConte=
+nt p{
+=09=09=09font-size:14px !important;
+=09=09=09line-height:115% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.headerContainer .mcnTextContent,.headerContainer .mcnTextContent p{
+=09=09=09font-size:18px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.bodyContainer .mcnTextContent,.bodyContainer .mcnTextContent p{
+=09=09=09font-size:18px !important;
+=09=09=09line-height:125% !important;
+=09=09}
+
+}=09@media only screen and (max-width: 480px){
+=09=09.footerContainer .mcnTextContent,.footerContainer .mcnTextContent p{
+=09=09=09font-size:14px !important;
+=09=09=09line-height:115% !important;
+=09=09}
+
+}</style></head>
+    <body leftmargin=3D"0" marginwidth=3D"0" topmargin=3D"0" marginheight=
+=3D"0" offset=3D"0" style=3D"height: 100%;margin: 0;padding: 0;width: 100%;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;background-color:=
+ #363636;">
+        <!--
+-->
+        <center>
+            <table align=3D"center" border=3D"0" cellpadding=3D"0" cellspac=
+ing=3D"0" height=3D"100%" width=3D"100%" id=3D"bodyTable" style=3D"border-c=
+ollapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size=
+-adjust: 100%;-webkit-text-size-adjust: 100%;height: 100%;margin: 0;padding=
+: 0;width: 100%;background-color: #363636;">
+                <tr>
+                    <td align=3D"center" valign=3D"top" id=3D"bodyCell" sty=
+le=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text=
+-size-adjust: 100%;height: 100%;margin: 0;padding: 0;width: 100%;border-top=
+: 0;">
+                        <!-- BEGIN TEMPLATE // -->
+                        <table border=3D"0" cellpadding=3D"0" cellspacing=
+=3D"0" width=3D"100%" style=3D"border-collapse: collapse;mso-table-lspace: =
+0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adju=
+st: 100%;">
+                            <tr>
+                                <td align=3D"center" valign=3D"top" style=
+=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;">
+                                    <!-- BEGIN PREHEADER // -->
+                                    <table border=3D"0" cellpadding=3D"0" c=
+ellspacing=3D"0" width=3D"100%" id=3D"templatePreheader" style=3D"border-co=
+llapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;background-color: #FFFFFF;borde=
+r-top: 0;border-bottom: 1px solid #D5D5D5;">
+                                        <tr>
+                                        =09<td align=3D"center" valign=3D"t=
+op" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webk=
+it-text-size-adjust: 100%;">
+                                                <table border=3D"0" cellpad=
+ding=3D"0" cellspacing=3D"0" width=3D"600" class=3D"templateContainer" styl=
+e=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                    <tr>
+                                                        <td valign=3D"top" =
+class=3D"preheaderContainer" style=3D"padding-top: 10px;padding-bottom: 10p=
+x;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-siz=
+e-adjust: 100%;"><table class=3D"mcnTextBlock" style=3D"min-width: 100%;bor=
+der-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text=
+-size-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspac=
+ing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"600" style=3D"width:600px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 11px;text-align: left;" valign=3D"top"=
+>
+
+                            <a href=3D"https://mailchi.mp/openshift/your-ju=
+ne-openshift-update?e=3Ddef745e273" target=3D"_blank" style=3D"mso-line-hei=
+ght-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%=
+;color: #26ABE2;font-weight: normal;text-decoration: underline;">View this =
+email in your browser</a>
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table></td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <!-- // END PREHEADER -->
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align=3D"center" valign=3D"top" style=
+=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;">
+                                    <!-- BEGIN HEADER // -->
+                                    <table border=3D"0" cellpadding=3D"0" c=
+ellspacing=3D"0" width=3D"100%" id=3D"templateHeader" style=3D"border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;background-color: #EEEEEE;border-t=
+op: 0;border-bottom: 0;">
+                                        <tr>
+                                            <td align=3D"center" valign=3D"=
+top" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-web=
+kit-text-size-adjust: 100%;">
+                                                <table border=3D"0" cellpad=
+ding=3D"0" cellspacing=3D"0" width=3D"600" class=3D"templateContainer" styl=
+e=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                    <tr>
+                                                        <td valign=3D"top" =
+class=3D"headerContainer" style=3D"padding-top: 15px;padding-bottom: 10px;m=
+so-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-a=
+djust: 100%;"></td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <!-- // END HEADER -->
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align=3D"center" valign=3D"top" style=
+=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;">
+                                    <!-- BEGIN BODY // -->
+                                    <table border=3D"0" cellpadding=3D"0" c=
+ellspacing=3D"0" width=3D"100%" id=3D"templateBody" style=3D"border-collaps=
+e: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adjus=
+t: 100%;-webkit-text-size-adjust: 100%;background-color: #EEEEEE;border-top=
+: 0;border-bottom: 0;">
+                                        <tr>
+                                            <td align=3D"center" valign=3D"=
+top" style=3D"padding-top: 10px;padding-right: 10px;padding-bottom: 5px;pad=
+ding-left: 10px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-w=
+ebkit-text-size-adjust: 100%;">
+                                                <table border=3D"0" cellpad=
+ding=3D"0" cellspacing=3D"0" width=3D"600" class=3D"templateContainer" styl=
+e=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                    <tr>
+                                                        <td align=3D"center=
+" valign=3D"top" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjus=
+t: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <table border=
+=3D"0" cellpadding=3D"0" cellspacing=3D"0" width=3D"100%" id=3D"bodyBackgro=
+und" style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rsp=
+ace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;backgrou=
+nd-color: #FFFFFF;border: 1px solid #D5D5D5;">
+                                                                <tr>
+                                                                    <td val=
+ign=3D"top" class=3D"bodyContainer" style=3D"padding-top: 10px;padding-bott=
+om: 10px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;"><table class=3D"mcnImageBlock" style=3D"min-width: =
+100%;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" =
+cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnImageBlockOuter">
+            <tr>
+                <td style=3D"padding: 9px;mso-line-height-rule: exactly;-ms=
+-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnImageB=
+lockInner" valign=3D"top">
+                    <table class=3D"mcnImageContentContainer" style=3D"min-=
+width: 100%;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspac=
+e: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D=
+"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left">
+                        <tbody><tr>
+                            <td class=3D"mcnImageContent" style=3D"padding-=
+right: 9px;padding-left: 9px;padding-top: 0;padding-bottom: 0;text-align: c=
+enter;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text=
+-size-adjust: 100%;" valign=3D"top">
+
+
+                                        <img alt=3D"" src=3D"https://mcuser=
+content.com/979c70339150d05eec1531104/images/edca3fe0-88bd-4e67-9685-94a109=
+ee2faf.png" style=3D"max-width: 600px;padding-bottom: 0;display: inline !im=
+portant;vertical-align: bottom;border: 0;height: auto;outline: none;text-de=
+coration: none;-ms-interpolation-mode: bicubic;" class=3D"mcnImage" width=
+=3D"563" align=3D"middle">
+
+
+                            </td>
+                        </tr>
+                    </tbody></table>
+                </td>
+            </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <h1 style=3D"display: block;margin: 0;padding: =
+0;font-family: Helvetica;font-size: 40px;font-style: normal;font-weight: bo=
+ld;line-height: 100%;letter-spacing: -1px;text-align: center;color: #543680=
+ !important;"><span style=3D"color:#cc0000"><span style=3D"font-size:25px">=
+What's New?</span></span></h1>
+
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnImageBlock" style=3D"min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0=
+" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnImageBlockOuter">
+            <tr>
+                <td style=3D"padding: 9px;mso-line-height-rule: exactly;-ms=
+-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnImageB=
+lockInner" valign=3D"top">
+                    <table class=3D"mcnImageContentContainer" style=3D"min-=
+width: 100%;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspac=
+e: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D=
+"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left">
+                        <tbody><tr>
+                            <td class=3D"mcnImageContent" style=3D"padding-=
+right: 9px;padding-left: 9px;padding-top: 0;padding-bottom: 0;text-align: c=
+enter;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text=
+-size-adjust: 100%;" valign=3D"top">
+
+                                    <a href=3D"https://openshift.us3.list-m=
+anage.com/track/click?u=3D979c70339150d05eec1531104&id=3Ddb306a83f3&e=3Ddef=
+745e273" title=3D"" class=3D"" target=3D"_blank" style=3D"mso-line-height-r=
+ule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                        <img alt=3D"" src=3D"https://mcuser=
+content.com/979c70339150d05eec1531104/images/6c2b00c1-0485-476f-9bdf-7c71c2=
+acb3dc.png" style=3D"max-width: 600px;padding-bottom: 0;display: inline !im=
+portant;vertical-align: bottom;border: 0;height: auto;outline: none;text-de=
+coration: none;-ms-interpolation-mode: bicubic;" class=3D"mcnImage" width=
+=3D"563" align=3D"middle">
+                                    </a>
+
+                            </td>
+                        </tr>
+                    </tbody></table>
+                </td>
+            </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <strong><span style=3D"font-size:18px">Red Hat =
+OpenShift Streaming</span></strong><br>
+<br>
+<span style=3D"font-size:15px">Experience live, unfiltered demos (with no s=
+afety nets), and meet Red Hatters, OpenShift experts, and other special gue=
+sts during our livestreams on Twitch, YouTube Live, and Facebook Live. <a h=
+ref=3D"https://openshift.us3.list-manage.com/track/click?u=3D979c70339150d0=
+5eec1531104&id=3D7e9d6f3582&e=3Ddef745e273" target=3D"_blank" style=3D"mso-=
+line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adju=
+st: 100%;color: #26ABE2;font-weight: normal;text-decoration: underline;">Ch=
+eck out the stream calendar &amp; follow us on Twitch</a>. </span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <strong><span style=3D"font-size:18px">Announci=
+ng Microsoft SQL Server 2019 Big Data Clusters on Red Hat OpenShift</span><=
+/strong><br>
+<br>
+<span style=3D"font-size:15px"><a href=3D"https://openshift.us3.list-manage=
+.com/track/click?u=3D979c70339150d05eec1531104&id=3Deda0facf10&e=3Ddef745e2=
+73" target=3D"_blank" style=3D"mso-line-height-rule: exactly;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;color: #26ABE2;font-weight: nor=
+mal;text-decoration: underline;">Microsoft SQL Server 2019 Big Data Cluster=
+s now supports</a> Red Hat OpenShift Container Platform and Azure Red Hat O=
+penshift&nbsp;(a fully managed service of OpenShift on Azure), as its first=
+ fully supported container and Kubernetes platform.</span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <strong><span style=3D"font-size:18px">OpenShif=
+t 4.4 Playground now Available</span></strong><br>
+<br>
+<span style=3D"font-size:15px">Deploy your own container image, or set up a=
+ pipeline to build your application from source, then monitor it with Prome=
+theus as it runs. Use an Operator to deploy and manage a database backend f=
+or your web app. <a href=3D"https://openshift.us3.list-manage.com/track/cli=
+ck?u=3D979c70339150d05eec1531104&id=3D2bb66438d5&e=3Ddef745e273" target=3D"=
+_blank" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-=
+webkit-text-size-adjust: 100%;color: #26ABE2;font-weight: normal;text-decor=
+ation: underline;">Try out OpenShift 4.4 on learn.openshift.com</a>.</span>
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnDividerBlock" style=3D"min-width: 100%;border-co=
+llapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;table-layout: fixed !important;=
+" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnDividerBlockOuter">
+        <tr>
+            <td class=3D"mcnDividerBlockInner" style=3D"min-width: 100%;pad=
+ding: 18px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit=
+-text-size-adjust: 100%;">
+                <table class=3D"mcnDividerContent" style=3D"min-width: 100%=
+;border-top: 2px solid #EAEAEA;border-collapse: collapse;mso-table-lspace: =
+0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adju=
+st: 100%;" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+                    <tbody><tr>
+                        <td style=3D"mso-line-height-rule: exactly;-ms-text=
+-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                            <span></span>
+                        </td>
+                    </tr>
+                </tbody></table>
+<!--
+                <td class=3D"mcnDividerBlockInner" style=3D"padding: 18px;"=
+>
+                <hr class=3D"mcnDividerContent" style=3D"border-bottom-colo=
+r:none; border-left-color:none; border-right-color:none; border-bottom-widt=
+h:0; border-left-width:0; border-right-width:0; margin-top:0; margin-right:=
+0; margin-bottom:0; margin-left:0;" />
+-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <h1 style=3D"display: block;margin: 0;padding: =
+0;font-family: Helvetica;font-size: 40px;font-style: normal;font-weight: bo=
+ld;line-height: 100%;letter-spacing: -1px;text-align: center;color: #543680=
+ !important;"><span style=3D"color:#cc0000"><span style=3D"font-size:25px">=
+Recent Blogs</span></span></h1>
+
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>Windows =
+Tools for OpenShift</strong></span><br>
+<br>
+<span style=3D"font-size:15px">This post will show one method of making the=
+ OpenShift admin and developer CLI tools <a href=3D"https://openshift.us3.l=
+ist-manage.com/track/click?u=3D979c70339150d05eec1531104&id=3Daf1af3a66f&e=
+=3Ddef745e273" target=3D"_blank" style=3D"mso-line-height-rule: exactly;-ms=
+-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;color: #26ABE2;font-=
+weight: normal;text-decoration: underline;">easily accessible on your Windo=
+ws 10 workstation</a> so that you can interact with and manage OpenShift cl=
+usters and features without having to rely on tools which are not Windows n=
+ative.</span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>Monitori=
+ng Services like an SRE in OpenShift ServiceMesh</strong></span><br>
+<br>
+<span style=3D"font-size:15px">In this article, we will examine <a href=3D"=
+https://openshift.us3.list-manage.com/track/click?u=3D979c70339150d05eec153=
+1104&id=3Dc90db791c2&e=3Ddef745e273" target=3D"_blank" style=3D"mso-line-he=
+ight-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100=
+%;color: #26ABE2;font-weight: normal;text-decoration: underline;">how to im=
+plement monitoring like an SRE</a> with a service deployed in the&nbsp;Open=
+Shift ServiceMesh&nbsp;(Istio). This allows us to rely on automatically col=
+lected and uniform metrics for all services in the mesh, and that, in turn,=
+ enables automation.</span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>OpenShif=
+t End-to-End: Plan and Deploy</strong></span><br>
+<br>
+<span style=3D"font-size:15px">This blog post is the first in a series, foc=
+using on the <a href=3D"https://openshift.us3.list-manage.com/track/click?u=
+=3D979c70339150d05eec1531104&id=3D090cf968fd&e=3Ddef745e273" target=3D"_bla=
+nk" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webk=
+it-text-size-adjust: 100%;color: #26ABE2;font-weight: normal;text-decoratio=
+n: underline;">design and deployment phases</a> of deploying an OpenShift c=
+luster. </span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>Monitori=
+ng Services like an SRE in OpenShift ServiceMesh Part 2: Collecting Standar=
+d Metrics</strong></span><br>
+<br>
+<span style=3D"font-size:15px">This article addresses which <a href=3D"http=
+s://openshift.us3.list-manage.com/track/click?u=3D979c70339150d05eec1531104=
+&id=3D2d6aacce87&e=3Ddef745e273" target=3D"_blank" style=3D"mso-line-height=
+-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;co=
+lor: #26ABE2;font-weight: normal;text-decoration: underline;">metrics are g=
+enerally relevant to collect</a>, based on some industry standard monitorin=
+g approaches and how it is possible to create dashboards with those metrics=
+.</span>
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnDividerBlock" style=3D"min-width: 100%;border-co=
+llapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;table-layout: fixed !important;=
+" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnDividerBlockOuter">
+        <tr>
+            <td class=3D"mcnDividerBlockInner" style=3D"min-width: 100%;pad=
+ding: 18px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit=
+-text-size-adjust: 100%;">
+                <table class=3D"mcnDividerContent" style=3D"min-width: 100%=
+;border-top: 2px solid #EAEAEA;border-collapse: collapse;mso-table-lspace: =
+0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adju=
+st: 100%;" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+                    <tbody><tr>
+                        <td style=3D"mso-line-height-rule: exactly;-ms-text=
+-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                            <span></span>
+                        </td>
+                    </tr>
+                </tbody></table>
+<!--
+                <td class=3D"mcnDividerBlockInner" style=3D"padding: 18px;"=
+>
+                <hr class=3D"mcnDividerContent" style=3D"border-bottom-colo=
+r:none; border-left-color:none; border-right-color:none; border-bottom-widt=
+h:0; border-left-width:0; border-right-width:0; margin-top:0; margin-right:=
+0; margin-bottom:0; margin-left:0;" />
+-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <h1 style=3D"display: block;margin: 0;padding: =
+0;font-family: Helvetica;font-size: 40px;font-style: normal;font-weight: bo=
+ld;line-height: 100%;letter-spacing: -1px;text-align: center;color: #543680=
+ !important;"><span style=3D"color:#cc0000"><span style=3D"font-size:25px">=
+In Case you Missed It </span></span></h1>
+
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnImageCardBlock" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0" style=3D"border-collapse: collapse;mso-tabl=
+e-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text=
+-size-adjust: 100%;">
+    <tbody class=3D"mcnImageCardBlockOuter">
+        <tr>
+            <td class=3D"mcnImageCardBlockInner" style=3D"padding-top: 9px;=
+padding-right: 18px;padding-bottom: 9px;padding-left: 18px;mso-line-height-=
+rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" v=
+align=3D"top">
+
+<table class=3D"mcnImageCardBottomContent" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0" align=3D"left" style=3D"border-collapse: co=
+llapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 10=
+0%;-webkit-text-size-adjust: 100%;">
+    <tbody><tr>
+        <td class=3D"mcnImageCardBottomImageContent" style=3D"padding-top: =
+0px;padding-right: 0px;padding-bottom: 0;padding-left: 0px;mso-line-height-=
+rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" v=
+align=3D"top" align=3D"left">
+
+
+            <a href=3D"https://openshift.us3.list-manage.com/track/click?u=
+=3D979c70339150d05eec1531104&id=3D9c0d303083&e=3Ddef745e273" title=3D"" cla=
+ss=3D"" target=3D"" style=3D"mso-line-height-rule: exactly;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;">
+
+
+            <img alt=3D"" src=3D"https://mcusercontent.com/979c70339150d05e=
+ec1531104/video_thumbnails_new/e2ba2c863319cc03f45cddf89dd484e2.png" style=
+=3D"max-width: 640px;border: 0;height: auto;outline: none;text-decoration: =
+none;-ms-interpolation-mode: bicubic;vertical-align: bottom;" class=3D"mcnI=
+mage" width=3D"563">
+            </a>
+
+        </td>
+    </tr>
+    <tr>
+        <td class=3D"mcnTextContent" style=3D"padding: 9px 18px;color: #F2F=
+2F2;font-family: Helvetica;font-size: 14px;font-weight: normal;text-align: =
+center;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-tex=
+t-size-adjust: 100%;word-break: break-word;line-height: 150%;" width=3D"545=
+" valign=3D"top">
+
+        </td>
+    </tr>
+</tbody></table>
+
+
+
+
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <strong><span style=3D"font-size:18px">Happy 6t=
+h Birthday, Kubernetes</span></strong><br>
+<br>
+<span style=3D"font-size:15px">With the recent celebration of 6 years of Ku=
+bernetes, Red Hat=E2=80=99s Burr Sutter sat down with Clayton Coleman to ta=
+lk about where Kubernetes came from and how it developed from a container o=
+rchestration project inside Google, to a world-wide open source phenomenon.=
+ <a href=3D"https://openshift.us3.list-manage.com/track/click?u=3D979c70339=
+150d05eec1531104&id=3D5ad157b960&e=3Ddef745e273" target=3D"_blank" style=3D=
+"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size=
+-adjust: 100%;color: #26ABE2;font-weight: normal;text-decoration: underline=
+;">Check out the video</a>.</span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>On Deman=
+d: OpenShift Commons Gathering on Community Development</strong></span><br>
+<br>
+<span style=3D"font-size:15px">We recently hosted a day-long virtual OpenSh=
+ift Commons Gathering on Twitch. With speakers from Microsoft, Bitergia, Un=
+iversity of Nebrasks at Omaha, Layer5, Zalando, and Salesforce. <a href=3D"=
+https://openshift.us3.list-manage.com/track/click?u=3D979c70339150d05eec153=
+1104&id=3Dfdcfb84620&e=3Ddef745e273" target=3D"_blank" style=3D"mso-line-he=
+ight-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100=
+%;color: #26ABE2;font-weight: normal;text-decoration: underline;">Watch the=
+ talks on-demand now</a>. </span><br>
+&nbsp;
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <span style=3D"font-size:18px"><strong>Upcoming=
+ Webinar - July 29: Gain Insights with SQL Server 2019 Big Data Clusters on=
+ OpenShift</strong></span><br>
+<br>
+<span style=3D"font-size:15px"><a href=3D"https://openshift.us3.list-manage=
+.com/track/click?u=3D979c70339150d05eec1531104&id=3D7fc39718ca&e=3Ddef745e2=
+73" target=3D"_blank" style=3D"mso-line-height-rule: exactly;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;color: #26ABE2;font-weight: nor=
+mal;text-decoration: underline;">Register for this webinar</a> to learn how=
+ SQL Server 2019 Big Data Clusters, now supported on the Red Hat OpenShift =
+container platform, help you extract insights from your data to drive busin=
+ess decisions.</span>
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnDividerBlock" style=3D"min-width: 100%;border-co=
+llapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-=
+adjust: 100%;-webkit-text-size-adjust: 100%;table-layout: fixed !important;=
+" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnDividerBlockOuter">
+        <tr>
+            <td class=3D"mcnDividerBlockInner" style=3D"min-width: 100%;pad=
+ding: 18px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit=
+-text-size-adjust: 100%;">
+                <table class=3D"mcnDividerContent" style=3D"min-width: 100%=
+;border-top: 2px solid #EAEAEA;border-collapse: collapse;mso-table-lspace: =
+0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adju=
+st: 100%;" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+                    <tbody><tr>
+                        <td style=3D"mso-line-height-rule: exactly;-ms-text=
+-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                            <span></span>
+                        </td>
+                    </tr>
+                </tbody></table>
+<!--
+                <td class=3D"mcnDividerBlockInner" style=3D"padding: 18px;"=
+>
+                <hr class=3D"mcnDividerContent" style=3D"border-bottom-colo=
+r:none; border-left-color:none; border-right-color:none; border-bottom-widt=
+h:0; border-left-width:0; border-right-width:0; margin-top:0; margin-right:=
+0; margin-bottom:0; margin-left:0;" />
+-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <h1 style=3D"display: block;margin: 0;padding: =
+0;font-family: Helvetica;font-size: 40px;font-style: normal;font-weight: bo=
+ld;line-height: 100%;letter-spacing: -1px;text-align: center;color: #543680=
+ !important;"><span style=3D"color:#cc0000"><span style=3D"font-size:25px">=
+Upcoming Events </span></span></h1>
+
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"0"=
+ cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"599" style=3D"width:599px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding: 0px =
+18px 9px;line-height: 125%;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;word-break: break-word;color: #6060=
+60;font-family: Helvetica;font-size: 15px;text-align: left;" valign=3D"top"=
+>
+
+                            <div style=3D"text-align: center;"><span style=
+=3D"font-size:15px">Connect with the OpenShift team at an <a href=3D"https:=
+//openshift.us3.list-manage.com/track/click?u=3D979c70339150d05eec1531104&i=
+d=3Dd6ce5718d3&e=3Ddef745e273" target=3D"_blank" style=3D"mso-line-height-r=
+ule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;colo=
+r: #26ABE2;font-weight: normal;text-decoration: underline;">upcoming event<=
+/a>.</span></div>
+
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table><table class=3D"mcnFollowBlock" style=3D"min-width: 100%;border-col=
+lapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-a=
+djust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=3D"=
+0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnFollowBlockOuter">
+        <tr>
+            <td style=3D"padding: 9px;mso-line-height-rule: exactly;-ms-tex=
+t-size-adjust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnFollowBloc=
+kInner" valign=3D"top" align=3D"center">
+                <table class=3D"mcnFollowContentContainer" style=3D"min-wid=
+th: 100%;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D"10=
+0%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody><tr>
+        <td style=3D"padding-left: 9px;padding-right: 9px;mso-line-height-r=
+ule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" al=
+ign=3D"center">
+            <table style=3D"min-width: 100%;border-collapse: collapse;mso-t=
+able-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;" class=3D"mcnFollowContent" width=3D"100%" cellspaci=
+ng=3D"0" cellpadding=3D"0" border=3D"0">
+                <tbody><tr>
+                    <td style=3D"padding-top: 9px;padding-right: 9px;paddin=
+g-left: 9px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webki=
+t-text-size-adjust: 100%;" valign=3D"top" align=3D"center">
+                        <table cellspacing=3D"0" cellpadding=3D"0" border=
+=3D"0" align=3D"center" style=3D"border-collapse: collapse;mso-table-lspace=
+: 0pt;mso-table-rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-ad=
+just: 100%;">
+                            <tbody><tr>
+                                <td valign=3D"top" align=3D"center" style=
+=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;">
+                                    <!--[if mso]>
+                                    <table align=3D"center" border=3D"0" ce=
+llspacing=3D"0" cellpadding=3D"0">
+                                    <tr>
+                                    <![endif]-->
+
+                                        <!--[if mso]>
+                                        <td align=3D"center" valign=3D"top"=
+>
+                                        <![endif]-->
+
+
+                                            <table style=3D"display: inline=
+;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-=
+text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" cellspacing=3D"0" c=
+ellpadding=3D"0" border=3D"0" align=3D"left">
+                                                <tbody><tr>
+                                                    <td style=3D"padding-ri=
+ght: 10px;padding-bottom: 9px;mso-line-height-rule: exactly;-ms-text-size-a=
+djust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnFollowContentItemC=
+ontainer" valign=3D"top">
+                                                        <table class=3D"mcn=
+FollowContentItem" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" borde=
+r=3D"0" style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-=
+rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <tbody><tr>
+                                                                <td style=
+=3D"padding-top: 5px;padding-right: 10px;padding-bottom: 5px;padding-left: =
+9px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;" valign=3D"middle" align=3D"left">
+                                                                    <table =
+width=3D"" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left" =
+style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                                        <tb=
+ody><tr>
+
+                                                                           =
+     <td class=3D"mcnFollowIconContent" width=3D"24" valign=3D"middle" alig=
+n=3D"center" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 1=
+00%;-webkit-text-size-adjust: 100%;">
+                                                                           =
+         <a href=3D"https://openshift.us3.list-manage.com/track/click?u=3D9=
+79c70339150d05eec1531104&id=3De94b1bc1a8&e=3Ddef745e273" target=3D"_blank" =
+style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;"><img src=3D"https://cdn-images.mailchimp.com/icons/=
+social-block-v2/gray-twitter-48.png" alt=3D"Twitter" style=3D"display: bloc=
+k;border: 0;height: auto;outline: none;text-decoration: none;-ms-interpolat=
+ion-mode: bicubic;" class=3D"" width=3D"24" height=3D"24"></a>
+                                                                           =
+     </td>
+
+
+                                                                        </t=
+r>
+                                                                    </tbody=
+></table>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody></table>
+                                                    </td>
+                                                </tr>
+                                            </tbody></table>
+
+                                        <!--[if mso]>
+                                        </td>
+                                        <![endif]-->
+
+                                        <!--[if mso]>
+                                        <td align=3D"center" valign=3D"top"=
+>
+                                        <![endif]-->
+
+
+                                            <table style=3D"display: inline=
+;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-=
+text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" cellspacing=3D"0" c=
+ellpadding=3D"0" border=3D"0" align=3D"left">
+                                                <tbody><tr>
+                                                    <td style=3D"padding-ri=
+ght: 10px;padding-bottom: 9px;mso-line-height-rule: exactly;-ms-text-size-a=
+djust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnFollowContentItemC=
+ontainer" valign=3D"top">
+                                                        <table class=3D"mcn=
+FollowContentItem" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" borde=
+r=3D"0" style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-=
+rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <tbody><tr>
+                                                                <td style=
+=3D"padding-top: 5px;padding-right: 10px;padding-bottom: 5px;padding-left: =
+9px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;" valign=3D"middle" align=3D"left">
+                                                                    <table =
+width=3D"" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left" =
+style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                                        <tb=
+ody><tr>
+
+                                                                           =
+     <td class=3D"mcnFollowIconContent" width=3D"24" valign=3D"middle" alig=
+n=3D"center" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 1=
+00%;-webkit-text-size-adjust: 100%;">
+                                                                           =
+         <a href=3D"https://openshift.us3.list-manage.com/track/click?u=3D9=
+79c70339150d05eec1531104&id=3D3e14f804af&e=3Ddef745e273" target=3D"_blank" =
+style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;"><img src=3D"https://cdn-images.mailchimp.com/icons/=
+social-block-v2/gray-facebook-48.png" alt=3D"Facebook" style=3D"display: bl=
+ock;border: 0;height: auto;outline: none;text-decoration: none;-ms-interpol=
+ation-mode: bicubic;" class=3D"" width=3D"24" height=3D"24"></a>
+                                                                           =
+     </td>
+
+
+                                                                        </t=
+r>
+                                                                    </tbody=
+></table>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody></table>
+                                                    </td>
+                                                </tr>
+                                            </tbody></table>
+
+                                        <!--[if mso]>
+                                        </td>
+                                        <![endif]-->
+
+                                        <!--[if mso]>
+                                        <td align=3D"center" valign=3D"top"=
+>
+                                        <![endif]-->
+
+
+                                            <table style=3D"display: inline=
+;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-=
+text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" cellspacing=3D"0" c=
+ellpadding=3D"0" border=3D"0" align=3D"left">
+                                                <tbody><tr>
+                                                    <td style=3D"padding-ri=
+ght: 10px;padding-bottom: 9px;mso-line-height-rule: exactly;-ms-text-size-a=
+djust: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnFollowContentItemC=
+ontainer" valign=3D"top">
+                                                        <table class=3D"mcn=
+FollowContentItem" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" borde=
+r=3D"0" style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-=
+rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <tbody><tr>
+                                                                <td style=
+=3D"padding-top: 5px;padding-right: 10px;padding-bottom: 5px;padding-left: =
+9px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;" valign=3D"middle" align=3D"left">
+                                                                    <table =
+width=3D"" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left" =
+style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                                        <tb=
+ody><tr>
+
+                                                                           =
+     <td class=3D"mcnFollowIconContent" width=3D"24" valign=3D"middle" alig=
+n=3D"center" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 1=
+00%;-webkit-text-size-adjust: 100%;">
+                                                                           =
+         <a href=3D"https://openshift.us3.list-manage.com/track/click?u=3D9=
+79c70339150d05eec1531104&id=3Da28da77cd9&e=3Ddef745e273" target=3D"_blank" =
+style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;"><img src=3D"https://cdn-images.mailchimp.com/icons/=
+social-block-v2/gray-youtube-48.png" alt=3D"YouTube" style=3D"display: bloc=
+k;border: 0;height: auto;outline: none;text-decoration: none;-ms-interpolat=
+ion-mode: bicubic;" class=3D"" width=3D"24" height=3D"24"></a>
+                                                                           =
+     </td>
+
+
+                                                                        </t=
+r>
+                                                                    </tbody=
+></table>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody></table>
+                                                    </td>
+                                                </tr>
+                                            </tbody></table>
+
+                                        <!--[if mso]>
+                                        </td>
+                                        <![endif]-->
+
+                                        <!--[if mso]>
+                                        <td align=3D"center" valign=3D"top"=
+>
+                                        <![endif]-->
+
+
+                                            <table style=3D"display: inline=
+;border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-=
+text-size-adjust: 100%;-webkit-text-size-adjust: 100%;" cellspacing=3D"0" c=
+ellpadding=3D"0" border=3D"0" align=3D"left">
+                                                <tbody><tr>
+                                                    <td style=3D"padding-ri=
+ght: 0;padding-bottom: 9px;mso-line-height-rule: exactly;-ms-text-size-adju=
+st: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnFollowContentItemCont=
+ainer" valign=3D"top">
+                                                        <table class=3D"mcn=
+FollowContentItem" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" borde=
+r=3D"0" style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-=
+rspace: 0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <tbody><tr>
+                                                                <td style=
+=3D"padding-top: 5px;padding-right: 10px;padding-bottom: 5px;padding-left: =
+9px;mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-s=
+ize-adjust: 100%;" valign=3D"middle" align=3D"left">
+                                                                    <table =
+width=3D"" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D"left" =
+style=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: =
+0pt;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                                        <tb=
+ody><tr>
+
+                                                                           =
+     <td class=3D"mcnFollowIconContent" width=3D"24" valign=3D"middle" alig=
+n=3D"center" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 1=
+00%;-webkit-text-size-adjust: 100%;">
+                                                                           =
+         <a href=3D"https://openshift.us3.list-manage.com/track/click?u=3D9=
+79c70339150d05eec1531104&id=3D256cca9d0f&e=3Ddef745e273" target=3D"_blank" =
+style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-t=
+ext-size-adjust: 100%;"><img src=3D"https://cdn-images.mailchimp.com/icons/=
+social-block-v2/gray-rss-48.png" alt=3D"Blog" style=3D"display: block;borde=
+r: 0;height: auto;outline: none;text-decoration: none;-ms-interpolation-mod=
+e: bicubic;" class=3D"" width=3D"24" height=3D"24"></a>
+                                                                           =
+     </td>
+
+
+                                                                        </t=
+r>
+                                                                    </tbody=
+></table>
+                                                                </td>
+                                                            </tr>
+                                                        </tbody></table>
+                                                    </td>
+                                                </tr>
+                                            </tbody></table>
+
+                                        <!--[if mso]>
+                                        </td>
+                                        <![endif]-->
+
+                                    <!--[if mso]>
+                                    </tr>
+                                    </table>
+                                    <![endif]-->
+                                </td>
+                            </tr>
+                        </tbody></table>
+                    </td>
+                </tr>
+            </tbody></table>
+        </td>
+    </tr>
+</tbody></table>
+
+            </td>
+        </tr>
+    </tbody>
+</table></td>
+                                                                </tr>
+                                                            </table>
+                                                        </td>
+                                                    </tr>
+                                                    <tr>
+                                                        <td align=3D"center=
+" valign=3D"top" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjus=
+t: 100%;-webkit-text-size-adjust: 100%;">
+                                                            <img src=3D"htt=
+ps://cdn-images.mailchimp.com/template_images/gallery/couponshadow.png" hei=
+ght=3D"20" width=3D"600" class=3D"mcnImage" style=3D"display: block;max-wid=
+th: 560px;border: 0;height: auto;outline: none;text-decoration: none;-ms-in=
+terpolation-mode: bicubic;vertical-align: bottom;">
+                                                        </td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <!-- // END BODY -->
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align=3D"center" valign=3D"top" style=
+=3D"padding-bottom: 40px;mso-line-height-rule: exactly;-ms-text-size-adjust=
+: 100%;-webkit-text-size-adjust: 100%;">
+                                    <!-- BEGIN FOOTER // -->
+                                    <table border=3D"0" cellpadding=3D"0" c=
+ellspacing=3D"0" width=3D"100%" id=3D"templateFooter" style=3D"border-colla=
+pse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-adj=
+ust: 100%;-webkit-text-size-adjust: 100%;background-color: #363636;border-t=
+op: 1px solid #000000;border-bottom: 0;">
+                                        <tr>
+                                            <td align=3D"center" valign=3D"=
+top" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100%;-web=
+kit-text-size-adjust: 100%;">
+                                                <table border=3D"0" cellpad=
+ding=3D"0" cellspacing=3D"0" width=3D"600" class=3D"templateContainer" styl=
+e=3D"border-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;=
+-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;">
+                                                    <tr>
+                                                        <td valign=3D"top" =
+class=3D"footerContainer" style=3D"padding-top: 10px;padding-bottom: 10px;m=
+so-line-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-a=
+djust: 100%;"><table class=3D"mcnTextBlock" style=3D"min-width: 100%;border=
+-collapse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-si=
+ze-adjust: 100%;-webkit-text-size-adjust: 100%;" width=3D"100%" cellspacing=
+=3D"0" cellpadding=3D"0" border=3D"0">
+    <tbody class=3D"mcnTextBlockOuter">
+        <tr>
+            <td class=3D"mcnTextBlockInner" style=3D"padding-top: 9px;mso-l=
+ine-height-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjus=
+t: 100%;" valign=3D"top">
+              =09<!--[if mso]>
+=09=09=09=09<table align=3D"left" border=3D"0" cellspacing=3D"0" cellpaddin=
+g=3D"0" width=3D"100%" style=3D"width:100%;">
+=09=09=09=09<tr>
+=09=09=09=09<![endif]-->
+=09=09=09
+=09=09=09=09<!--[if mso]>
+=09=09=09=09<td valign=3D"top" width=3D"600" style=3D"width:600px;">
+=09=09=09=09<![endif]-->
+                <table style=3D"max-width: 100%;min-width: 100%;border-coll=
+apse: collapse;mso-table-lspace: 0pt;mso-table-rspace: 0pt;-ms-text-size-ad=
+just: 100%;-webkit-text-size-adjust: 100%;" class=3D"mcnTextContentContaine=
+r" width=3D"100%" cellspacing=3D"0" cellpadding=3D"0" border=3D"0" align=3D=
+"left">
+                    <tbody><tr>
+
+                        <td class=3D"mcnTextContent" style=3D"padding-top: =
+0;padding-right: 18px;padding-bottom: 9px;padding-left: 18px;mso-line-heigh=
+t-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 100%;w=
+ord-break: break-word;color: #CCCCCC;font-family: Helvetica;font-size: 11px=
+;line-height: 125%;text-align: center;" valign=3D"top">
+
+                            <em>Copyright =C2=A9 2020 Red Hat OpenShift, Al=
+l rights reserved.</em>
+<br>
+    You joined this list when you signed up for an OpenShift Online account=
+ or requested to be added.
+    <br>
+    <br>
+    <strong>Our mailing address is:</strong>
+    <br>
+    <div class=3D"vcard"><span class=3D"org fn">Red Hat OpenShift</span><di=
+v class=3D"adr"><div class=3D"street-address">100 East Davie Street</div><s=
+pan class=3D"locality">Raleigh</span>, <span class=3D"region">NC</span>  <s=
+pan class=3D"postal-code">27601</span></div><br><a href=3D"https://openshif=
+t.us3.list-manage.com/vcard?u=3D979c70339150d05eec1531104&id=3Dc528e5e48e" =
+class=3D"hcard-download">Add us to your address book</a></div>
+    <br>
+    <br>
+=09Want to change how you receive these emails?<br>
+    You can <a href=3D"https://openshift.us3.list-manage.com/profile?u=3D97=
+9c70339150d05eec1531104&id=3Dc528e5e48e&e=3Ddef745e273" style=3D"mso-line-h=
+eight-rule: exactly;-ms-text-size-adjust: 100%;-webkit-text-size-adjust: 10=
+0%;color: #CCCCCC;font-weight: normal;text-decoration: underline;">update y=
+our preferences</a> or <a href=3D"https://openshift.us3.list-manage.com/uns=
+ubscribe?u=3D979c70339150d05eec1531104&id=3Dc528e5e48e&e=3Ddef745e273&c=3D6=
+6f48780af" style=3D"mso-line-height-rule: exactly;-ms-text-size-adjust: 100=
+%;-webkit-text-size-adjust: 100%;color: #CCCCCC;font-weight: normal;text-de=
+coration: underline;">unsubscribe from this list</a>.
+    <br>
+    <br>
+ <a href=3D"http://www.mailchimp.com/email-referral/?utm_source=3Dfreemium_=
+newsletter&utm_medium=3Demail&utm_campaign=3Dreferral_marketing&aid=3D979c7=
+0339150d05eec1531104&afl=3D1"><img src=3D"https://cdn-images.mailchimp.com/=
+monkey_rewards/MC_MonkeyReward_15.png" border=3D"0" alt=3D"Email Marketing =
+Powered by Mailchimp" title=3D"Mailchimp Email Marketing" width=3D"139" hei=
+ght=3D"54"></a>
+                        </td>
+                    </tr>
+                </tbody></table>
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</td>
+=09=09=09=09<![endif]-->
+
+=09=09=09=09<!--[if mso]>
+=09=09=09=09</tr>
+=09=09=09=09</table>
+=09=09=09=09<![endif]-->
+            </td>
+        </tr>
+    </tbody>
+</table></td>
+                                                    </tr>
+                                                </table>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                    <!-- // END FOOTER -->
+                                </td>
+                            </tr>
+                        </table>
+                        <!-- // END TEMPLATE -->
+                    </td>
+                </tr>
+            </table>
+        </center>
+    <img src=3D"https://openshift.us3.list-manage.com/track/open.php?u=3D97=
+9c70339150d05eec1531104&id=3D66f48780af&e=3Ddef745e273" height=3D"1" width=
+=3D"1"></body>
+</html>
+--_----------=_MCPart_1735325173--

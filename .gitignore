@@ -1,6 +1,6 @@
 /target
 .idea
-py_rs_mail_parser.egg-info
+fast_mail_parser.egg-info
 .eggs
 build
 .pytest_cache

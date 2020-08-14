@@ -1,0 +1,43 @@
+[package]
+name = "fast_mail_parser"
+version = "0.1.0"
+authors = ["Andrey Sokirko <andrey.sokirko@namecheap.com>"]
+readme = "Readme.md"
+license = "Apache-2.0"
+description = "This is a fast Python library for .eml files parsing (mail parser, mailparser)."
+
+[package.metadata.maturin]
+classifier = [
+    "License :: OSI Approved :: Apache Software License",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Topic :: Communications :: Email",
+    "Topic :: Software Development :: Libraries",
+]
+requires-python = ">3.5"
+maintainer-email = "andrey.sokirko@namecheap.com"
+maintainer = "Andrey Sokirko"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+debug = false
+
+[lib]
+name = "fast_mail_parser"
+path = "src/fast_mail_parser.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+mailparse = "0.13.0"
+pyo3 = "0.11.1"
+
+[features]
+default = ["pyo3/extension-module"]
