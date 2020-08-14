@@ -23,7 +23,7 @@ class PyTest(TestCommand):
     def run(self):
         import subprocess
 
-        subprocess.check_call(["pytest", "tests", "-s"])
+        subprocess.check_call(["pytest", "tests", "-s", "-v"])
 
 
 with open("Cargo.toml") as fp:
@@ -31,7 +31,7 @@ with open("Cargo.toml") as fp:
 
 setup_requires = ["setuptools-rust>=0.10.1", "wheel"]
 install_requires = ["toml~=0.10.0"]
-tests_require = install_requires + ["pytest"]
+tests_require = install_requires + ["pytest", "pytest-benchmark", "mail-parser"]
 
 setup(
     name="fast_mail_parser",
