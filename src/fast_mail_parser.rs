@@ -9,7 +9,7 @@ use pyo3::types::PyBytes;
 
 pub mod mail_parser;
 
-create_exception!(nc_mail_parser, ParseError, exceptions::Exception);
+create_exception!(fast_mail_parser, ParseError, exceptions::Exception);
 
 #[pyclass]
 #[derive(Clone)]
