@@ -16,6 +16,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
         run: |
+          pip install setuptools rust-setuptools wheel twine toml
           python setup.py install --user
       - name: Test
         run: |
