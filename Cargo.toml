@@ -8,7 +8,7 @@ license = "Apache-2.0"
 description = "Very fast Python library for .eml files parsing."
 homepage = "https://github.com/namecheap/fast_mail_parser/blob/master/README.md"
 repository = "https://github.com/namecheap/fast_mail_parser"
-readme = "README.md"
+readme = "Readme.md"
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
 categories = ["email", "parsing"]
 
