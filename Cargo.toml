@@ -1,12 +1,12 @@
 [package]
 edition = "2018"
 name = "fast_mail_parser"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Andrey Sokirko <andrey.sokirko@namecheap.com>"]
 license = "Apache-2.0"
 
 description = "Very fast Python library for .eml files parsing."
-homepage = "https://github.com/namecheap/fast_mail_parser/blob/master/README.md"
+homepage = "https://github.com/namecheap/fast_mail_parser"
 repository = "https://github.com/namecheap/fast_mail_parser"
 readme = "Readme.md"
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
