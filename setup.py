@@ -2,7 +2,6 @@ import sys
 
 import toml
 from setuptools import setup
-from setuptools.command.test import test as TestCommand
 
 try:
     from setuptools_rust import RustExtension
@@ -15,16 +14,6 @@ except ImportError:
         raise SystemExit(errno)
     else:
         from setuptools_rust import RustExtension
-
-
-class PyTest(TestCommand):
-    user_options = []
-
-    def run(self):
-        import subprocess
-
-        subprocess.check_call(["pytest", "tests", "-s", "-v"])
-
 
 with open("Cargo.toml") as fp:
     version = toml.load(fp)["package"]["version"]
@@ -43,5 +32,4 @@ setup(
     setup_requires=setup_requires,
     include_package_data=True,
     zip_safe=False,
-    cmdclass={"test": PyTest},
 )

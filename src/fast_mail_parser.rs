@@ -52,7 +52,7 @@ trait PyToBytes {
 impl PyToBytes for PyObject {
     fn to_bytes(&self, py: Python) -> PyResult<Vec<u8>> {
         let mut result = self.extract::<&PyBytes>(py)
-            .map(|s| s.as_bytes().iter().cloned().collect::<Vec<_>>().into_iter());
+            .map(|s| s.as_bytes().to_vec().into_iter());
 
         if result.is_err() {
             result = self.extract::<String>(py)
