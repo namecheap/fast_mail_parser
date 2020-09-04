@@ -1,6 +1,7 @@
 # fast_mail_parser
 ![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
 [![PyPI version](https://badge.fury.io/py/fast-mail-parser.svg)](https://badge.fury.io/py/fast-mail-parser)
+[![Downloads](https://pepy.tech/badge/fast-mail-parser)](https://pepy.tech/project/fast-mail-parser)
 
 fast_mail_parser is a Python library for .eml files parsing.
 The main benefit is a performance: the library is much faster than python implementations.
