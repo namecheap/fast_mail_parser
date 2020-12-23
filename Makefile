@@ -7,7 +7,7 @@ benchmark:
 	pytest -v tests/benchmark
 
 build:
-	docker run --rm -v $(CURDIR):/io konstin2/maturin build --release --strip --manylinux 1
+	docker run --rm -v $(CURDIR):/io konstin2/maturin build --release --strip
 
 publish:
 	twine check target/wheels/*

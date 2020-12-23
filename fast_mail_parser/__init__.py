@@ -8,6 +8,7 @@ __all__ = [
 class PyAttachment:
     mimetype: str
     content: bytes
+    filename: str
 
 
 class PyMail:

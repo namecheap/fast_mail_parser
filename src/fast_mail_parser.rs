@@ -3,8 +3,8 @@ extern crate pyo3;
 use std::collections::HashMap;
 
 use pyo3::{exceptions, wrap_pyfunction};
-use pyo3::prelude::*;
 use pyo3::create_exception;
+use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 pub mod mail_parser;
@@ -18,6 +18,8 @@ pub struct PyAttachment {
     pub mimetype: String,
     #[pyo3(get)]
     pub content: Py<PyBytes>,
+    #[pyo3(get)]
+    pub filename: String,
 }
 
 impl PyAttachment {
@@ -25,6 +27,7 @@ impl PyAttachment {
         PyAttachment {
             mimetype: attachment.mimetype,
             content: Py::from(PyBytes::new(py, attachment.content.as_slice())),
+            filename: attachment.filename,
         }
     }
 }

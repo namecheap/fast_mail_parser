@@ -18,6 +18,7 @@ pub struct Mail<'a> {
 pub struct Attachment {
     pub mimetype: String,
     pub content: Vec<u8>,
+    pub filename: String,
 }
 
 impl<'a> Mail<'a> {
@@ -57,6 +58,7 @@ impl<'a> Mail<'a> {
         self.parts.iter().map(|p| Attachment {
             mimetype: p.ctype.mimetype.clone(),
             content: p.get_body_raw().unwrap_or_default(),
+            filename: p.ctype.params.get("name").unwrap_or(&String::new()).clone(),
         }).collect()
     }
 
