@@ -59,7 +59,7 @@ print(email.headers)
 for attachment in email.attachments:
     print(attachment.mimetype)
     print(attachment.content)
-
+    print(attachment.filename)
 ```
 
 ## Contributing
