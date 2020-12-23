@@ -1,7 +1,6 @@
+import pytest
 import sys
 from typing import Callable
-
-import pytest
 
 from fast_mail_parser import PyMail, parse_email
 
@@ -30,6 +29,11 @@ def valid_mail(valid_message: str, read_mail: Callable) -> PyMail:
 
 
 @pytest.fixture
+def large_mail(large_message: str, read_mail: Callable) -> PyMail:
+    return parse_email(large_message)
+
+
+@pytest.fixture
 def valid_message(read_mail: Callable) -> str:
     return read_mail('tests/data/valid_message.eml')
 
@@ -37,3 +41,8 @@ def valid_message(read_mail: Callable) -> str:
 @pytest.fixture
 def invalid_message(read_mail: Callable) -> str:
     return read_mail('tests/data/invalid_message.eml')
+
+
+@pytest.fixture(scope='module')
+def large_message(read_mail: Callable) -> str:
+    return read_mail('tests/data/large_message.eml')
