@@ -18,7 +18,7 @@ except ImportError:
 with open("Cargo.toml") as fp:
     version = toml.load(fp)["package"]["version"]
 
-setup_requires = ["setuptools-rust>=0.10.1", "wheel"]
+setup_requires = ["setuptools-rust>=0.12.1", "wheel"]
 install_requires = ["toml~=0.10.0"]
 tests_require = install_requires + ["pytest", "pytest-benchmark", "mail-parser"]
 

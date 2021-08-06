@@ -1,7 +1,7 @@
 [package]
 edition = "2018"
 name = "fast_mail_parser"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Andrey Sokirko <andrey.sokirko@namecheap.com>"]
 license = "Apache-2.0"
 
@@ -24,7 +24,7 @@ classifier = [
     "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries",
 ]
-requires-python = ">3.5"
+requires-python = ">=3.6.0"
 maintainer-email = "andrey.sokirko@namecheap.com"
 maintainer = "Andrey Sokirko"
 
@@ -43,7 +43,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 mailparse = "0.13.0"
-pyo3 = "0.11.1"
+pyo3 = "0.14.1"
 
 [features]
 default = ["pyo3/extension-module"]
