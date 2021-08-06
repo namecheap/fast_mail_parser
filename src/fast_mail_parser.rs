@@ -9,7 +9,7 @@ use pyo3::types::PyBytes;
 
 pub mod mail_parser;
 
-create_exception!(fast_mail_parser, ParseError, exceptions::Exception);
+create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
 #[pyclass]
 #[derive(Clone)]
@@ -61,7 +61,7 @@ impl PyToBytes for PyObject {
             result = self.extract::<String>(py)
                 .map(|s| s.chars().map(|c| c as u8).collect::<Vec<_>>().into_iter())
                 .map_err(|_| {
-                    PyErr::new::<exceptions::TypeError, _>("The argument cannot be interpreted as bytes.")
+                    PyErr::new::<exceptions::PyTypeError, _>("The argument cannot be interpreted as bytes.")
                 })
         }
 
@@ -75,7 +75,7 @@ pub fn parse_email(py: Python, payload: PyObject) -> PyResult<PyMail> {
 
     mail_parser::parse_email(message.as_slice())
         .map_err(|e| {
-            ParseError::py_err(format!("Message parsing error: {}", e))
+            ParseError::new_err(format!("Message parsing error: {}", e))
         })
         .map(|m| {
             PyMail {
