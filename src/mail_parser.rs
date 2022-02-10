@@ -1,8 +1,5 @@
-extern crate mailparse;
-
 use std::collections::HashMap;
-
-use self::mailparse::*;
+use mailparse::*;
 
 pub fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)

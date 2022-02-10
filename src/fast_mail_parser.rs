@@ -1,13 +1,9 @@
-extern crate pyo3;
+mod mail_parser;
 
-use std::collections::HashMap;
-
-use pyo3::{exceptions, wrap_pyfunction};
-use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-
-pub mod mail_parser;
+use pyo3::{create_exception, exceptions, wrap_pyfunction};
+use std::collections::HashMap;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
@@ -54,14 +50,18 @@ trait PyToBytes {
 
 impl PyToBytes for PyObject {
     fn to_bytes(&self, py: Python) -> PyResult<Vec<u8>> {
-        let mut result = self.extract::<&PyBytes>(py)
+        let mut result = self
+            .extract::<&PyBytes>(py)
             .map(|s| s.as_bytes().to_vec().into_iter());
 
         if result.is_err() {
-            result = self.extract::<String>(py)
+            result = self
+                .extract::<String>(py)
                 .map(|s| s.chars().map(|c| c as u8).collect::<Vec<_>>().into_iter())
                 .map_err(|_| {
-                    PyErr::new::<exceptions::PyTypeError, _>("The argument cannot be interpreted as bytes.")
+                    PyErr::new::<exceptions::PyTypeError, _>(
+                        "The argument cannot be interpreted as bytes.",
+                    )
                 })
         }
 
@@ -74,18 +74,18 @@ pub fn parse_email(py: Python, payload: PyObject) -> PyResult<PyMail> {
     let message = payload.to_bytes(py)?;
 
     mail_parser::parse_email(message.as_slice())
-        .map_err(|e| {
-            ParseError::new_err(format!("Message parsing error: {}", e))
-        })
-        .map(|m| {
-            PyMail {
-                subject: m.get_subject(),
-                text_plain: m.get_text_plain(),
-                text_html: m.get_text_html(),
-                date: m.get_date(),
-                attachments: m.get_attachments().into_iter().map(|a| PyAttachment::from_attachment(py, a)).collect(),
-                headers: m.get_headers(),
-            }
+        .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))
+        .map(|m| PyMail {
+            subject: m.get_subject(),
+            text_plain: m.get_text_plain(),
+            text_html: m.get_text_html(),
+            date: m.get_date(),
+            attachments: m
+                .get_attachments()
+                .into_iter()
+                .map(|a| PyAttachment::from_attachment(py, a))
+                .collect(),
+            headers: m.get_headers(),
         })
 }
 
