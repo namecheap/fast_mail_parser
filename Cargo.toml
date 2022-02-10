@@ -1,8 +1,8 @@
 [package]
-edition = "2018"
+edition = "2021"
 name = "fast_mail_parser"
-version = "0.2.1"
-authors = ["Andrey Sokirko <andrey.sokirko@namecheap.com>"]
+version = "0.2.2"
+authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
 license = "Apache-2.0"
 
 description = "Very fast Python library for .eml files parsing."
@@ -42,8 +42,8 @@ path = "src/fast_mail_parser.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-mailparse = "0.13.0"
-pyo3 = "0.14.1"
+mailparse = "0.13.8"
+pyo3 = "0.15.1"
 
 [features]
 default = ["pyo3/extension-module"]
