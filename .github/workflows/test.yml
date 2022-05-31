@@ -19,7 +19,7 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Install the package
         run: |
-          python setup.py install --user
+          make install
       - name: Test
         run: |
           make test

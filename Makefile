@@ -1,4 +1,4 @@
-.PHONY: build
+.PHONY: install
 
 test:
 	pytest -v --ignore tests/benchmark tests
@@ -6,9 +6,5 @@ test:
 benchmark:
 	pytest -v tests/benchmark
 
-build:
-	docker run --rm -v $(CURDIR):/io konstin2/maturin build --release --strip
-
-publish:
-	twine check target/wheels/*
-	twine upload target/wheels/*
+install:
+	python3 setup.py install --force

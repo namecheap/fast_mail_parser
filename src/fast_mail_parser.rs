@@ -19,7 +19,7 @@ pub struct PyAttachment {
 }
 
 impl PyAttachment {
-    pub fn from_attachment(py: Python, attachment: mail_parser::Attachment) -> Self {
+    pub(crate) fn from_attachment(py: Python, attachment: mail_parser::Attachment) -> Self {
         PyAttachment {
             mimetype: attachment.mimetype,
             content: Py::from(PyBytes::new(py, attachment.content.as_slice())),
@@ -42,6 +42,22 @@ pub struct PyMail {
     pub attachments: Vec<PyAttachment>,
     #[pyo3(get)]
     pub headers: HashMap<String, String>,
+}
+
+impl PyMail {
+    pub(crate)  fn from_mail(py: Python, mail: mail_parser::Mail) -> Self {
+        Self {
+            subject: mail.subject,
+            text_plain: mail.text_plain,
+            text_html: mail.text_html,
+            date: mail.date,
+            attachments: mail.attachments
+                .into_iter()
+                .map(|a| PyAttachment::from_attachment(py, a))
+                .collect(),
+            headers: mail.headers,
+        }
+    }
 }
 
 trait PyToBytes {
@@ -75,18 +91,7 @@ pub fn parse_email(py: Python, payload: PyObject) -> PyResult<PyMail> {
 
     mail_parser::parse_email(message.as_slice())
         .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))
-        .map(|m| PyMail {
-            subject: m.get_subject(),
-            text_plain: m.get_text_plain(),
-            text_html: m.get_text_html(),
-            date: m.get_date(),
-            attachments: m
-                .get_attachments()
-                .into_iter()
-                .map(|a| PyAttachment::from_attachment(py, a))
-                .collect(),
-            headers: m.get_headers(),
-        })
+        .map(|mail| PyMail::from_mail(py, mail))
 }
 
 #[pymodule]
