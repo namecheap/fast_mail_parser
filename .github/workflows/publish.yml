@@ -44,5 +44,5 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
         run: |
           pip install twine
-          twine check target/wheels/*.whl
-          twine upload target/wheels/*.whl
+          twine check target/wheels/*
+          twine upload target/wheels/*
