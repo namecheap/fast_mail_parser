@@ -2,25 +2,47 @@ name: Publish
 
 on:
   release:
-    types: [created]
+    types: [ created ]
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ "windows-2019", "macOS-12", "ubuntu-latest" ]
+
     steps:
       - uses: actions/checkout@v2
+
+      - name: Set up Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+
       - name: Set up Python
         uses: actions/setup-python@v2
         with:
           python-version: '3.x'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install twine
-      - name: Build and publish
+
+      - if: "${{ matrix.os != 'ubuntu-latest' }}"
+        name: Build
+        uses: messense/maturin-action@v1
+        with:
+          maturin-version: 0.12.18
+          command: build
+          args: --release --strip
+
+      - if: "${{ matrix.os == 'ubuntu-latest' }}"
+        name: Build
+        run: docker run --rm -v ${PWD}:/io konstin2/maturin build --release --strip
+
+      - name: Publish
         env:
           TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
           TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
         run: |
-          make build
-          make publish
+          pip install twine
+          twine check target/wheels/*.whl
+          twine upload target/wheels/*.whl

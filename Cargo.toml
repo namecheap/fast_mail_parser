@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "fast_mail_parser"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
 license = "Apache-2.0"
 
@@ -24,9 +24,9 @@ classifier = [
     "Topic :: Communications :: Email",
     "Topic :: Software Development :: Libraries",
 ]
-requires-python = ">=3.6.0"
-maintainer-email = "andrey.sokirko@namecheap.com"
-maintainer = "Andrey Sokirko"
+requires-python = ">=3.7.0"
+maintainer-email = "wartwvister@gmail.com"
+maintainer = "Andrii Sokyrko"
 
 [profile.dev]
 opt-level = 0
@@ -35,6 +35,9 @@ debug = true
 [profile.release]
 opt-level = 3
 debug = false
+strip = "debuginfo"
+lto = true
+codegen-units = 1
 
 [lib]
 name = "fast_mail_parser"
@@ -43,7 +46,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 mailparse = "0.13.8"
-pyo3 = "0.15.1"
+pyo3 = "0.16.5"
 
 [features]
 default = ["pyo3/extension-module"]
