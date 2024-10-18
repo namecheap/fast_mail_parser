@@ -24,7 +24,7 @@ classifiers = [
   "Topic :: Communications :: Email",
   "Topic :: Software Development :: Libraries",
 ]
-dependencies = ["toml==0.10.2", "wheel"]
+dependencies = ["toml==0.10.2", "wheel", "maturin>=1.0,<2.0"]
 
 [project.optional-dependencies]
 test = ["pytest~=7.4.4", "pytest-benchmark==4.0.0", "mail-parser==3.15.0"]
