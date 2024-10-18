@@ -1,32 +1,16 @@
 [package]
-edition = "2021"
 name = "fast_mail_parser"
-version = "0.2.5"
-authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
-license = "Apache-2.0"
-
 description = "Very fast Python library for .eml files parsing."
+edition = "2021"
+version = "0.3.0"
+authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
+readme = "README.md"
+license-file = "LICENSE"
 homepage = "https://github.com/namecheap/fast_mail_parser"
 repository = "https://github.com/namecheap/fast_mail_parser"
-readme = "Readme.md"
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
 categories = ["email", "parsing"]
-
-[package.metadata.maturin]
-classifier = [
-    "License :: OSI Approved :: Apache Software License",
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "Programming Language :: Python",
-    "Programming Language :: Rust",
-    "Operating System :: POSIX",
-    "Operating System :: Unix",
-    "Topic :: Communications :: Email",
-    "Topic :: Software Development :: Libraries",
-]
-requires-python = ">=3.7.0"
-maintainer-email = "wartwvister@gmail.com"
-maintainer = "Andrii Sokyrko"
+publish = false
 
 [profile.dev]
 opt-level = 0
@@ -45,8 +29,8 @@ path = "src/fast_mail_parser.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-mailparse = "0.13.8"
-pyo3 = "0.16.5"
+mailparse = "0.15.0"
+pyo3 = "0.16.6"
 
 [features]
 default = ["pyo3/extension-module"]
