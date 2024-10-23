@@ -1,4 +1,5 @@
 # fast_mail_parser
+
 ![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
 [![PyPI version](https://badge.fury.io/py/fast-mail-parser.svg)](https://badge.fury.io/py/fast-mail-parser)
 [![Downloads](https://pepy.tech/badge/fast-mail-parser)](https://pepy.tech/project/fast-mail-parser)
@@ -22,7 +23,6 @@ Legend:
   Outliers: 1 Standard Deviation from Mean; 1.5 IQR (InterQuartile Range) from 1st Quartile and 3rd Quartile.
   OPS: Operations Per Second, computed as 1 / Mean
 ```
-
 
 ## Installation
 
@@ -60,6 +60,7 @@ for attachment in email.attachments:
 ```
 
 ## Contributing
+
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
 Please make sure to update tests as appropriate.

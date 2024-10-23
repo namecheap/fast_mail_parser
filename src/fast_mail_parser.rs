@@ -45,13 +45,14 @@ pub struct PyMail {
 }
 
 impl PyMail {
-    pub(crate)  fn from_mail(py: Python, mail: mail_parser::Mail) -> Self {
+    pub(crate) fn from_mail(py: Python, mail: mail_parser::Mail) -> Self {
         Self {
             subject: mail.subject,
             text_plain: mail.text_plain,
             text_html: mail.text_html,
             date: mail.date,
-            attachments: mail.attachments
+            attachments: mail
+                .attachments
                 .into_iter()
                 .map(|a| PyAttachment::from_attachment(py, a))
                 .collect(),

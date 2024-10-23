@@ -7,4 +7,7 @@ benchmark:
 	pytest -v tests/benchmark
 
 install:
-	python3 setup.py install --force
+	pip install .
+
+install-test:
+	pip install ".[test]"

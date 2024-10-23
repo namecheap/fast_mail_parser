@@ -1,7 +1,11 @@
 /target
 .idea
+.venv/
+venv/
 fast_mail_parser.egg-info
 .eggs
 build
 .pytest_cache
 dist
+__pycache__
+.python-version

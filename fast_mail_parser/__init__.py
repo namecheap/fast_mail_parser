@@ -1,31 +1,8 @@
-from typing import Union, List, Dict
+from .fast_mail_parser import parse_email, ParseError, PyMail, PyAttachment
 
 __all__ = [
-    'parse_email',
+    "parse_email",
+    "ParseError",
+    "PyMail",
+    "PyAttachment",
 ]
-
-
-class PyAttachment:
-    mimetype: str
-    content: bytes
-    filename: str
-
-
-class PyMail:
-    subject: str
-    text_plain: List[str]
-    text_html: List[str]
-    date: str
-    attachments: List[PyAttachment]
-    headers: Dict[str, str]
-
-
-class ParseError(Exception):
-    pass
-
-
-def parse_email(payload: Union[str, bytes]) -> PyMail:
-    ...
-
-
-from .fast_mail_parser import parse_email, ParseError
