@@ -5,7 +5,7 @@ description = "Very fast Python library for .eml files parsing."
 authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
 requires-python = ">= 3.7"
-readme = "README.md"
+readme = "Readme.md"
 license = { file = "LICENSE" }
 classifiers = [
   "License :: OSI Approved :: Apache Software License",
