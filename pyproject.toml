@@ -1,42 +1,47 @@
-[project]
-name = "fast_mail_parser"
-version = "0.3.0"
-description = "Very fast Python library for .eml files parsing."
-authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]
-keywords = ["parser", "email", "rfc822", "mime", "maildir"]
-requires-python = ">= 3.7"
-readme = "Readme.md"
-license = { file = "LICENSE" }
-classifiers = [
-  "License :: OSI Approved :: Apache Software License",
-  "Development Status :: 3 - Alpha",
-  "Intended Audience :: Developers",
-  "Programming Language :: Python",
-  "Programming Language :: Rust",
-  "Programming Language :: Python :: 3.7",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
-  "Programming Language :: Python :: 3.10",
-  "Programming Language :: Python :: 3.11",
-  "Programming Language :: Python :: 3.12",
-  "Operating System :: POSIX",
-  "Operating System :: Unix",
-  "Topic :: Communications :: Email",
-  "Topic :: Software Development :: Libraries",
-]
-dependencies = ["toml==0.10.2", "wheel", "maturin>=1.0,<2.0"]
-
-[project.optional-dependencies]
-test = ["pytest~=7.4.4", "pytest-benchmark==4.0.0", "mail-parser==3.15.0"]
-
 [project.urls]
-Homepage = "https://github.com/namecheap/fast_mail_parser"
-Repository = "https://github.com/namecheap/fast_mail_parser.git"
-Issues = "https://github.com/namecheap/fast_mail_parser/issues"
+  Homepage   = "https://github.com/namecheap/fast_mail_parser"
+  Issues     = "https://github.com/namecheap/fast_mail_parser/issues"
+  Repository = "https://github.com/namecheap/fast_mail_parser.git"
+
+[project]
+  description     = "Very fast Python library for .eml files parsing."
+  license         = { file = "LICENSE" }
+  name            = "fast_mail_parser"
+  readme          = "Readme.md"
+  requires-python = ">= 3.9"
+  version         = "0.4.0"
+
+  keywords = [ "email", "maildir", "mime", "parser", "rfc822" ]
+
+  authors = [ { email = "wartwvister@gmail.com", name = "Andrii Sokyrko" } ]
+
+  classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX",
+    "Operating System :: Unix",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python",
+    "Programming Language :: Rust",
+    "Topic :: Communications :: Email",
+    "Topic :: Software Development :: Libraries",
+  ]
+
+  dependencies = [  ]
+
+[dependency-groups]
+  test = [ "mail-parser>=4.1.4", "pytest-benchmark>=5.1.0", "pytest>=8.4.1" ]
 
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
-build-backend = "maturin"
+  build-backend = "maturin"
+  requires      = [ "maturin>=1.0,<2.0" ]
 
 [tool.maturin]
-sdist-include = ["src/*"]
+  module-name     = "fast_mail_parser._core"
+  python-packages = [ "fast_mail_parser" ]
+  python-source   = "src"
+  sdist-include   = [ "src/*" ]

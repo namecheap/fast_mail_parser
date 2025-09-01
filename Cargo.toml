@@ -1,36 +1,35 @@
 [package]
-name = "fast_mail_parser"
-description = "Very fast Python library for .eml files parsing."
-edition = "2021"
-version = "0.3.0"
-authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
-readme = "Readme.md"
-license-file = "LICENSE"
-homepage = "https://github.com/namecheap/fast_mail_parser"
-repository = "https://github.com/namecheap/fast_mail_parser"
-keywords = ["parser", "email", "rfc822", "mime", "maildir"]
-categories = ["email", "parsing"]
-publish = false
+  authors      = [ "Andrii Sokyrko <wartwvister@gmail.com>" ]
+  categories   = [ "email", "parsing" ]
+  description  = "Very fast Python library for .eml files parsing."
+  edition      = "2021"
+  homepage     = "https://github.com/namecheap/fast_mail_parser"
+  keywords     = [ "email", "maildir", "mime", "parser", "rfc822" ]
+  license-file = "LICENSE"
+  name         = "fast_mail_parser"
+  publish      = false
+  readme       = "Readme.md"
+  repository   = "https://github.com/namecheap/fast_mail_parser"
+  version      = "0.4.0"
 
 [profile.dev]
-opt-level = 0
-debug = true
+  debug     = true
+  opt-level = 0
 
 [profile.release]
-opt-level = 3
-debug = false
-strip = "debuginfo"
-lto = true
-codegen-units = 1
+  codegen-units = 1
+  debug         = false
+  lto           = true
+  opt-level     = 3
+  strip         = "debuginfo"
 
 [lib]
-name = "fast_mail_parser"
-path = "src/fast_mail_parser.rs"
-crate-type = ["cdylib"]
+  crate-type = [ "cdylib" ]
+  name       = "_core"
 
 [dependencies]
-mailparse = "0.15.0"
-pyo3 = "0.16.6"
+  mailparse = "0.15.0"
+  pyo3      = { features = [ "extension-module" ], version = "0.22.0" }
 
 [features]
-default = ["pyo3/extension-module"]
+  default = [ "pyo3/extension-module" ]
