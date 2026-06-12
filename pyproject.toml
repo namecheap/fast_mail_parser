@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "Very fast Python library for .eml files parsing."
 authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
-requires-python = ">= 3.7"
+requires-python = ">= 3.9"
 readme = "Readme.md"
 license = { file = "LICENSE" }
 classifiers = [
@@ -13,12 +13,11 @@ classifiers = [
   "Intended Audience :: Developers",
   "Programming Language :: Python",
   "Programming Language :: Rust",
-  "Programming Language :: Python :: 3.7",
-  "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Operating System :: POSIX",
   "Operating System :: Unix",
   "Topic :: Communications :: Email",
