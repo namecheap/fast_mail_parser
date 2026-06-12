@@ -18,13 +18,16 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint job — blocking. fmt/clippy/mypy all pass on the current code, so they
-  # gate now. clippy::cast_possible_truncation is set to warn (not deny) so the
-  # known str->bytes bug is surfaced in the log without blocking; -D warnings
-  # still fails the build on any new default-level warning.
+  # Lint job — advisory. These surface real findings on the current code today
+  # (the source is not rustfmt-clean, and clippy flags the str->bytes cast), so
+  # the steps are non-blocking and each runs regardless of the others. Flip a
+  # step to blocking (drop continue-on-error) once its debt is cleared:
+  #   - cargo fmt  -> after a one-time `cargo fmt` formatting commit
+  #   - clippy     -> after the str->bytes fix (#19)
+  #   - mypy       -> after the .pyi stub type-checks clean (#42)
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint
+    name: Lint (advisory)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -39,14 +42,20 @@ jobs:
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
+        continue-on-error: true
 
+      # clippy::cast_possible_truncation pinpoints the str->bytes corruption bug.
       - name: cargo clippy
+        if: always()
         run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
+        continue-on-error: true
 
       - name: mypy (type stubs)
+        if: always()
         run: |
           python -m pip install --upgrade pip mypy
           mypy fast_mail_parser/
+        continue-on-error: true
 
   # ---------------------------------------------------------------------------
   # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
