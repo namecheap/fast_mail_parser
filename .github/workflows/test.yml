@@ -61,23 +61,38 @@ jobs:
   # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
   # a pinned dependency surfaces without blocking unrelated PRs — flip to
   # blocking once the dependency stack is current. cargo-audit needs a newer
-  # rustc than the repo's pinned 1.83, so it runs on stable: RUSTUP_TOOLCHAIN
-  # overrides the rust-toolchain file for this step only.
+  # rustc than the repo's pinned 1.83, so the job runs on stable via
+  # RUSTUP_TOOLCHAIN (overrides the rust-toolchain file).
+  #
+  # cargo-audit is `cargo install`ed from source (~3 min — previously the
+  # slowest job by far). The compiled binary is cached, so only the first run
+  # (or a cache-key bump) pays that cost; subsequent runs restore it in seconds.
+  # The advisory DB is still fetched fresh on every run, so findings stay
+  # current regardless of the cached binary.
   # ---------------------------------------------------------------------------
   security-audit:
     name: cargo audit (advisory)
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
           toolchain: stable
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        continue-on-error: true
-        env:
-          RUSTUP_TOOLCHAIN: stable
+      - name: Cache cargo-audit binary
+        id: cache-cargo-audit
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: ~/.cargo/bin/cargo-audit
+          # Bump the suffix to force a rebuild on a newer cargo-audit.
+          key: cargo-audit-bin-${{ runner.os }}-v1
+      - name: Install cargo-audit
+        if: steps.cache-cargo-audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        continue-on-error: true
+        run: cargo audit
 
   # ---------------------------------------------------------------------------
   # Test matrix — the real merge gate. Verified to build & pass with the current
