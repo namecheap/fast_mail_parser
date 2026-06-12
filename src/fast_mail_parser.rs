@@ -1,7 +1,7 @@
 mod mail_parser;
 
 use pyo3::prelude::*;
-use pyo3::types::PyBytes;
+use pyo3::types::{PyBytes, PyString};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::collections::HashMap;
 
@@ -80,13 +80,23 @@ impl PyToBytes for Py<PyAny> {
             return Ok(bytes.as_bytes().to_vec());
         }
 
-        obj.extract::<String>()
-            .map(|s| s.chars().map(|c| c as u8).collect())
-            .map_err(|_| {
-                PyErr::new::<exceptions::PyTypeError, _>(
-                    "The argument cannot be interpreted as bytes.",
-                )
-            })
+        if let Ok(text) = obj.cast::<PyString>() {
+            if let Ok(text) = text.to_str() {
+                // Historical str->bytes mapping: each code point truncated to its
+                // low byte. For ASCII that is exactly the UTF-8 representation, so
+                // copy the bytes directly (a memcpy) instead of walking code
+                // points; only non-ASCII input needs the per-char cast.
+                return Ok(if text.is_ascii() {
+                    text.as_bytes().to_vec()
+                } else {
+                    text.chars().map(|c| c as u8).collect()
+                });
+            }
+        }
+
+        Err(PyErr::new::<exceptions::PyTypeError, _>(
+            "The argument cannot be interpreted as bytes.",
+        ))
     }
 }
 
