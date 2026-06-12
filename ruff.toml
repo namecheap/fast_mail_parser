@@ -1,0 +1,12 @@
+# Ruff configuration for fast_mail_parser.
+# Sensible, not-overly-strict rule set: pycodestyle errors (E), pyflakes (F),
+# import sorting (I), pyupgrade (UP), and flake8-bugbear (B).
+line-length = 100
+target-version = "py39"
+
+# The Python surface is the thin fast_mail_parser/ wrapper; the Rust extension
+# is built into it. Test data/fixtures are not linted.
+extend-exclude = ["tests/data", "tests/fixtures"]
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
