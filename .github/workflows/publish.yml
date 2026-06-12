@@ -171,14 +171,18 @@ jobs:
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: "dist/*"
-      # Publish via PyPI Trusted Publishing (OIDC) — no long-lived token needed.
-      # Requires a one-time setup on PyPI: add a Trusted Publisher for
-      # namecheap/fast_mail_parser, workflow "publish.yml" (no environment).
-      # See the PR description for the exact steps. After this is live the old
-      # PYPI_USERNAME / PYPI_PASSWORD secrets can be deleted.
+      # Publish using the legacy PYPI_USERNAME / PYPI_PASSWORD secrets (token or
+      # username/password) rather than OIDC Trusted Publishing. NOTE: PyPI no
+      # longer accepts plain username/password — this only succeeds if
+      # PYPI_USERNAME is "__token__" and PYPI_PASSWORD is a valid API token.
+      # Preferred long-term: re-enable OIDC Trusted Publishing (drop these
+      # secrets) by configuring a Trusted Publisher for namecheap/fast_mail_parser
+      # + publish.yml on PyPI.
       - name: Publish to PyPI
         if: ${{ github.event_name == 'release' && startsWith(github.ref, 'refs/tags/') }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           packages-dir: dist
           skip-existing: true
+          user: ${{ secrets.PYPI_USERNAME }}
+          password: ${{ secrets.PYPI_PASSWORD }}
