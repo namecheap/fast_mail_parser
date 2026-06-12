@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Rust crate dependencies (Cargo.toml / Cargo.lock at the repo root).
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # GitHub Actions used by the workflows in .github/workflows.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

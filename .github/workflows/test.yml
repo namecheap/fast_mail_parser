@@ -55,11 +55,13 @@ jobs:
         continue-on-error: true
 
   # ---------------------------------------------------------------------------
-  # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
-  # a pinned dependency surfaces without blocking unrelated PRs — flip to
-  # blocking once the dependency stack is current. cargo-audit needs a newer
-  # rustc than the repo's pinned 1.83, so the job runs on stable via
-  # RUSTUP_TOOLCHAIN (overrides the rust-toolchain file).
+  # Supply-chain audit. Blocking (no continue-on-error): the dependency stack is
+  # current (PyO3 0.29) and the Cargo.lock audits clean, so a new advisory
+  # against any dependency should fail the build and gate the PR rather than pass
+  # silently. (It was previously advisory only because the stack was stale and a
+  # fresh advisory against a pinned dep would have blocked unrelated PRs.)
+  # cargo-audit needs a newer rustc than the repo's pinned 1.83, so the job runs
+  # on stable via RUSTUP_TOOLCHAIN (overrides the rust-toolchain file).
   #
   # cargo-audit is `cargo install`ed from source (~3 min — previously the
   # slowest job by far). The compiled binary is cached and keyed on the pinned
@@ -76,7 +78,7 @@ jobs:
   # binary version.
   # ---------------------------------------------------------------------------
   security-audit:
-    name: cargo audit (advisory)
+    name: cargo audit
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: stable
@@ -97,7 +99,6 @@ jobs:
         if: steps.cache-cargo-audit.outputs.cache-hit != 'true'
         run: cargo install cargo-audit --version ${{ env.CARGO_AUDIT_VERSION }} --locked
       - name: cargo audit
-        continue-on-error: true
         run: cargo audit
 
   # ---------------------------------------------------------------------------

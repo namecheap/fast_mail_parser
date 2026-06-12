@@ -1,0 +1,48 @@
+# cargo-deny configuration.
+#
+# Starter config for local and future-CI supply-chain checks. There is no
+# cargo-deny CI job wired up yet (out of scope); run it locally with:
+#   cargo install cargo-deny --locked
+#   cargo deny check
+#
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+# --- Advisories --------------------------------------------------------------
+# Pulled from the RustSec advisory DB. Security vulnerabilities and unmaintained
+# crates are hard errors; yanked crates warn so they surface without blocking.
+[advisories]
+version = 2
+yanked = "warn"
+
+# --- Licenses ----------------------------------------------------------------
+# Allow only well-known permissive licenses. SPDX identifiers; see
+# https://spdx.org/licenses/. Add to this list as new (vetted) deps appear.
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+# --- Bans --------------------------------------------------------------------
+# Catch dependency bloat and accidental duplicates. Multiple versions of the
+# same crate warn (common and not always avoidable) rather than fail.
+[bans]
+multiple-versions = "warn"
+wildcards = "warn"
+
+# --- Sources -----------------------------------------------------------------
+# Only allow dependencies from the canonical crates.io registry. Unknown
+# registries and git sources are rejected.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
