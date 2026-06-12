@@ -1,6 +1,6 @@
 [project]
 name = "fast_mail_parser"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Very fast Python library for .eml files parsing."
 authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
