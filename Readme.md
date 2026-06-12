@@ -34,29 +34,56 @@ pip install fast-mail-parser
 
 ## Usage
 
+`parse_email` accepts the raw message as `str` or `bytes` and returns a
+`PyMail`. It raises `ParseError` if the payload cannot be parsed.
+
+`PyMail` exposes the following attributes:
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `subject` | `str` | Subject header (empty string if missing). |
+| `date` | `str` | Date header (empty string if missing). |
+| `text_plain` | `list[str]` | All `text/plain` bodies. |
+| `text_html` | `list[str]` | All `text/html` bodies. |
+| `headers` | `dict[str, str]` | All message headers. |
+| `attachments` | `list[PyAttachment]` | Attachments (see below). |
+
+Each `PyAttachment` has `mimetype: str`, `filename: str`, and `content: bytes`.
+
 ```python
 import sys
+
 from fast_mail_parser import parse_email, ParseError
 
-with open('message.eml', 'r') as f:
+# parse_email accepts both str and bytes; reading in binary mode is safest.
+with open('message.eml', 'rb') as f:
     message_payload = f.read()
 
 try:
     email = parse_email(message_payload)
 except ParseError as e:
-    print("Failed to parse email: ", e)
+    print("Failed to parse email:", e)
     sys.exit(1)
 
-print(email.subject)
-print(email.date)
-print(email.text_plain)
-print(email.text_html)
-print(email.headers)
+print("Subject:", email.subject)
+print("Date:", email.date)
 
+# headers is a dict[str, str].
+for name, value in email.headers.items():
+    print(f"{name}: {value}")
+
+# text_plain and text_html are lists of strings (one entry per matching part).
+for body in email.text_plain:
+    print("Plain text body:", body)
+
+for body in email.text_html:
+    print("HTML body:", body)
+
+# attachments is a list of PyAttachment objects.
 for attachment in email.attachments:
-    print(attachment.mimetype)
-    print(attachment.content)
-    print(attachment.filename)
+    print("Attachment:", attachment.filename)
+    print("  mimetype:", attachment.mimetype)
+    print("  size:", len(attachment.content), "bytes")  # content is bytes
 ```
 
 ## Contributing
