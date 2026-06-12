@@ -32,15 +32,9 @@ impl<'a> Mail {
             .map(|h| (h.get_key(), h.get_value()))
             .collect();
 
-        let subject = headers
-            .get("Subject")
-            .map(String::from)
-            .unwrap_or_default();
+        let subject = headers.get("Subject").map(String::from).unwrap_or_default();
 
-        let date = headers
-            .get("Date")
-            .map(String::from)
-            .unwrap_or_default();
+        let date = headers.get("Date").map(String::from).unwrap_or_default();
 
         let mut attachments = vec![];
         let mut text_plain = vec![];
