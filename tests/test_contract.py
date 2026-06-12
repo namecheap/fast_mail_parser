@@ -119,16 +119,14 @@ def test__rejects_non_text_input_with_type_error(bad_input):
         parse_email(bad_input)
 
 
-def test__non_ascii_str_decodes_as_truncated_code_points():
-    # str input is decoded by truncating each code point to its low byte
-    # (historical, lossy behavior). The ASCII fast path must stay byte-identical
-    # to this, so a non-ASCII str must parse exactly like the explicitly
-    # truncated bytes do.
-    raw = "Subject: café über\r\n\r\nbody"  # é, ü -> 0xE9, 0xFC
-    truncated_bytes = bytes((ord(char) & 0xFF) for char in raw)
+def test__non_ascii_str_decodes_as_utf8():
+    # str input is decoded losslessly as its UTF-8 bytes. A non-ASCII str must
+    # therefore parse exactly like its explicit UTF-8 encoding (no truncation of
+    # code points to their low byte).
+    raw = "Subject: café über 日本\r\n\r\nbody"
 
     from_str = parse_email(raw)
-    from_bytes = parse_email(truncated_bytes)
+    from_bytes = parse_email(raw.encode("utf-8"))
 
     assert from_str.subject == from_bytes.subject
     assert from_str.headers == from_bytes.headers
