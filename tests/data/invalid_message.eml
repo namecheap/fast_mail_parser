@@ -1,4 +1,4 @@
-Delivered-To: wartwvister@gmail.com
+Delivered-To: recipient@example.com
 Received: by 2002:ad4:5567:0:0:0:0:0 with SMTP id w7csp199345qvy;
         Tue, 30 Jun 2020 22:39:50 -0700 (PDT)
 X-Google-Smtp-Source: ABdhPJx1ThX8le0touadBy/BdCwGffeaOKkb0vDiV7FnQerlyN7QQIFY9tuNJcqBNN0CUlkxly0G
@@ -30,7 +30,7 @@ ARC-Authentication-Results: i=1; mx.google.com;
 Return-Path: <bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net>
 Received: from mail253.wdc02.mcdlv.net (mail253.wdc02.mcdlv.net. [205.201.130.253])
         by mx.google.com with ESMTPS id d93si4829705ybi.258.2020.06.30.22.39.49
-        for <wartwvister@gmail.com>
+        for <recipient@example.com>
         (version=TLS1_2 cipher=ECDHE-ECDSA-AES128-GCM-SHA256 bits=128/128);
         Tue, 30 Jun 2020 22:39:50 -0700 (PDT)
 Received-SPF: pass (google.com: domain of bounce-mc.us3_24172875.286746-def745e273@mail253.wdc02.mcdlv.net designates 205.201.130.253 as permitted sender) client-ip=205.201.130.253;
@@ -46,15 +46,15 @@ DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=openshift.com; s=k1; t=1
 	 Content-Type:MIME-Version; b=Eihu1MP4q/msO3NstvNljEBi/N9O8JCyxXwV3odNXyva2mYQPa+gT8/+Upv0zTkmO
 	 97OF0q68/5iZ094GlBeTZEgVS+v+InDSyuU0t3bhkb5ktRINRr+X4VASXboa4MDSlD
 	 wrCieYRwqqq14FHvHHRxkkZ7HwUaRGHm4v2VvbW4=
-Received: from localhost (localhost [127.0.0.1]) by mail253.wdc02.mcdlv.net (Mailchimp) with ESMTP id 49xVJg029szRDc for <wartwvister@gmail.com>; Wed,
+Received: from localhost (localhost [127.0.0.1]) by mail253.wdc02.mcdlv.net (Mailchimp) with ESMTP id 49xVJg029szRDc for <recipient@example.com>; Wed,
   1 Jul 2020 05:33:55 +0000 (GMT)
 Subject: Your June OpenShift Update
 From: Red Hat OpenShift <noreply@openshift.com>
 Reply-To: Red Hat OpenShift <noreply@openshift.com>
-To: <wartwvister@gmail.com>
+To: <recipient@example.com>
 Date: Wed,
   1 Jul 2020 05:33:42 +0000
-Message-ID: <979c70339150d05eec1531104.def745e273.20200701053326.66f48780af.4a62601a@mail253.wdc02.mcdlv.net>
+Message-ID: <979c70339150d05eec1531104.def745e273.20200701053326.66f48780af.4a62601a@example.com>
 X-Mailer: MailChimp Mailer - **CID66f48780afdef745e273**
 X-Campaign: mailchimp979c70339150d05eec1531104.66f48780af
 X-campaignid: mailchimp979c70339150d05eec1531104.66f48780af

@@ -1,19 +1,19 @@
-Delivered-To: bruce@untroubled.org
+Delivered-To: recipient@example.org
 Received: (qmail 26559 invoked from network); 21 Aug 2016 10:49:40 -0000
 Received: from mx03.futurequest.net (mx03.futurequest.net [69.5.6.174])
   by pt02.futurequest.net ([69.5.6.173])
   with FQDP via TCP; 21 Aug 2016 10:49:40 -0000
 Received: (qmail 19675 invoked from network); 21 Aug 2016 10:49:40 -0000
-Received: from localhost.localdomain.com (mail.revesoft.com [208.74.72.248])
+Received: from localhost.localdomain.com (mail.example.com [208.74.72.248])
   by mx03.futurequest.net ([69.5.6.174])
   with ESMTP via TCP; 21 Aug 2016 10:49:39 -0000
 Received: from host86-187-174-57.range86-187.btcentralplus.com ([86.187.174.57]:45321 helo=User)
 	by localhost.localdomain.com with esmtpa (Exim 4.87)
-	(envelope-from <anabelgonzalo@fanox.com>)
+	(envelope-from <sender@example.com>)
 	id 1bakrE-000291-LF; Fri, 19 Aug 2016 20:34:52 +0600
-Reply-To: <anabelgonzalo@fanox.com>
+Reply-To: <sender@example.com>
 Subject: =?utf-8?B?R29vZCBuZXdzOiBMb3JlbSBpcHN1bSBkb2xvciBzaXQgYW1ldCAtIGRldGFpbHMgaW5zaWRl?=
-From: "Anabel Gonzalo"<anabelgonzalo@fanox.com>
+From: "Example Sender"<sender@example.com>
 Date: Wed, 23 Oct 2024 10:34:04 +0300
 MIME-Version: 1.0
 X-Priority: 3
@@ -22,14 +22,14 @@ X-Mailer: Microsoft Outlook Express 6.00.2600.0000
 X-MimeOLE: Produced By Microsoft MimeOLE V6.00.2600.0000
 X-AntiAbuse: This header was added to track abuse, please include it with any abuse report
 X-AntiAbuse: Primary Hostname - localhost.localdomain.com
-X-AntiAbuse: Original Domain - untroubled.org
+X-AntiAbuse: Original Domain - example.org
 X-AntiAbuse: Originator/Caller UID/GID - [47 12] / [47 12]
-X-AntiAbuse: Sender Address Domain - fanox.com
-X-Get-Message-Sender-Via: localhost.localdomain.com: authenticated_id: quazi.limon@revesoft.com
-X-Authenticated-Sender: localhost.localdomain.com: quazi.limon@revesoft.com
+X-AntiAbuse: Sender Address Domain - example.com
+X-Get-Message-Sender-Via: localhost.localdomain.com: authenticated_id: authuser@example.com
+X-Authenticated-Sender: localhost.localdomain.com: authuser@example.com
 Content-Type: multipart/mixed;
 	boundary="mix-4a62f61e:30a2cf33"
-Message-Id: <E1t3Vsa-0004ON-Nu@st10.mi6.kiev.ua>
+Message-Id: <E1t3Vsa-0004ON-Nu@example.com>
 
 --mix-4a62f61e:30a2cf33
 Content-Type: multipart/alternative;
