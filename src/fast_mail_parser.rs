@@ -82,15 +82,10 @@ impl PyToBytes for Py<PyAny> {
 
         if let Ok(text) = obj.cast::<PyString>() {
             if let Ok(text) = text.to_str() {
-                // Historical str->bytes mapping: each code point truncated to its
-                // low byte. For ASCII that is exactly the UTF-8 representation, so
-                // copy the bytes directly (a memcpy) instead of walking code
-                // points; only non-ASCII input needs the per-char cast.
-                return Ok(if text.is_ascii() {
-                    text.as_bytes().to_vec()
-                } else {
-                    text.chars().map(|c| c as u8).collect()
-                });
+                // Decode str losslessly as its UTF-8 bytes. ASCII is unchanged
+                // (ASCII == its own UTF-8); non-ASCII code points now round-trip
+                // correctly instead of being truncated to their low byte.
+                return Ok(text.as_bytes().to_vec());
             }
         }
 
