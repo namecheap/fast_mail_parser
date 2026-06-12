@@ -10,6 +10,7 @@
 //! objects. Keeping the two models separate decouples the parsing logic from the
 //! Python bindings.
 
+use charset::{decode_ascii, Charset};
 use mailparse::*;
 use std::collections::HashMap;
 
@@ -28,6 +29,20 @@ const MAX_MIME_DEPTH: usize = 256;
 
 pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
+}
+
+/// Decode already-transfer-decoded `body` bytes into a `String` using the part's
+/// charset (defaulting to us-ascii when the label is missing or unrecognized).
+///
+/// This mirrors mailparse's internal `get_body_as_string` exactly -- same crate,
+/// same logic -- so it can be fed the bytes from `get_body_raw` to produce the
+/// same result as `get_body` without decoding the transfer encoding twice.
+fn decode_charset(body: &[u8], ctype: &ParsedContentType) -> String {
+    if let Some(charset) = Charset::for_label(ctype.charset.as_bytes()) {
+        charset.decode(body).0.into_owned()
+    } else {
+        decode_ascii(body).into_owned()
+    }
 }
 
 #[derive(Debug)]
@@ -75,25 +90,31 @@ impl<'a> Mail {
             let attachment_name = mail.ctype.params.get("name");
             let mime = mail.ctype.mimetype.as_str();
 
-            // Propagate body decode failures instead of swallowing them with
-            // `unwrap_or_default()`. A broken transfer encoding (e.g. invalid
-            // base64/quoted-printable) or an undecodable charset would otherwise
-            // be silently turned into an empty body, hiding corruption from the
-            // caller. `get_body_raw`/`get_body` return `MailParseError`, which the
-            // PyO3 layer surfaces to Python as `ParseError`.
-            attachments.push(Attachment {
-                mimetype: mime.to_string(),
-                content: mail.get_body_raw()?,
-                filename: attachment_name.cloned().unwrap_or_default(),
-            });
+            // Undo the Content-Transfer-Encoding (e.g. base64/quoted-printable)
+            // exactly once. `?` propagates a broken transfer encoding instead of
+            // swallowing it with `unwrap_or_default()`, which would silently turn
+            // corruption into an empty body; the PyO3 layer surfaces the error to
+            // Python as `ParseError`.
+            let content = mail.get_body_raw()?;
 
+            // For text parts, build the Python-facing string from the bytes we
+            // just decoded instead of calling `get_body()`, which would re-run the
+            // identical transfer decode a second time. `decode_charset` performs
+            // only the charset step, so the result matches mailparse's `get_body`
+            // output byte-for-byte (see `decode_charset`).
             if attachment_name.is_none() {
                 if mime == "text/plain" {
-                    text_plain.push(mail.get_body()?)
+                    text_plain.push(decode_charset(&content, &mail.ctype));
                 } else if mime == "text/html" {
-                    text_html.push(mail.get_body()?)
+                    text_html.push(decode_charset(&content, &mail.ctype));
                 }
             }
+
+            attachments.push(Attachment {
+                mimetype: mime.to_string(),
+                content,
+                filename: attachment_name.cloned().unwrap_or_default(),
+            });
         }
 
         Ok(Self {
