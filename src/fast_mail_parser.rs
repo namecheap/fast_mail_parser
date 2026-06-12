@@ -1,3 +1,19 @@
+//! PyO3 binding layer for the `fast_mail_parser` extension module.
+//!
+//! The crate intentionally keeps two parallel data models:
+//!
+//! - [`mail_parser`] is a **PyO3-free core**: `Mail`/`Attachment` are plain Rust
+//!   types that hold the parsed message. Because they have no Python dependency,
+//!   the parsing logic can be exercised and tested independently of any Python
+//!   runtime.
+//! - This module is the **PyO3 binding layer**: [`PyMail`]/[`PyAttachment`] wrap
+//!   the core types and expose them to Python, converting Rust values into Python
+//!   objects (e.g. `Vec<u8>` -> `bytes`).
+//!
+//! Keeping the split decouples the parsing logic from the Python bindings: the
+//! core stays portable and unit-testable, while everything PyO3-specific lives
+//! here.
+
 mod mail_parser;
 
 use pyo3::prelude::*;
@@ -35,6 +51,10 @@ impl PyAttachment {
     }
 }
 
+/// A parsed email message exposed to Python.
+///
+/// Note that [`attachments`](Self::attachments) is **not** limited to file
+/// attachments: it contains every node of the message's MIME tree.
 #[pyclass]
 pub struct PyMail {
     #[pyo3(get)]
@@ -45,6 +65,13 @@ pub struct PyMail {
     pub text_html: Vec<String>,
     #[pyo3(get)]
     pub date: String,
+    /// Every node of the message's MIME tree, not just file attachments.
+    ///
+    /// This includes the text parts (`text/plain`, `text/html`, whose decoded
+    /// bodies also appear in `text_plain`/`text_html`) and the multipart
+    /// container nodes themselves (e.g. `multipart/mixed`, `multipart/alternative`).
+    /// Container nodes carry their MIME type but have empty `content`. A part is
+    /// only a real file attachment when its `filename` is non-empty.
     #[pyo3(get)]
     pub attachments: Vec<PyAttachment>,
     #[pyo3(get)]
@@ -68,36 +95,38 @@ impl PyMail {
     }
 }
 
-trait PyToBytes {
-    fn to_bytes(&self, py: Python<'_>) -> PyResult<Vec<u8>>;
-}
+/// Interpret a Python object as a byte buffer for parsing.
+///
+/// Accepts `bytes` (used as-is) or `str` (decoded as its UTF-8 bytes; ASCII is
+/// unchanged because ASCII == its own UTF-8, and non-ASCII code points round-trip
+/// correctly instead of being truncated to their low byte). Any other type raises
+/// Python `TypeError`.
+fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Vec<u8>> {
+    let obj = payload.bind(py);
 
-impl PyToBytes for Py<PyAny> {
-    fn to_bytes(&self, py: Python<'_>) -> PyResult<Vec<u8>> {
-        let obj = self.bind(py);
-
-        if let Ok(bytes) = obj.cast::<PyBytes>() {
-            return Ok(bytes.as_bytes().to_vec());
-        }
-
-        if let Ok(text) = obj.cast::<PyString>() {
-            if let Ok(text) = text.to_str() {
-                // Decode str losslessly as its UTF-8 bytes. ASCII is unchanged
-                // (ASCII == its own UTF-8); non-ASCII code points now round-trip
-                // correctly instead of being truncated to their low byte.
-                return Ok(text.as_bytes().to_vec());
-            }
-        }
-
-        Err(PyErr::new::<exceptions::PyTypeError, _>(
-            "The argument cannot be interpreted as bytes.",
-        ))
+    if let Ok(bytes) = obj.cast::<PyBytes>() {
+        return Ok(bytes.as_bytes().to_vec());
     }
+
+    if let Ok(text) = obj.cast::<PyString>() {
+        if let Ok(text) = text.to_str() {
+            return Ok(text.as_bytes().to_vec());
+        }
+    }
+
+    Err(PyErr::new::<exceptions::PyTypeError, _>(
+        "The argument cannot be interpreted as bytes.",
+    ))
 }
 
+/// Parse a raw email (`bytes` or `str`) into a [`PyMail`].
+///
+/// The resulting `PyMail.attachments` lists every node of the MIME tree -- text
+/// parts and the multipart container nodes -- not only file attachments; see
+/// [`PyMail::attachments`] for details.
 #[pyfunction]
 pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
-    let message = payload.to_bytes(py)?;
+    let message = payload_to_bytes(&payload, py)?;
 
     mail_parser::parse_email(message.as_slice())
         .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))
