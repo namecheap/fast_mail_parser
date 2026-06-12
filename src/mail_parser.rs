@@ -1,3 +1,15 @@
+//! PyO3-free parsing core for `fast_mail_parser`.
+//!
+//! This module holds the pure-Rust data model -- [`Mail`] and [`Attachment`] --
+//! and the logic that turns a raw message into them. It has no dependency on
+//! Python or PyO3, so it can be exercised and unit-tested independently of any
+//! Python runtime.
+//!
+//! The companion `fast_mail_parser` module is the **PyO3 binding layer**:
+//! `PyMail`/`PyAttachment` wrap these core types and convert them into Python
+//! objects. Keeping the two models separate decouples the parsing logic from the
+//! Python bindings.
+
 use mailparse::*;
 use std::collections::HashMap;
 
