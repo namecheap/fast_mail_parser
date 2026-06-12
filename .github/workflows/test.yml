@@ -102,10 +102,9 @@ jobs:
         run: cargo audit
 
   # ---------------------------------------------------------------------------
-  # Test matrix — the real merge gate. Builds & passes on CPython 3.9–3.13 with
-  # PyO3 0.29 (3.7/3.8 are EOL and unavailable on current ubuntu runners). 3.13
-  # is a required cell now that PyO3 0.29 supports it (was allowed-failure under
-  # the old 0.16 pin).
+  # Test matrix — the real merge gate. Runs on CPython 3.11–3.14, built with
+  # PyO3 0.29. (3.9/3.10 dropped and 3.14 added per project policy; 3.7/3.8 are
+  # EOL and unavailable on current ubuntu runners.)
   # ---------------------------------------------------------------------------
   test:
     name: Test (py${{ matrix.python-version }})
@@ -113,7 +112,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
