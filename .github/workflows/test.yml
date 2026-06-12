@@ -18,13 +18,13 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Advisory lint job. Every check here WILL flag a known, already-tracked code
-  # issue, so the steps are non-blocking (continue-on-error) for now. Remove the
-  # continue-on-error from a step to make it a hard gate once the linked issue
-  # is fixed — do NOT leave them advisory forever.
+  # Lint job — blocking. fmt/clippy/mypy all pass on the current code, so they
+  # gate now. clippy::cast_possible_truncation is set to warn (not deny) so the
+  # known str->bytes bug is surfaced in the log without blocking; -D warnings
+  # still fails the build on any new default-level warning.
   # ---------------------------------------------------------------------------
   lint:
-    name: Lint (advisory)
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -39,39 +39,42 @@ jobs:
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
-        continue-on-error: true # make blocking once formatting is clean
 
-      # clippy::cast_possible_truncation pinpoints the str->bytes corruption bug.
       - name: cargo clippy
         run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
-        continue-on-error: true # blocking once the str->bytes fix lands
 
       - name: mypy (type stubs)
         run: |
           python -m pip install --upgrade pip mypy
           mypy fast_mail_parser/
-        continue-on-error: true # blocking once the .pyi stub type-checks clean
 
   # ---------------------------------------------------------------------------
-  # Supply-chain audit. Advisory until PyO3 is upgraded, because pyo3 0.16.6
-  # carries RUSTSEC-2025-0020. Flip to blocking after the upgrade.
+  # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
+  # a pinned dependency surfaces without blocking unrelated PRs — flip to
+  # blocking once the dependency stack is current. cargo-audit needs a newer
+  # rustc than the repo's pinned 1.81, so it runs on stable: RUSTUP_TOOLCHAIN
+  # overrides the rust-toolchain file for this step only.
   # ---------------------------------------------------------------------------
   security-audit:
     name: cargo audit (advisory)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        continue-on-error: true # blocking once pyo3 >= 0.24.1 clears RUSTSEC-2025-0020
+        continue-on-error: true
+        env:
+          RUSTUP_TOOLCHAIN: stable
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------------------------------------------------
-  # Test matrix — the real merge gate. pyo3 0.16.6 only supports CPython <= 3.10,
-  # and 3.7/3.8 are EOL and unavailable on current ubuntu runners, so the
-  # required set is 3.9/3.10. 3.11/3.12 are run as allowed-failures to surface
-  # the upgrade gap; move them into the required set (and add "3.13") once PyO3
-  # is upgraded.
+  # Test matrix — the real merge gate. Verified to build & pass with the current
+  # pinned pyo3 0.16.6 on CPython 3.9–3.12 (3.7/3.8 are EOL and unavailable on
+  # current ubuntu runners). 3.13 runs as an allowed-failure to surface the
+  # forward-compat gap; move it into the required set once PyO3 is upgraded.
   # ---------------------------------------------------------------------------
   test:
     name: Test (py${{ matrix.python-version }})
@@ -79,12 +82,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10"]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
         experimental: [false]
         include:
-          - python-version: "3.11"
-            experimental: true
-          - python-version: "3.12"
+          - python-version: "3.13"
             experimental: true
     continue-on-error: ${{ matrix.experimental }}
     steps:
