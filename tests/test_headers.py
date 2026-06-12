@@ -2,7 +2,7 @@ from fast_mail_parser import PyMail
 
 
 def test__total_number_is_valid(valid_mail: PyMail):
-    assert len(valid_mail.headers) is 29
+    assert len(valid_mail.headers) == 29
 
 
 def test__header_is_accessible_by_key(valid_mail: PyMail):
