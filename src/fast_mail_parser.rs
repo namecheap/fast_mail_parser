@@ -7,22 +7,29 @@ use std::collections::HashMap;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
-#[pyclass]
+#[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyAttachment {
     #[pyo3(get)]
     pub mimetype: String,
-    #[pyo3(get)]
-    pub content: Py<PyBytes>,
+    pub content: Vec<u8>,
     #[pyo3(get)]
     pub filename: String,
 }
 
+#[pymethods]
 impl PyAttachment {
-    pub(crate) fn from_attachment(py: Python, attachment: mail_parser::Attachment) -> Self {
+    #[getter]
+    fn content<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, self.content.as_slice())
+    }
+}
+
+impl PyAttachment {
+    pub(crate) fn from_attachment(attachment: mail_parser::Attachment) -> Self {
         PyAttachment {
             mimetype: attachment.mimetype,
-            content: Py::from(PyBytes::new(py, attachment.content.as_slice())),
+            content: attachment.content,
             filename: attachment.filename,
         }
     }
@@ -45,7 +52,7 @@ pub struct PyMail {
 }
 
 impl PyMail {
-    pub(crate) fn from_mail(py: Python, mail: mail_parser::Mail) -> Self {
+    pub(crate) fn from_mail(mail: mail_parser::Mail) -> Self {
         Self {
             subject: mail.subject,
             text_plain: mail.text_plain,
@@ -54,7 +61,7 @@ impl PyMail {
             attachments: mail
                 .attachments
                 .into_iter()
-                .map(|a| PyAttachment::from_attachment(py, a))
+                .map(PyAttachment::from_attachment)
                 .collect(),
             headers: mail.headers,
         }
@@ -62,42 +69,39 @@ impl PyMail {
 }
 
 trait PyToBytes {
-    fn to_bytes(&self, py: Python) -> PyResult<Vec<u8>>;
+    fn to_bytes(&self, py: Python<'_>) -> PyResult<Vec<u8>>;
 }
 
-impl PyToBytes for PyObject {
-    fn to_bytes(&self, py: Python) -> PyResult<Vec<u8>> {
-        let mut result = self
-            .extract::<&PyBytes>(py)
-            .map(|s| s.as_bytes().to_vec().into_iter());
+impl PyToBytes for Py<PyAny> {
+    fn to_bytes(&self, py: Python<'_>) -> PyResult<Vec<u8>> {
+        let obj = self.bind(py);
 
-        if result.is_err() {
-            result = self
-                .extract::<String>(py)
-                .map(|s| s.chars().map(|c| c as u8).collect::<Vec<_>>().into_iter())
-                .map_err(|_| {
-                    PyErr::new::<exceptions::PyTypeError, _>(
-                        "The argument cannot be interpreted as bytes.",
-                    )
-                })
+        if let Ok(bytes) = obj.cast::<PyBytes>() {
+            return Ok(bytes.as_bytes().to_vec());
         }
 
-        result.map(|iter| iter.collect())
+        obj.extract::<String>()
+            .map(|s| s.chars().map(|c| c as u8).collect())
+            .map_err(|_| {
+                PyErr::new::<exceptions::PyTypeError, _>(
+                    "The argument cannot be interpreted as bytes.",
+                )
+            })
     }
 }
 
 #[pyfunction]
-pub fn parse_email(py: Python, payload: PyObject) -> PyResult<PyMail> {
+pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let message = payload.to_bytes(py)?;
 
     mail_parser::parse_email(message.as_slice())
         .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))
-        .map(|mail| PyMail::from_mail(py, mail))
+        .map(PyMail::from_mail)
 }
 
 #[pymodule]
-fn fast_mail_parser(py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_wrapped(wrap_pyfunction!(parse_email))?;
+fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(parse_email, m)?)?;
     m.add_class::<PyMail>()?;
     m.add_class::<PyAttachment>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;

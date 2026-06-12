@@ -30,7 +30,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 mailparse = "0.15.0"
-pyo3 = "0.16.6"
+pyo3 = "0.29"
 
 [features]
 default = ["pyo3/extension-module"]

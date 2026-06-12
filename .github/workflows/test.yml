@@ -36,7 +36,7 @@ jobs:
           python-version: "3.10"
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          toolchain: "1.81"
+          toolchain: "1.83"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
@@ -61,7 +61,7 @@ jobs:
   # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
   # a pinned dependency surfaces without blocking unrelated PRs — flip to
   # blocking once the dependency stack is current. cargo-audit needs a newer
-  # rustc than the repo's pinned 1.81, so it runs on stable: RUSTUP_TOOLCHAIN
+  # rustc than the repo's pinned 1.83, so it runs on stable: RUSTUP_TOOLCHAIN
   # overrides the rust-toolchain file for this step only.
   # ---------------------------------------------------------------------------
   security-audit:
