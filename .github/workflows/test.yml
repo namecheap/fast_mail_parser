@@ -38,7 +38,7 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          toolchain: "1.83"
+          toolchain: stable
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
@@ -74,8 +74,9 @@ jobs:
   # against any dependency should fail the build and gate the PR rather than pass
   # silently. (It was previously advisory only because the stack was stale and a
   # fresh advisory against a pinned dep would have blocked unrelated PRs.)
-  # cargo-audit needs a newer rustc than the repo's pinned 1.83, so the job runs
-  # on stable via RUSTUP_TOOLCHAIN (overrides the rust-toolchain file).
+  # The rust-toolchain file tracks `stable` and the MSRV (1.83) is declared via
+  # `rust-version` in Cargo.toml; this job sets RUSTUP_TOOLCHAIN=stable explicitly
+  # so cargo-audit always builds against current stable regardless of that file.
   #
   # cargo-audit is `cargo install`ed from source (~3 min — previously the
   # slowest job by far). The compiled binary is cached and keyed on the pinned
@@ -135,7 +136,7 @@ jobs:
           cache: pip
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          toolchain: "1.83"
+          toolchain: stable
       # Cache the cargo registry and build artifacts so `make install` reuses
       # compiled crates across runs instead of rebuilding from scratch (#47).
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -168,7 +169,7 @@ jobs:
           cache: pip
       - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
         with:
-          toolchain: "1.83"
+          toolchain: stable
       # Cache the cargo registry and build artifacts so `make install` reuses
       # compiled crates across runs instead of rebuilding from scratch (#47).
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
