@@ -1,0 +1,24 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Message with attachment
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=mixed-0"
+
+------=mixed-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+See attached image.
+
+------=mixed-0
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="pixel.png"
+MIME-Version: 1.0
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgAAACAAFUok8+AAAA
+AElFTkSuQmCC
+
+------=mixed-0--

@@ -1,0 +1,10 @@
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+From: Отправитель <отправитель@пример.рф>
+Subject: Письмо с UTF-8 заголовками
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+MIME-Version: 1.0
+
+UTF-8 body for an EAI message.

@@ -1,0 +1,10 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Quoted-printable body
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+Discount: 50=3D50? C=C3=B4t=C3=A9 caf=C3=A9 =E2=80=94 d=C3=A9j=C3=A0 vu.

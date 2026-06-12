@@ -1,0 +1,10 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: =?utf-8?b?Q2Fmw6kg4piVIOKAlCBkw6lqw6A=?= vu update
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Body is plain ASCII; the subject is the RFC 2047 part.
