@@ -1,0 +1,35 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Nested multipart
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=nest-0"
+
+------=nest-0
+Content-Type: multipart/alternative; boundary="----=nest-1"
+
+------=nest-1
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain part of the alternative.
+
+------=nest-1
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+<html><body>HTML part of the alternative.</body></html>
+
+------=nest-1--
+
+------=nest-0
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="doc.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQKMSAwIG9iajw8Pj5lbmRvYmoKdHJhaWxlcjw8Pj4KJSVFT0YK
+
+------=nest-0--

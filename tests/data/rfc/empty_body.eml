@@ -1,0 +1,10 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: No body
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+

@@ -1,0 +1,4 @@
+# RFC test fixtures are parsed byte-for-byte and use CRLF (the RFC 5322 line
+# ending). Keep them verbatim so Git's autocrlf never rewrites the bytes the
+# tests assert against.
+tests/data/rfc/*.eml -text

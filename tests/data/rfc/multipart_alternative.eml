@@ -1,0 +1,22 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Alternative parts
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="----=alt-0"
+
+------=alt-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain alternative body.
+
+------=alt-0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+<html><body><p>HTML alternative body.</p></body></html>
+
+------=alt-0--

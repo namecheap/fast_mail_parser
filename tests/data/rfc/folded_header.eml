@@ -1,0 +1,15 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: This is a deliberately long subject line that the email generator
+ must fold across multiple physical lines using folding whitespace per RFC
+ 5322 so the parser has to unfold it back into a single logical value
+References: <ref-0@example.com> <ref-1@example.com> <ref-2@example.com>
+ <ref-3@example.com> <ref-4@example.com> <ref-5@example.com>
+ <ref-6@example.com> <ref-7@example.com>
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Body after folded headers.

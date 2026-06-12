@@ -1,0 +1,25 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Related inline image
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="----=rel-0"
+
+------=rel-0
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body><img src="cid:img1"></body></html>
+
+------=rel-0
+Content-Type: image/png
+Content-Transfer-Encoding: base64
+Content-ID: <img1>
+MIME-Version: 1.0
+Content-Disposition: inline
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNgAAACAAFUok8+AAAA
+AElFTkSuQmCC
+
+------=rel-0--
