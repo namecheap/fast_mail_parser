@@ -135,10 +135,11 @@ jobs:
         run: pytest -v tests/benchmark --benchmark-min-rounds=25 --benchmark-json=benchmark.json
       - name: Enforce performance gate
         env:
-          # Gate on min-time ratio (README ~8x). CI measures ~8x+ on the Linux
-          # runner after the str-input fast path; 6x floor catches real
-          # regressions while staying clear of runner noise.
-          BENCH_MIN_SPEEDUP: "6.0"
+          # Gate on min-time ratio. 8x matches the README headline figure and
+          # requires the str-input fast path; the optimized parser measures
+          # ~8.7x on CI. Headroom is tight, so a slow-relative runner can dip
+          # below 8x.
+          BENCH_MIN_SPEEDUP: "8.0"
         run: python .github/scripts/check_benchmark.py benchmark.json
       - name: Upload benchmark report
         if: always()
