@@ -1,5 +1,3 @@
-import typing as t
-
 __all__ = [
     "parse_email",
     "PyMail",
@@ -18,11 +16,11 @@ class PyMail:
     def __init__(
         self,
         subject: str,
-        text_plain: t.List[str],
-        text_html: t.List[str],
+        text_plain: list[str],
+        text_html: list[str],
         date: str,
-        attachments: t.List[PyAttachment],
-        headers: t.Dict[str, str],
+        attachments: list[PyAttachment],
+        headers: dict[str, str],
     ) -> None:
         self.subject = subject
         self.text_plain = text_plain
@@ -36,7 +34,7 @@ class ParseError(Exception):
     """Error happened during parsing email."""
 
 
-def parse_email(payload: t.Union[str, bytes]) -> PyMail:
+def parse_email(payload: str | bytes) -> PyMail:
     """Parse raw content of email and return structured datatype.
 
     A missing ``Subject`` or ``Date`` header yields the empty string ``""``

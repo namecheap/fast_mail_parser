@@ -1,6 +1,7 @@
-import pytest
 import sys
 from typing import Callable
+
+import pytest
 
 from fast_mail_parser import PyMail, parse_email
 
@@ -10,7 +11,7 @@ sys.path.pop(0)
 @pytest.fixture(scope='module')
 def read_mail() -> Callable:
     def wrap(path: str):
-        with open(path, 'r') as f:
+        with open(path) as f:
             return f.read()
 
     return wrap
