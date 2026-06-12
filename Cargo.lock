@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "fast_mail_parser"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "mailparse",
  "pyo3",

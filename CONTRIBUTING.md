@@ -129,28 +129,31 @@ make benchmark
 The following checks are run in CI. Run them locally before opening a PR:
 
 ```bash
-cargo fmt --all -- --check       # Rust formatting (enforced / blocking in CI)
+cargo fmt --all -- --check       # Rust formatting (blocking in CI)
 cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
-mypy fast_mail_parser/           # type-stub checking (advisory in CI)
-ruff check .                     # Python linting (advisory)
+mypy --strict fast_mail_parser/  # type-stub checking (blocking in CI)
+ruff check --fix .               # Python lint + autofix (blocking in CI; config in ruff.toml)
 ```
+
+Run **`ruff check --fix .`** before opening a PR — it auto-fixes most findings
+(import order, modern typing, etc.); fix any remainder by hand so `ruff check .`
+is clean.
 
 In CI:
 
-- **`cargo fmt --check`** is **blocking** — the source is rustfmt-clean and must
-  stay that way.
-- **`cargo clippy`** and **`mypy`** are currently **advisory**
-  (`continue-on-error`) while their remaining debt clears. Please keep new code
-  clean under both even though they do not yet fail the build.
-- `ruff` is advisory; keep Python code clean under it.
+- **`cargo fmt --check`**, **`mypy --strict`**, and **`ruff check`** are
+  **blocking** — keep the source clean under all three.
+- **`cargo clippy`** is currently **advisory** (`continue-on-error`) while its
+  remaining debt clears; please keep new code clean under it even though it does
+  not yet fail the build.
 
 ## Continuous integration
 
 The [`Test`](.github/workflows/test.yml) workflow gates every pull request. It
 consists of:
 
-- **Lint** — `cargo fmt --check` (blocking), plus `cargo clippy` and `mypy`
-  (advisory).
+- **Lint** — `cargo fmt --check`, `mypy --strict`, and `ruff check` (all
+  blocking), plus `cargo clippy` (advisory).
 - **cargo audit** — a **blocking** supply-chain audit of the Rust dependency
   stack (PyO3 0.29) against the RustSec advisory database. A new advisory
   against any dependency fails the build.

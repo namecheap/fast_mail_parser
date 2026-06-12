@@ -18,15 +18,13 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Lint. rustfmt and mypy --strict are enforced (blocking); clippy and ruff
-  # stay advisory (continue-on-error) until their debt clears, and each runs
+  # Lint. rustfmt, mypy --strict, and ruff are enforced (blocking); clippy
+  # stays advisory (continue-on-error) until its debt clears, and each runs
   # regardless of the others:
   #   - rustfmt -> blocking (source is rustfmt-clean).
   #   - clippy  -> flip to blocking after the str->bytes fix (#19).
   #   - mypy    -> blocking: `mypy --strict fast_mail_parser/` is clean (#42).
-  #   - ruff    -> advisory: `ruff check .` reports issues in the package
-  #                stubs (UP006/UP007) and in test code (I001/E501/UP*). Fixing
-  #                those is out of scope here; flip to blocking once clean (#44).
+  #   - ruff    -> blocking: `ruff check .` is clean (config in ruff.toml).
   # ---------------------------------------------------------------------------
   lint:
     name: Lint
@@ -58,15 +56,12 @@ jobs:
           python -m pip install --upgrade pip mypy
           mypy --strict fast_mail_parser/
 
-      # Advisory: `ruff check .` currently reports issues in the package stubs
-      # (UP006/UP007) and in test code (I001/E501/UP015). Fixing those is out
-      # of scope; drop continue-on-error once they are resolved (#44).
+      # Blocking: `ruff check .` is clean (config in ruff.toml).
       - name: ruff check
         if: always()
         run: |
           python -m pip install ruff
           ruff check .
-        continue-on-error: true
 
   # ---------------------------------------------------------------------------
   # Supply-chain audit. Blocking (no continue-on-error): the dependency stack is

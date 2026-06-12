@@ -11,7 +11,6 @@ break (update consumers, bump the version) — do not loosen the test to make it
 pass.
 """
 
-import typing as t
 
 import pytest
 
@@ -34,7 +33,7 @@ EXPECTED_ATTACHMENT_ATTRS = {"mimetype", "content", "filename"}
 MALFORMED_MESSAGE = " unexpected continuation\r\n\r\nbody"
 
 
-def _public_attrs(obj: object) -> t.Set[str]:
+def _public_attrs(obj: object) -> set[str]:
     return {name for name in dir(obj) if not name.startswith("_")}
 
 

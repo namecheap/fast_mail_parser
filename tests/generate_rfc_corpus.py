@@ -16,8 +16,8 @@ then commit the regenerated tests/data/rfc/*.eml files.
 """
 
 import os
-from email.message import EmailMessage
 from email import policy
+from email.message import EmailMessage
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "data", "rfc")
 
