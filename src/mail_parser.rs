@@ -1,6 +1,19 @@
 use mailparse::*;
 use std::collections::HashMap;
 
+// DoS hardening: `parse_email` runs on untrusted input. The two constants below
+// bound otherwise-unbounded resource use. Both limits sit far above any
+// realistic email, so well-formed messages are never affected.
+
+// Reject payloads larger than 100 MiB. A single email this large is not
+// legitimate; rejecting up front prevents a huge payload from exhausting memory.
+const MAX_INPUT_BYTES: usize = 100 * 1024 * 1024;
+
+// Cap MIME multipart nesting at 256 levels. `extract_mail_parts` recurses over
+// subparts, so a maliciously deep multipart tree could otherwise blow the stack
+// and crash the host process. Real messages nest only a handful of levels deep.
+const MAX_MIME_DEPTH: usize = 256;
+
 pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
 }
@@ -24,6 +37,12 @@ pub(crate) struct Attachment {
 
 impl<'a> Mail {
     pub(crate) fn new(payload: &'a [u8]) -> Result<Self, MailParseError> {
+        if payload.len() > MAX_INPUT_BYTES {
+            return Err(MailParseError::Generic(
+                "Input exceeds maximum allowed size",
+            ));
+        }
+
         let mail = parse_mail(payload)?;
 
         let headers: HashMap<String, String> = mail
@@ -40,7 +59,7 @@ impl<'a> Mail {
         let mut text_plain = vec![];
         let mut text_html = vec![];
 
-        for mail in Self::extract_mail_parts(mail) {
+        for mail in Self::extract_mail_parts(mail, 0)? {
             let attachment_name = mail.ctype.params.get("name");
             let mime = mail.ctype.mimetype.as_str();
 
@@ -69,16 +88,25 @@ impl<'a> Mail {
         })
     }
 
-    fn extract_mail_parts(mut mail: ParsedMail<'a>) -> Vec<ParsedMail<'a>> {
+    fn extract_mail_parts(
+        mut mail: ParsedMail<'a>,
+        depth: usize,
+    ) -> Result<Vec<ParsedMail<'a>>, MailParseError> {
+        if depth >= MAX_MIME_DEPTH {
+            return Err(MailParseError::Generic(
+                "MIME nesting exceeds maximum allowed depth",
+            ));
+        }
+
         let mut result = vec![];
         let subparts = std::mem::take(&mut mail.subparts);
 
         for part in subparts {
-            result.extend(Self::extract_mail_parts(part));
+            result.extend(Self::extract_mail_parts(part, depth + 1)?);
         }
 
         result.push(mail);
 
-        result
+        Ok(result)
     }
 }
