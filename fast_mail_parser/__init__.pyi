@@ -37,5 +37,9 @@ class ParseError(Exception):
 
 
 def parse_email(payload: t.Union[str, bytes]) -> PyMail:
-    """Parse raw content of email and return structured datatype."""
+    """Parse raw content of email and return structured datatype.
+
+    A missing ``Subject`` or ``Date`` header yields the empty string ``""``
+    (not ``None``) on the returned ``PyMail``.
+    """
 
