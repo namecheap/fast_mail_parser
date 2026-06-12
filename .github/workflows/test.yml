@@ -135,7 +135,9 @@ jobs:
         run: pytest -v tests/benchmark --benchmark-min-rounds=25 --benchmark-json=benchmark.json
       - name: Enforce performance gate
         env:
-          BENCH_MIN_SPEEDUP: "5.0" # README observes ~8x; 5x leaves headroom for CI noise
+          # Gate on min-time ratio (README ~8x; ~5.5x observed on shared runners).
+          # 4x floor catches real regressions while staying clear of runner noise.
+          BENCH_MIN_SPEEDUP: "4.0"
         run: python .github/scripts/check_benchmark.py benchmark.json
       - name: Upload benchmark report
         if: always()
