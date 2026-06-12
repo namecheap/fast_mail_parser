@@ -114,8 +114,9 @@ jobs:
     strategy:
       matrix:
         platform:
-          - runner: macos-13 # macos-12 is being removed from GitHub-hosted runners
-            target: x86_64
+          # Only arm64 macOS wheels. The macos-13 (x86_64) runner is being
+          # retired and became unschedulable (its job sat queued until GitHub
+          # cancelled the release). x86_64 macOS installs fall back to the sdist.
           - runner: macos-14
             target: aarch64
     steps:
