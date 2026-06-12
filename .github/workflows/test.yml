@@ -1,28 +1,147 @@
 name: Test
 
-on: [push]
+# Runs on pushes to the default branch AND on every pull request, so the
+# matrix can be used as a required merge gate. (Baseline only ran on push.)
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs for the same ref to save runner minutes.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  # ---------------------------------------------------------------------------
+  # Lint job — advisory. These surface real findings on the current code today
+  # (the source is not rustfmt-clean, and clippy flags the str->bytes cast), so
+  # the steps are non-blocking and each runs regardless of the others. Flip a
+  # step to blocking (drop continue-on-error) once its debt is cleared:
+  #   - cargo fmt  -> after a one-time `cargo fmt` formatting commit
+  #   - clippy     -> after the str->bytes fix (#19)
+  #   - mypy       -> after the .pyi stub type-checks clean (#42)
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.10"
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: "1.81"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      # clippy::cast_possible_truncation pinpoints the str->bytes corruption bug.
+      - name: cargo clippy
+        if: always()
+        run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
+        continue-on-error: true
+
+      - name: mypy (type stubs)
+        if: always()
+        run: |
+          python -m pip install --upgrade pip mypy
+          mypy fast_mail_parser/
+        continue-on-error: true
+
+  # ---------------------------------------------------------------------------
+  # Supply-chain audit. Advisory (continue-on-error) so a fresh advisory against
+  # a pinned dependency surfaces without blocking unrelated PRs — flip to
+  # blocking once the dependency stack is current. cargo-audit needs a newer
+  # rustc than the repo's pinned 1.81, so it runs on stable: RUSTUP_TOOLCHAIN
+  # overrides the rust-toolchain file for this step only.
+  # ---------------------------------------------------------------------------
+  security-audit:
+    name: cargo audit (advisory)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+        with:
+          toolchain: stable
+      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        continue-on-error: true
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Test matrix — the real merge gate. Verified to build & pass with the current
+  # pinned pyo3 0.16.6 on CPython 3.9–3.12 (3.7/3.8 are EOL and unavailable on
+  # current ubuntu runners). 3.13 runs as an allowed-failure to surface the
+  # forward-compat gap; move it into the required set once PyO3 is upgraded.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: [3.7, 3.8, 3.9, "3.10", 3.11, 3.12]
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        experimental: [false]
+        include:
+          - python-version: "3.13"
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
       - name: Install the package
+        run: make install
+      - name: Install test dependencies
+        run: make install-test
+      - name: Test
+        run: make test
+
+  # ---------------------------------------------------------------------------
+  # Benchmark quality gate. The benchmark used to run inside every matrix cell
+  # (6x redundant, slow). It now runs once here and acts as a performance gate:
+  # fast_mail_parser must stay at least BENCH_MIN_SPEEDUP times faster than the
+  # pure-Python mail-parser baseline (README reports ~8x). The ratio is measured
+  # on the same runner in the same run, so it is hardware-independent and stable.
+  # Getting faster always passes; only regressions below the floor fail.
+  # ---------------------------------------------------------------------------
+  benchmark:
+    name: Benchmark quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.10"
+          cache: pip
+      - name: Install the package + test dependencies
         run: |
           make install
-      - name: Install test dependencies
-        run: |
           make install-test
-      - name: Test
-        run: |
-          make test
-      - name: Benchmark
-        run: |
-          make benchmark
+      - name: Run benchmark
+        run: pytest -v tests/benchmark --benchmark-min-rounds=25 --benchmark-json=benchmark.json
+      - name: Enforce performance gate
+        env:
+          # Gate on min-time ratio (README ~8x; ~5.5x observed on shared runners).
+          # 4x floor catches real regressions while staying clear of runner noise.
+          BENCH_MIN_SPEEDUP: "4.0"
+        run: python .github/scripts/check_benchmark.py benchmark.json
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: benchmark-json
+          path: benchmark.json
