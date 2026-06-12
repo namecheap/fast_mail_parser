@@ -128,9 +128,18 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Vec<u8>> {
 pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let message = payload_to_bytes(&payload, py)?;
 
-    mail_parser::parse_email(message.as_slice())
-        .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))
-        .map(PyMail::from_mail)
+    // The actual parse is pure Rust and never touches the Python interpreter, so
+    // release the GIL (`py.detach`) for its duration. This lets other Python
+    // threads -- including other `parse_email` calls -- run concurrently instead
+    // of serializing on the GIL, which turns multi-threaded parsing throughput
+    // from single-core into multi-core. `message` is an owned copy, so nothing
+    // borrows from a Python object while the GIL is released. Errors and the
+    // `PyMail` are produced after re-attaching, where the interpreter is needed.
+    let mail = py
+        .detach(|| mail_parser::parse_email(message.as_slice()))
+        .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))?;
+
+    Ok(PyMail::from_mail(mail))
 }
 
 #[pymodule]
