@@ -63,17 +63,23 @@ impl<'a> Mail {
             let attachment_name = mail.ctype.params.get("name");
             let mime = mail.ctype.mimetype.as_str();
 
+            // Propagate body decode failures instead of swallowing them with
+            // `unwrap_or_default()`. A broken transfer encoding (e.g. invalid
+            // base64/quoted-printable) or an undecodable charset would otherwise
+            // be silently turned into an empty body, hiding corruption from the
+            // caller. `get_body_raw`/`get_body` return `MailParseError`, which the
+            // PyO3 layer surfaces to Python as `ParseError`.
             attachments.push(Attachment {
                 mimetype: mime.to_string(),
-                content: mail.get_body_raw().unwrap_or_default(),
+                content: mail.get_body_raw()?,
                 filename: attachment_name.cloned().unwrap_or_default(),
             });
 
             if attachment_name.is_none() {
                 if mime == "text/plain" {
-                    text_plain.push(mail.get_body().unwrap_or_default())
+                    text_plain.push(mail.get_body()?)
                 } else if mime == "text/html" {
-                    text_html.push(mail.get_body().unwrap_or_default())
+                    text_html.push(mail.get_body()?)
                 }
             }
         }
