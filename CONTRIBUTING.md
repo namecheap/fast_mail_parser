@@ -16,9 +16,9 @@ discuss what you would like to change.
   **1.83**; if you use `rustup`, the correct version is selected automatically
   in this directory. Some CI checks (`cargo audit`) run on **stable** rather
   than the pinned version.
-- **Python** — **3.9–3.13** (`requires-python = ">= 3.9"` in
-  [`pyproject.toml`](pyproject.toml)). The CI test matrix covers 3.9, 3.10,
-  3.11, 3.12, and 3.13.
+- **Python** — **3.11–3.14** (`requires-python = ">= 3.11"` in
+  [`pyproject.toml`](pyproject.toml)). The CI test matrix covers 3.11, 3.12,
+  3.13, and 3.14.
 - **[maturin](https://www.maturin.rs/)** — the build backend (declared in
   `pyproject.toml` as `maturin>=1.0,<2.0`). It compiles the Rust extension and
   installs it into your environment.
@@ -155,10 +155,10 @@ consists of:
   stack (PyO3 0.29) against the RustSec advisory database. A new advisory
   against any dependency fails the build.
 - **Test matrix** — the real merge gate. Builds and runs the suite on **CPython
-  3.9, 3.10, 3.11, 3.12, and 3.13** via `make install` / `make install-test` /
+  3.11, 3.12, 3.13, and 3.14** via `make install` / `make install-test` /
   `make test`.
 - **Benchmark quality gate** — runs the benchmark once and enforces that
-  `fast_mail_parser` stays at least **8x** faster than the pure-Python
+  `fast_mail_parser` stays at least **7x** faster than the pure-Python
   `mail-parser` baseline (`BENCH_MIN_SPEEDUP`). The ratio is measured on the same
   runner in the same run, so it is hardware-independent; getting faster always
   passes, only a regression below the floor fails.
