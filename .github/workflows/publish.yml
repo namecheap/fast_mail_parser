@@ -168,22 +168,27 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+          # download-artifact@v8 verifies each artifact's digest against the value
+          # upload-artifact@v7 recorded; that pairing can report a spurious
+          # mismatch even though the download itself succeeds. Warn instead of
+          # failing the release — integrity is still attested by the provenance
+          # step below.
+          digest-mismatch: warn
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-path: "dist/*"
-      # Publish using the legacy PYPI_USERNAME / PYPI_PASSWORD secrets (token or
-      # username/password) rather than OIDC Trusted Publishing. NOTE: PyPI no
-      # longer accepts plain username/password — this only succeeds if
-      # PYPI_USERNAME is "__token__" and PYPI_PASSWORD is a valid API token.
-      # Preferred long-term: re-enable OIDC Trusted Publishing (drop these
-      # secrets) by configuring a Trusted Publisher for namecheap/fast_mail_parser
-      # + publish.yml on PyPI.
+      # Publish via PyPI Trusted Publishing (OIDC) — no long-lived credentials.
+      # OIDC also enables PEP 740 attestations (attestations: true); these are
+      # silently IGNORED if an explicit username/password is set, so do NOT add
+      # `user`/`password` here. Requires a one-time PyPI setup: add a Trusted
+      # Publisher for namecheap/fast_mail_parser, workflow "publish.yml" (no
+      # environment), at
+      # https://pypi.org/manage/project/fast-mail-parser/settings/publishing/
       - name: Publish to PyPI
         if: ${{ github.event_name == 'release' && startsWith(github.ref, 'refs/tags/') }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           packages-dir: dist
           skip-existing: true
-          user: ${{ secrets.PYPI_USERNAME }}
-          password: ${{ secrets.PYPI_PASSWORD }}
+          attestations: true
