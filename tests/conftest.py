@@ -16,24 +16,24 @@ def read_mail() -> Callable:
     return wrap
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def attachment_mail(read_mail: Callable) -> PyMail:
     message = read_mail('tests/data/attachment_message.eml')
 
     return parse_email(message)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def valid_mail(valid_message: str, read_mail: Callable) -> PyMail:
     return parse_email(valid_message)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def large_mail(large_message: str, read_mail: Callable) -> PyMail:
     return parse_email(large_message)
 
 
-@pytest.fixture
+@pytest.fixture(scope='module')
 def valid_message(read_mail: Callable) -> str:
     return read_mail('tests/data/valid_message.eml')
 
