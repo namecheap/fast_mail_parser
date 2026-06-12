@@ -2,6 +2,7 @@
 name = "fast_mail_parser"
 description = "Very fast Python library for .eml files parsing."
 edition = "2021"
+rust-version = "1.83"
 version = "0.3.0"
 authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
 readme = "Readme.md"
@@ -29,7 +30,7 @@ path = "src/fast_mail_parser.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-mailparse = "0.15.0"
+mailparse = "0.16.1"
 pyo3 = "0.29"
 
 [features]
