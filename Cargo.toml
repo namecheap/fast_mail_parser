@@ -38,4 +38,7 @@ mailparse = "0.16.1"
 pyo3 = "0.29"
 
 [features]
-default = ["pyo3/extension-module"]
+# abi3-py311 targets the CPython stable ABI with a 3.11 baseline (matching
+# `requires-python` in pyproject.toml): one wheel per platform covers every
+# CPython >= 3.11, including versions released after this build.
+default = ["pyo3/extension-module", "pyo3/abi3-py311"]
