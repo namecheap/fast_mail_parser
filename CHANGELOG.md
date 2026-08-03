@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Wheels now target the CPython stable ABI (`cp311-abi3`, via the
+  `pyo3/abi3-py311` feature): a single wheel per platform supports every
+  CPython ≥ 3.11, including versions released after the build. New CPython
+  minors no longer require a repo change or a new release for installability
+  (#14, #15, #101). The abi3 build benchmarked ~11% *faster* than the
+  version-specific build (min parse time, CPython 3.12, Apple Silicon), so no
+  hybrid version-specific wheels are shipped.
+- CI now builds one abi3 wheel and runs the full test matrix (CPython
+  3.11–3.14) against that same wheel — the stable-ABI contract is verified,
+  not assumed. The per-version publish matrix collapsed to one wheel per
+  platform.
+
 ## [0.4.0] - 2026-06-12
 
 ### Breaking

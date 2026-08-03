@@ -32,6 +32,17 @@ Use the package manager [pip](https://pypi.org/project/fast_mail_parser/) to ins
 pip install fast-mail-parser
 ```
 
+Wheels target the CPython stable ABI (`cp311-abi3`): one wheel per platform
+covers every supported CPython version, including versions released after the
+package — a new Python no longer has to wait for a new release.
+
+| Python | Support |
+| --- | --- |
+| CPython 3.11+ (including future versions) | Prebuilt wheel |
+| CPython 3.13t/3.14t (free-threaded) | Builds from source; the extension currently re-enables the GIL on import ([#101](https://github.com/namecheap/fast_mail_parser/issues/101)) |
+| CPython ≤ 3.10 | Not supported (last compatible release: 0.2.5) |
+| PyPy | Not supported |
+
 ## Usage
 
 `parse_email` accepts the raw message as `str` or `bytes` and returns a

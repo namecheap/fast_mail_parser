@@ -3,6 +3,11 @@ name: Publish
 # Release builds the multi-platform wheels + sdist and publishes to PyPI.
 # workflow_dispatch builds everything WITHOUT publishing — use it to validate
 # the pipeline (artifacts are uploaded) without cutting a release.
+#
+# Wheels target the CPython stable ABI (cp311-abi3, enabled via the
+# pyo3/abi3-py311 cargo feature): each platform job builds ONE wheel that
+# covers every CPython >= 3.11, including versions released after this build.
+# A new CPython minor requires no changes to this workflow.
 on:
   release:
     types: [created]
@@ -42,7 +47,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           sccache: "true"
           manylinux: auto
       - name: Upload wheels
@@ -73,7 +78,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           sccache: "true"
           manylinux: musllinux_1_2
       - name: Upload wheels
@@ -101,7 +106,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           sccache: "true"
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -128,7 +133,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.platform.target }}
-          args: --release --out dist --find-interpreter
+          args: --release --out dist
           sccache: "true"
       - name: Upload wheels
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
