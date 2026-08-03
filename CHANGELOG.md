@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-03
+
 ### Changed
 
 - Wheels now target the CPython stable ABI (`cp311-abi3`, via the
@@ -68,6 +70,7 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/namecheap/fast_mail_parser/releases/tag/v0.3.0
