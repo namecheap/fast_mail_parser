@@ -135,7 +135,7 @@ def test__chunking_a_batch_changes_nothing():
 
 def test__an_unparseable_payload_lands_in_its_own_slot_amid_real_messages():
     # BROKEN rather than tests/data/invalid_message.eml: despite its name that
-    # fixture parses successfully (see issue filed from #149), so it cannot
+    # fixture parses successfully (see #150), so it cannot
     # stand in for a parse failure.
     good = open(CORPUS[0], "rb").read()
     payloads = [good, BROKEN, good]
