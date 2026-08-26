@@ -13,6 +13,9 @@
 use charset::{decode_ascii, Charset};
 use mailparse::*;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
 
 // DoS hardening: `parse_email` runs on untrusted input. The two constants below
 // bound otherwise-unbounded resource use. Both limits sit far above any
@@ -36,6 +39,84 @@ pub(crate) const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed de
 
 pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
+}
+
+/// Parse a batch of messages in parallel, preserving input order.
+///
+/// One result per input, each independently `Ok` or `Err`, so a single malformed
+/// message cannot fail the batch.
+///
+/// Uses `std::thread::scope` and a shared atomic cursor rather than a thread
+/// pool crate. Two reasons: it adds no dependency -- which keeps the lockfile
+/// and the licence allowlist untouched -- and the cursor gives *dynamic* work
+/// distribution, which is the property that actually matters here. Static
+/// chunking would stall a worker that happened to draw several large messages,
+/// and real mail batches are very uneven in size.
+///
+/// `threads` caps the worker count; `None` uses the machine's parallelism.
+/// Callers with a batch smaller than the thread count do not spawn idle workers.
+pub(crate) fn parse_many(
+    payloads: &[Vec<u8>],
+    threads: Option<NonZeroUsize>,
+) -> Vec<Result<Mail, MailParseError>> {
+    if payloads.is_empty() {
+        return Vec::new();
+    }
+
+    let available = threads
+        .or_else(|| thread::available_parallelism().ok())
+        .map_or(1, NonZeroUsize::get);
+    // Never more workers than there is work for them to do.
+    let workers = available.min(payloads.len()).max(1);
+
+    if workers == 1 {
+        return payloads.iter().map(|payload| Mail::new(payload)).collect();
+    }
+
+    let cursor = AtomicUsize::new(0);
+    let collected: Vec<Vec<(usize, Result<Mail, MailParseError>)>> = thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    // Each worker claims indices until the batch is exhausted and
+                    // keeps its own results, so no synchronisation is needed on
+                    // the output and no `unsafe` is involved.
+                    let mut mine = Vec::new();
+                    loop {
+                        let index = cursor.fetch_add(1, Ordering::Relaxed);
+                        if index >= payloads.len() {
+                            break;
+                        }
+                        mine.push((index, Mail::new(&payloads[index])));
+                    }
+                    mine
+                })
+            })
+            .collect();
+
+        handles
+            .into_iter()
+            // A worker only panics if the parser does, which is a bug rather
+            // than a malformed-input case. Resuming the unwind keeps the
+            // behaviour identical to the single-message path, where PyO3 turns a
+            // panic into a Python exception instead of losing it.
+            .map(|handle| match handle.join() {
+                Ok(results) => results,
+                Err(payload) => std::panic::resume_unwind(payload),
+            })
+            .collect()
+    });
+
+    // Restore input order. Slots are filled exactly once, so no gaps.
+    let mut ordered: Vec<Option<Result<Mail, MailParseError>>> =
+        (0..payloads.len()).map(|_| None).collect();
+    for (index, result) in collected.into_iter().flatten() {
+        ordered[index] = Some(result);
+    }
+    ordered
+        .into_iter()
+        .map(|slot| slot.expect("every index is claimed exactly once"))
+        .collect()
 }
 
 /// Decode already-transfer-decoded `body` bytes into a `String` using the part's

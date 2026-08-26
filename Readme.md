@@ -210,6 +210,36 @@ for cid in re.findall(r'cid:([^"\'>\s]+)', mail.text_html[0]):
 distinguishes an absent header (`None`) from an explicit `inline` — the two are
 different statements about intent.
 
+### Parsing a batch
+
+`parse_many` parses a whole batch in one call, in parallel, releasing the GIL for
+the batch rather than per message:
+
+```python
+from fast_mail_parser import ParseError, parse_many
+
+results = parse_many(payloads)              # list[str | bytes] in, results in input order
+results = parse_many(payloads, threads=8)   # cap the workers; default is the machine's
+```
+
+Each slot is a `PyMail` **or** a `ParseError` instance — returned, not raised —
+so one malformed message does not cost you the rest of the batch, and inputs zip
+cleanly to outcomes:
+
+```python
+for payload, outcome in zip(payloads, parse_many(payloads)):
+    if isinstance(outcome, ParseError):
+        quarantine(payload, reason=str(outcome))
+    else:
+        index(outcome)
+```
+
+Pass `raise_on_error=True` to raise the first failure instead.
+
+**Chunk large workloads.** Every parsed message is materialised before the call
+returns, so a batch of ten thousand one-megabyte mails holds essentially all of it
+decoded at once. Feed it in chunks of a few hundred rather than a whole mailbox.
+
 ### Error handling
 
 `parse_email` raises a subtype of `ParseError`, chosen by what actually went

@@ -18,9 +18,10 @@ mod mail_parser;
 
 use mailparse::MailParseError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDateTime, PyString, PyTzInfo};
+use pyo3::types::{PyBytes, PyDateTime, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
@@ -282,9 +283,61 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     Ok(PyMail::from_mail(mail))
 }
 
+/// Parse a batch of messages in one call, in parallel, preserving input order.
+///
+/// Accepts the same `str`/`bytes` inputs as `parse_email`. Each slot of the
+/// result is either a `PyMail` or a `ParseError` **instance** -- returned, not
+/// raised -- so one malformed message cannot cost the caller the rest of the
+/// batch, and inputs zip cleanly to outcomes. `raise_on_error=True` restores
+/// fail-fast behaviour for callers who prefer it.
+///
+/// `threads` caps the worker count; the default is the machine's parallelism.
+///
+/// Memory: every parsed message is materialised before returning. A batch of ten
+/// thousand one-megabyte mails holds essentially all of it decoded at once, so
+/// chunk large workloads at the caller.
+#[pyfunction]
+#[pyo3(signature = (payloads, *, threads = None, raise_on_error = false))]
+pub fn parse_many(
+    py: Python<'_>,
+    payloads: Vec<Py<PyAny>>,
+    threads: Option<usize>,
+    raise_on_error: bool,
+) -> PyResult<Py<PyList>> {
+    // Convert every payload to owned bytes *before* releasing the GIL: this
+    // touches Python objects, and nothing may borrow from one while detached.
+    let messages: Vec<Vec<u8>> = payloads
+        .iter()
+        .map(|payload| payload_to_bytes(payload, py))
+        .collect::<PyResult<_>>()?;
+
+    let workers = threads.and_then(NonZeroUsize::new);
+
+    // The whole batch parses with the GIL released, so other Python threads keep
+    // running for its full duration rather than per message.
+    let parsed = py.detach(|| mail_parser::parse_many(&messages, workers));
+
+    let items = PyList::empty(py);
+    for result in parsed {
+        match result {
+            Ok(mail) => items.append(Py::new(py, PyMail::from_mail(mail))?)?,
+            Err(error) => {
+                let err = to_py_err(error);
+                if raise_on_error {
+                    return Err(err);
+                }
+                // The exception object itself, not a raise.
+                items.append(err.value(py))?;
+            }
+        }
+    }
+    Ok(items.unbind())
+}
+
 #[pymodule]
 fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_many, m)?)?;
     m.add_class::<PyMail>()?;
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyAddress>()?;

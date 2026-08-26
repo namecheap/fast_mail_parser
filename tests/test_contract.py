@@ -19,6 +19,7 @@ from fast_mail_parser import ParseError, PyAttachment, PyMail, parse_email
 
 EXPECTED_EXPORTS = {
     "parse_email",
+    "parse_many",
     "ParseError",
     "HeaderParseError",
     "MimeStructureError",
