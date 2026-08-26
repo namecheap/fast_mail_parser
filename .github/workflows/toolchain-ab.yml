@@ -3,11 +3,16 @@ name: Toolchain A/B
 # Compares the SAME source built with two Rust toolchains, to decide whether the
 # pin in rust-toolchain.toml can be lifted (#120).
 #
-# rustc 1.98.0 makes this crate ~26% slower than 1.97.1, which is why the
-# toolchain is pinned. That number came from comparing separate CI runs, where
-# between-runner variance is ~26% -- the same order as the effect being measured.
-# This workflow builds both toolchains in ONE job instead, where within-job noise
-# is ~0.3%, so the delta is a real measurement rather than a suggestive one.
+# rustc 1.98.0 makes this crate ~30% slower than 1.97.1, which is why the
+# toolchain is pinned. The original estimate (~26%) came from comparing separate
+# CI runs, where between-runner variance is itself ~26% -- the same order as the
+# effect. Building both toolchains in ONE job gives a real measurement:
+#
+#   parse_message  1.376 ms -> 1.788 ms  (+30.0%)
+#   full_read      1.408 ms -> 1.811 ms  (+28.7%)
+#   mail-parser     9.960 ms -> 10.187 ms  (+2.3%)  <- pure-Python control
+#
+# The control barely moves, which is what makes the other two trustworthy.
 #
 # Run it when a new Rust stable appears: if the candidate is within tolerance,
 # the pin can be lifted. That is the bar rust-toolchain.toml asks for.
@@ -61,8 +66,9 @@ jobs:
         env:
           RUSTUP_TOOLCHAIN: ${{ inputs.candidate }}
         run: |
-          # A separate target dir, or cargo reuses the baseline's artifacts and
-          # the "candidate" build is really the baseline's binary.
+          # A separate target dir is load-bearing: without it cargo reuses the
+          # baseline's artifacts and the "candidate" is silently the same binary,
+          # which reports a reassuring 0% and means nothing.
           export CARGO_TARGET_DIR="$RUNNER_TEMP/target-candidate"
           python -m venv "$RUNNER_TEMP/venv-candidate"
           "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --upgrade pip
