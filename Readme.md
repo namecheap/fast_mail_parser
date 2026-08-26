@@ -54,6 +54,10 @@ print(email.text_plain[0])
 That is the whole surface for the common case. See [Usage](#usage) for the full
 API, and [Python support](#python-support) for wheel coverage.
 
+Coming from the stdlib `email` module, or upgrading from 0.6.x? See the
+[migration guide](https://github.com/namecheap/fast_mail_parser/blob/master/docs/migrating.md) — its snippets are
+executed in CI, so they cannot go stale.
+
 ## Why the name changed
 
 The `fast-mail-parser` name on PyPI belongs to a PyPI account this project no
