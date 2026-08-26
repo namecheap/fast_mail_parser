@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A differential compatibility suite against the stdlib `email` module**
+  (`tests/test_stdlib_parity.py`) plus `docs/compatibility.md` (part of #103).
+  Both parsers run over the whole fixture corpus and are compared on nine
+  dimensions; a mismatch fails CI unless it is a declared, explained divergence,
+  and a declared divergence that stops occurring fails too — so the document
+  cannot drift from the code in either direction.
+
+  The corpus now matches the stdlib **byte for byte**, attachment payloads
+  included, on everything except five documented differences (body line endings
+  preserved rather than normalised to LF being the one most likely to bite) and
+  one case where this library is *more* correct: the stdlib surrogate-escapes raw
+  UTF-8 in address headers (RFC 6532) where this library decodes it.
 - CI: `cargo deny` now runs, enforcing the supply-chain policy in `deny.toml`
   (advisories, licence allowlist, bans, source allowlist). The file had declared
   all of it since it was added with nothing enforcing any of it, and had drifted:

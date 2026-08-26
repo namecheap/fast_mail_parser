@@ -188,6 +188,14 @@ assert handled
 A malformed transfer encoding also raises `ParseError` rather than silently
 yielding an empty body.
 
+## Known differences from the stdlib
+
+Structurally the two agree byte for byte across the RFC corpus. Five documented
+differences remain — most importantly, **body line endings are preserved rather
+than normalised to `LF`** — and one case where this library is the more correct
+of the two. See [compatibility.md](compatibility.md); every row there is enforced
+by `tests/test_stdlib_parity.py`.
+
 ## What this library does not do
 
 The stdlib is a full email *library*; this is a fast **parser**. Not provided:
