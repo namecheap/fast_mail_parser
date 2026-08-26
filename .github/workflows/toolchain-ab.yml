@@ -1,0 +1,98 @@
+name: Toolchain A/B
+
+# Compares the SAME source built with two Rust toolchains, to decide whether the
+# pin in rust-toolchain.toml can be lifted (#120).
+#
+# rustc 1.98.0 makes this crate ~30% slower than 1.97.1, which is why the
+# toolchain is pinned. The original estimate (~26%) came from comparing separate
+# CI runs, where between-runner variance is itself ~26% -- the same order as the
+# effect. Building both toolchains in ONE job gives a real measurement:
+#
+#   parse_message  1.376 ms -> 1.788 ms  (+30.0%)
+#   full_read      1.408 ms -> 1.811 ms  (+28.7%)
+#   mail-parser     9.960 ms -> 10.187 ms  (+2.3%)  <- pure-Python control
+#
+# The control barely moves, which is what makes the other two trustworthy.
+#
+# Run it when a new Rust stable appears: if the candidate is within tolerance,
+# the pin can be lifted. That is the bar rust-toolchain.toml asks for.
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: "Toolchain to compare against (the current pin)"
+        default: "1.97.1"
+      candidate:
+        description: "Toolchain to evaluate (a version, or `stable`)"
+        default: "stable"
+      tolerance:
+        description: "Max tolerated slowdown vs baseline, percent"
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: ${{ inputs.candidate }} vs ${{ inputs.baseline }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install both toolchains
+        run: |
+          rustup toolchain install --profile minimal --no-self-update \
+            "${{ inputs.baseline }}" "${{ inputs.candidate }}"
+          rustup run "${{ inputs.baseline }}" rustc --version
+          rustup run "${{ inputs.candidate }}" rustc --version
+
+      - name: Benchmark the baseline toolchain
+        env:
+          # Overrides rust-toolchain.toml, which an rustup toolchain file cannot
+          # do from the other direction. Verified precedence: this env var wins.
+          RUSTUP_TOOLCHAIN: ${{ inputs.baseline }}
+        run: |
+          python -m venv "$RUNNER_TEMP/venv-baseline"
+          "$RUNNER_TEMP/venv-baseline/bin/pip" install -q --upgrade pip
+          "$RUNNER_TEMP/venv-baseline/bin/pip" install -q ".[test]"
+          "$RUNNER_TEMP/venv-baseline/bin/pytest" -q tests/benchmark \
+            --benchmark-min-rounds=25 --benchmark-json=baseline.json
+
+      - name: Benchmark the candidate toolchain
+        env:
+          RUSTUP_TOOLCHAIN: ${{ inputs.candidate }}
+        run: |
+          # A separate target dir is load-bearing: without it cargo reuses the
+          # baseline's artifacts and the "candidate" is silently the same binary,
+          # which reports a reassuring 0% and means nothing.
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/target-candidate"
+          python -m venv "$RUNNER_TEMP/venv-candidate"
+          "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --upgrade pip
+          "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --no-cache-dir ".[test]"
+          "$RUNNER_TEMP/venv-candidate/bin/pytest" -q tests/benchmark \
+            --benchmark-min-rounds=25 --benchmark-json=candidate.json
+
+      - name: Compare
+        env:
+          BENCH_MAX_REGRESSION_PCT: ${{ inputs.tolerance }}
+          # Not meaningful here: this compares toolchains, not the library
+          # against another implementation. Set low so it never masks the verdict.
+          BENCH_MIN_SPEEDUP: "1.0"
+        run: |
+          echo "candidate: ${{ inputs.candidate }}   baseline: ${{ inputs.baseline }}"
+          # Same gate script as the PR benchmark, pointed at toolchains instead
+          # of revisions: "this revision" is the candidate toolchain.
+          python .github/scripts/check_benchmark.py candidate.json baseline.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: toolchain-ab-json
+          path: |
+            baseline.json
+            candidate.json
