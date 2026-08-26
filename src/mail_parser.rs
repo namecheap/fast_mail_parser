@@ -27,6 +27,13 @@ const MAX_INPUT_BYTES: usize = 100 * 1024 * 1024;
 // and crash the host process. Real messages nest only a handful of levels deep.
 const MAX_MIME_DEPTH: usize = 256;
 
+// The two cap failures are the only errors this module originates itself;
+// everything else comes from mailparse. They are named so the binding layer can
+// classify them by identity rather than by re-typing the literals (see
+// `to_py_err` in the binding layer).
+pub(crate) const ERR_INPUT_TOO_LARGE: &str = "Input exceeds maximum allowed size";
+pub(crate) const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed depth";
+
 pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
 }
@@ -195,9 +202,7 @@ pub(crate) struct Attachment {
 impl<'a> Mail {
     pub(crate) fn new(payload: &'a [u8]) -> Result<Self, MailParseError> {
         if payload.len() > MAX_INPUT_BYTES {
-            return Err(MailParseError::Generic(
-                "Input exceeds maximum allowed size",
-            ));
+            return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
         }
 
         let mail = parse_mail(payload)?;
@@ -322,9 +327,7 @@ impl<'a> Mail {
         depth: usize,
     ) -> Result<Vec<ParsedMail<'a>>, MailParseError> {
         if depth >= MAX_MIME_DEPTH {
-            return Err(MailParseError::Generic(
-                "MIME nesting exceeds maximum allowed depth",
-            ));
+            return Err(MailParseError::Generic(ERR_MIME_DEPTH));
         }
 
         let mut result = vec![];

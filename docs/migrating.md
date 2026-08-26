@@ -186,7 +186,9 @@ assert handled
 ```
 
 A malformed transfer encoding also raises `ParseError` rather than silently
-yielding an empty body.
+yielding an empty body — specifically `DecodeError`, one of three subtypes
+(`HeaderParseError`, `MimeStructureError`, `DecodeError`). All inherit from
+`ParseError`, so catching that still catches everything.
 
 ## Known differences from the stdlib
 

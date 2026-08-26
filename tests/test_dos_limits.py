@@ -9,7 +9,7 @@ Both limits sit far above any realistic email, so normal messages parse fine.
 
 import pytest
 
-from fast_mail_parser import ParseError, parse_email
+from fast_mail_parser import MimeStructureError, parse_email
 
 
 def _build_nested_multipart(levels: int) -> bytes:
@@ -61,15 +61,15 @@ def test_normally_nested_multipart_parses():
 
 
 def test_deeply_nested_multipart_rejected():
-    """Nesting beyond MAX_MIME_DEPTH (256) raises ParseError, not a crash."""
+    """Nesting beyond MAX_MIME_DEPTH (256) raises MimeStructureError, not a crash."""
     # 300 levels is comfortably past the 256-level cap.
     message = _build_nested_multipart(300)
-    with pytest.raises(ParseError):
+    with pytest.raises(MimeStructureError):
         parse_email(message)
 
 
 def test_oversized_input_rejected():
-    """A payload just over MAX_INPUT_BYTES (100 MiB) raises ParseError.
+    """A payload just over MAX_INPUT_BYTES (100 MiB) raises MimeStructureError.
 
     Allocating ~100 MiB once in-process is acceptable for a single test run;
     the cap itself is intentionally kept generous so production emails are
@@ -78,5 +78,5 @@ def test_oversized_input_rejected():
     max_input_bytes = 100 * 1024 * 1024
     # A header line plus filler to push total length just past the cap.
     oversized = b"Subject: big\r\n\r\n" + b"x" * (max_input_bytes + 1)
-    with pytest.raises(ParseError):
+    with pytest.raises(MimeStructureError):
         parse_email(oversized)

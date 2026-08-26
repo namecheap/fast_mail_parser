@@ -17,7 +17,16 @@ import pytest
 import fast_mail_parser
 from fast_mail_parser import ParseError, PyAttachment, PyMail, parse_email
 
-EXPECTED_EXPORTS = {"parse_email", "ParseError", "PyMail", "PyAttachment", "PyAddress"}
+EXPECTED_EXPORTS = {
+    "parse_email",
+    "ParseError",
+    "HeaderParseError",
+    "MimeStructureError",
+    "DecodeError",
+    "PyMail",
+    "PyAttachment",
+    "PyAddress",
+}
 EXPECTED_MAIL_ATTRS = {
     "subject",
     "text_plain",

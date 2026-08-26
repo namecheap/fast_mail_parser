@@ -210,6 +210,34 @@ for cid in re.findall(r'cid:([^"\'>\s]+)', mail.text_html[0]):
 distinguishes an absent header (`None`) from an explicit `inline` — the two are
 different statements about intent.
 
+### Error handling
+
+`parse_email` raises a subtype of `ParseError`, chosen by what actually went
+wrong:
+
+| Exception | Meaning |
+| --- | --- |
+| `HeaderParseError` | The header section could not be parsed — usually the input is not an email at all. |
+| `MimeStructureError` | Malformed MIME structure, or a resource cap tripped: over 100 MiB of input, or nesting deeper than 256 levels. |
+| `DecodeError` | A part's `Content-Transfer-Encoding` did not decode (bad base64, bad quoted-printable). |
+
+All three inherit from `ParseError`, so existing code keeps working:
+
+```python
+from fast_mail_parser import DecodeError, ParseError, parse_email
+
+try:
+    mail = parse_email(raw)
+except DecodeError:
+    quarantine(raw)          # one part's encoding is broken
+except ParseError:
+    reject(raw)              # not parseable at all
+```
+
+The distinction is worth acting on: a `DecodeError` says one part of an otherwise
+plausible message is corrupt, while a `HeaderParseError` usually says the bytes
+were never an email.
+
 ### Bodies vs. attachments
 
 The two are disjoint — a part appears in exactly one place. Classification
