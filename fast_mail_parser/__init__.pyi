@@ -2,6 +2,7 @@ from datetime import datetime
 
 __all__ = [
     "parse_email",
+    "parse_many",
     "PyMail",
     "PyAttachment",
     "PyAddress",
@@ -157,3 +158,28 @@ def parse_email(payload: str | bytes) -> PyMail:
     all of them.
     """
 
+
+def parse_many(
+    payloads: list[str | bytes],
+    *,
+    threads: int | None = None,
+    raise_on_error: bool = False,
+) -> list[PyMail | ParseError]:
+    """Parse a batch of messages in one call, in parallel, in input order.
+
+    Each slot of the result is either a ``PyMail`` or a ``ParseError``
+    *instance* -- returned, not raised -- so one malformed message does not cost
+    the caller the rest of the batch, and inputs zip cleanly to outcomes::
+
+        for payload, outcome in zip(payloads, parse_many(payloads)):
+            if isinstance(outcome, ParseError):
+                ...
+
+    Pass ``raise_on_error=True`` to raise the first failure instead.
+
+    ``threads`` caps the worker count; the default is the machine's parallelism.
+    The GIL is released for the whole batch rather than per message.
+
+    Every parsed message is materialised before returning, so chunk large
+    workloads at the caller.
+    """

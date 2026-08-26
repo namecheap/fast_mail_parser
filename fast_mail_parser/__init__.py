@@ -7,10 +7,12 @@ from .fast_mail_parser import (
     PyAttachment,
     PyMail,
     parse_email,
+    parse_many,
 )
 
 __all__ = [
     "parse_email",
+    "parse_many",
     "PyMail",
     "PyAttachment",
     "PyAddress",
