@@ -178,7 +178,8 @@ def parse_many(
     Pass ``raise_on_error=True`` to raise the first failure instead.
 
     ``threads`` caps the worker count; the default is the machine's parallelism.
-    The GIL is released for the whole batch rather than per message.
+    ``threads=0`` raises ``ValueError`` -- pass ``None`` for the default. The GIL
+    is released for the whole batch rather than per message.
 
     Every parsed message is materialised before returning, so chunk large
     workloads at the caller.
