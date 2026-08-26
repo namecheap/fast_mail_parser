@@ -6,6 +6,11 @@ rust-version = "1.83"
 version = "0.7.0"
 authors = ["Andrii Sokyrko <wartwvister@gmail.com>"]
 readme = "Readme.md"
+# Both fields: `license` is the SPDX expression tooling reads (cargo-deny warns
+# `no-license-field` without it, which is the same defect that made
+# encoding_rs 0.8.30 unclassifiable), while `license-file` is kept so the file
+# itself stays attached to the package.
+license = "Apache-2.0"
 license-file = "LICENSE"
 homepage = "https://github.com/namecheap/fast_mail_parser"
 repository = "https://github.com/namecheap/fast_mail_parser"

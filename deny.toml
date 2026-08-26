@@ -1,7 +1,7 @@
 # cargo-deny configuration.
 #
-# Starter config for local and future-CI supply-chain checks. There is no
-# cargo-deny CI job wired up yet (out of scope); run it locally with:
+# Enforced by the "cargo deny" job in .github/workflows/test.yml. Run it locally
+# with:
 #   cargo install cargo-deny --locked
 #   cargo deny check
 #
@@ -20,6 +20,13 @@ yanked = "warn"
 [licenses]
 version = 2
 allow = [
+    # BSD Zero Clause: permissive, OSI-approved, and imposes strictly fewer
+    # obligations than MIT (no attribution requirement), so allowing it follows
+    # from allowing MIT. Required rather than aspirational: `mailparse` -- the
+    # crate this library is built on -- and its `quoted_printable` dependency
+    # are both 0BSD, so the policy rejected the core dependency until this was
+    # added.
+    "0BSD",
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",

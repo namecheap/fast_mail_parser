@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: `cargo deny` now runs, enforcing the supply-chain policy in `deny.toml`
+  (advisories, licence allowlist, bans, source allowlist). The file had declared
+  all of it since it was added with nothing enforcing any of it, and had drifted:
+  `0BSD` was missing from the allowlist while `mailparse` -- the crate this
+  library is built on -- and its `quoted_printable` dependency are both 0BSD, so
+  the policy as written rejected the core dependency. `0BSD` is now allowed, with
+  the reasoning recorded next to it (#131).
+- The crate now declares `license = "Apache-2.0"` as an SPDX expression rather
+  than only pointing at the licence file, so tooling can classify it.
 - Bumped the pinned `encoding_rs` 0.8.30 -> 0.8.35 (lockfile only; `charset`
   already allowed it via `^0.8.22`). 0.8.30 dates from 2021 and this crate does
   the charset decoding for every text part, i.e. it runs on untrusted input.
