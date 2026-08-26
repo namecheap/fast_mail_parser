@@ -47,6 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A migration guide, `docs/migrating.md`** — covering the 0.6.x -> 0.7.0
+  breaking changes and the move from the stdlib `email` module, plus an honest
+  list of what this library deliberately does not do (building or mutating
+  messages, `Message` compatibility, header mutation). Every Python snippet in it
+  is extracted and executed against the built wheel by
+  `tests/test_docs_snippets.py`, in document order in one shared namespace, so a
+  snippet that drifts from the API fails CI rather than misleading a reader
+  (part of #103).
 - **Typed address fields on `PyMail`:** `from_` (a `PyAddress` or `None`) plus
   `to`, `cc`, `bcc` and `reply_to` (lists of `PyAddress`), each with
   `display_name: str | None` and `address: str`. `mailparse` already parsed these
