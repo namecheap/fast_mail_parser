@@ -9,6 +9,8 @@ Contract:
 - The GIL is released for the whole batch, not per message.
 """
 
+import glob
+import os
 import threading
 import time
 
@@ -61,14 +63,84 @@ def test__accepts_mixed_str_and_bytes():
     assert all(isinstance(r, PyMail) for r in results)
 
 
-def test__matches_parse_email_one_by_one():
-    payloads = [_message(f"m{i}") for i in range(10)]
+_DATA = os.path.join(os.path.dirname(__file__), "data")
+
+# Every real fixture. invalid_message.eml is excluded here and exercised
+# separately below, since it exists to fail parsing.
+CORPUS = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
+    path
+    for path in glob.glob(os.path.join(_DATA, "*.eml"))
+    if os.path.basename(path) != "invalid_message.eml"
+)
+
+
+def _view(mail: PyMail) -> dict:
+    """Everything a caller can observe, for comparing two parses of one message."""
+    return {
+        "subject": mail.subject,
+        "date": mail.date,
+        "date_parsed": mail.date_parsed,
+        "text_plain": tuple(mail.text_plain),
+        "text_html": tuple(mail.text_html),
+        "attachments": [
+            (a.mimetype, a.filename, a.content, a.content_id, a.disposition)
+            for a in mail.attachments
+        ],
+        "headers": {key: list(values) for key, values in mail.headers.items()},
+        "from_": None if mail.from_ is None else (mail.from_.display_name, mail.from_.address),
+        "to": [(a.display_name, a.address) for a in mail.to],
+        "cc": [(a.display_name, a.address) for a in mail.cc],
+    }
+
+
+def test__batch_matches_single_parse_across_the_whole_corpus():
+    # The batch path must be indistinguishable from calling parse_email in a
+    # loop -- on every observable field, over real messages, not just subjects.
+    assert len(CORPUS) >= 15, f"expected the fixture corpus, found {len(CORPUS)}"
+    payloads = [open(path, "rb").read() for path in CORPUS]
 
     batch = parse_many(payloads)
-    single = [parse_email(p) for p in payloads]
 
-    assert [m.subject for m in batch] == [m.subject for m in single]
-    assert [m.text_plain for m in batch] == [m.text_plain for m in single]
+    assert len(batch) == len(payloads)
+    # strict: equal lengths are part of the contract being asserted.
+    for path, payload, batched in zip(CORPUS, payloads, batch, strict=True):
+        assert _view(batched) == _view(parse_email(payload)), (
+            f"batch and single parse disagree on {os.path.basename(path)}"
+        )
+
+
+def test__batch_results_do_not_depend_on_position():
+    # Same messages, reversed order: each message's own result must be unchanged.
+    # Catches a worker writing into the wrong slot in a way a uniform batch hides.
+    payloads = [open(path, "rb").read() for path in CORPUS]
+
+    forward = parse_many(payloads)
+    backward = parse_many(list(reversed(payloads)))
+
+    assert [_view(m) for m in forward] == [_view(m) for m in reversed(backward)]
+
+
+def test__chunking_a_batch_changes_nothing():
+    # No state may leak between messages within a call, or between calls.
+    payloads = [open(path, "rb").read() for path in CORPUS]
+
+    whole = [_view(m) for m in parse_many(payloads)]
+    chunked = []
+    for start in range(0, len(payloads), 4):
+        chunked.extend(_view(m) for m in parse_many(payloads[start:start + 4]))
+
+    assert whole == chunked
+
+
+def test__an_unparseable_fixture_lands_in_its_own_slot():
+    invalid = open(os.path.join(_DATA, "invalid_message.eml"), "rb").read()
+    good = open(CORPUS[0], "rb").read()
+    payloads = [good, invalid, good]
+
+    results = parse_many(payloads)
+
+    assert isinstance(results[1], ParseError)
+    assert _view(results[0]) == _view(results[2]) == _view(parse_email(good))
 
 
 # --- per-item errors ----------------------------------------------------------
