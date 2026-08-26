@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 
 def test__mail_parser___parse_message(large_message: str, benchmark: Callable):
