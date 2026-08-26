@@ -6,19 +6,20 @@ silently turned a failed transfer-encoding decode (e.g. invalid base64) into an
 empty body. That hid corruption from the caller.
 
 The fix propagates those `MailParseError`s through `Mail::new`; the PyO3 layer
-maps them to `ParseError`. These tests assert broken encodings now surface as
-`ParseError` while valid messages (including valid base64) still parse.
+maps them to `DecodeError` (a `ParseError` subtype). These tests assert broken
+encodings surface as `DecodeError` while valid messages, including valid base64,
+still parse.
 """
 
 import base64
 
 import pytest
 
-from fast_mail_parser import ParseError, parse_email
+from fast_mail_parser import DecodeError, parse_email
 
 
 def test_broken_base64_text_body_raises():
-    """A text/plain body declaring base64 with invalid base64 raises ParseError.
+    """A text/plain body declaring base64 with invalid base64 raises DecodeError.
 
     This exercises the `get_body()` path. Before the fix the body was silently
     stored as empty; now the decode error is surfaced.
@@ -29,12 +30,12 @@ def test_broken_base64_text_body_raises():
         b"Content-Transfer-Encoding: base64\r\n\r\n"
         b"!!!!not_valid_base64!!!!\r\n"
     )
-    with pytest.raises(ParseError):
+    with pytest.raises(DecodeError):
         parse_email(message)
 
 
 def test_broken_base64_attachment_raises():
-    """A named attachment with invalid base64 raises ParseError.
+    """A named attachment with invalid base64 raises DecodeError.
 
     This exercises the `get_body_raw()` path used for every part's content.
     """
@@ -44,7 +45,7 @@ def test_broken_base64_attachment_raises():
         b"Content-Transfer-Encoding: base64\r\n\r\n"
         b"@@@not-base64@@@\r\n"
     )
-    with pytest.raises(ParseError):
+    with pytest.raises(DecodeError):
         parse_email(message)
 
 

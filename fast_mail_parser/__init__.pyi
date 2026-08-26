@@ -6,6 +6,9 @@ __all__ = [
     "PyAttachment",
     "PyAddress",
     "ParseError",
+    "HeaderParseError",
+    "MimeStructureError",
+    "DecodeError",
 ]
 
 
@@ -112,7 +115,35 @@ class PyMail:
 
 
 class ParseError(Exception):
-    """Error happened during parsing email."""
+    """Base class for every parse failure.
+
+    ``except ParseError`` catches all of the subtypes below, so code written
+    against it keeps working.
+    """
+
+
+class HeaderParseError(ParseError):
+    """The header section could not be parsed.
+
+    Usually means the input is not an email at all.
+    """
+
+
+class MimeStructureError(ParseError):
+    """The MIME structure is malformed, or a resource cap was exceeded.
+
+    Raised for a payload over the 100 MiB input limit and for MIME nesting
+    deeper than 256 levels -- both hostile-input guards rather than ordinary
+    malformedness.
+    """
+
+
+class DecodeError(ParseError):
+    """A part's ``Content-Transfer-Encoding`` could not be decoded.
+
+    For example base64 or quoted-printable that does not decode. The rest of the
+    message may still have been well-formed.
+    """
 
 
 def parse_email(payload: str | bytes) -> PyMail:
@@ -121,7 +152,8 @@ def parse_email(payload: str | bytes) -> PyMail:
     A missing ``Subject`` or ``Date`` header yields the empty string ``""``
     (not ``None``) on the returned ``PyMail``.
 
-    Raises ``ParseError`` if the payload cannot be parsed, including when a
-    part's ``Content-Transfer-Encoding`` is malformed.
+    Raises a ``ParseError`` subtype: ``HeaderParseError``,
+    ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle
+    all of them.
     """
 

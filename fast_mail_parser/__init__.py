@@ -1,4 +1,7 @@
 from .fast_mail_parser import (
+    DecodeError,
+    HeaderParseError,
+    MimeStructureError,
     ParseError,
     PyAddress,
     PyAttachment,
@@ -8,8 +11,11 @@ from .fast_mail_parser import (
 
 __all__ = [
     "parse_email",
-    "ParseError",
     "PyMail",
     "PyAttachment",
     "PyAddress",
+    "ParseError",
+    "HeaderParseError",
+    "MimeStructureError",
+    "DecodeError",
 ]

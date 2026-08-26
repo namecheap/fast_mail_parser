@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A `ParseError` hierarchy** (part of #100): `HeaderParseError`,
+  `MimeStructureError` and `DecodeError`, all inheriting from `ParseError` so
+  `except ParseError` keeps catching everything. Failures are categorised where
+  they occur, so a caller can distinguish "this is not an email" from "one
+  attachment's base64 is broken" — the second usually means an otherwise
+  plausible message with one corrupt part, which is worth routing differently.
+  Existing tests for the oversized-input, MIME-depth and broken-encoding paths
+  now assert the specific subtype.
 - **An honest cross-library benchmark table** in the README, comparing
   fast_mail_parser, mail-parser and the stdlib `email` module on *equivalent
   work* — each asked for the same result, with a "work performed" column so the

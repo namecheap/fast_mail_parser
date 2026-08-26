@@ -23,6 +23,43 @@ use std::collections::HashMap;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
+// Subtypes of ParseError, so an existing `except ParseError` keeps catching
+// everything while callers that care can distinguish the failure. The
+// distinction is actionable: a header-section failure usually means the input is
+// not an email at all, a structure failure means it is hostile or truncated, and
+// a decode failure means one part's transfer encoding is broken while the rest
+// of the message may still be worth looking at.
+create_exception!(
+    fast_mail_parser,
+    HeaderParseError,
+    ParseError,
+    "The header section could not be parsed."
+);
+create_exception!(
+    fast_mail_parser,
+    MimeStructureError,
+    ParseError,
+    "The MIME structure is malformed, or a resource cap was exceeded."
+);
+create_exception!(
+    fast_mail_parser,
+    DecodeError,
+    ParseError,
+    "A part's Content-Transfer-Encoding could not be decoded."
+);
+
+/// Map a core parse failure onto the matching Python exception.
+fn to_py_err(failure: mail_parser::ParseFailure) -> PyErr {
+    let message = format!("Message parsing error: {failure}");
+    match failure {
+        mail_parser::ParseFailure::Header(_) => HeaderParseError::new_err(message),
+        mail_parser::ParseFailure::MimeStructure(_) => {
+            MimeStructureError::new_err(message)
+        }
+        mail_parser::ParseFailure::Decode(_) => DecodeError::new_err(message),
+    }
+}
+
 /// One mailbox from an address header, exposed to Python.
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
@@ -207,9 +244,8 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Vec<u8>> {
 
 /// Parse a raw email (`bytes` or `str`) into a [`PyMail`].
 ///
-/// The resulting `PyMail.attachments` lists every node of the MIME tree -- text
-/// parts and the multipart container nodes -- not only file attachments; see
-/// [`PyMail::attachments`] for details.
+/// Raises `ParseError`, or more precisely one of its subtypes:
+/// `HeaderParseError`, `MimeStructureError` or `DecodeError`.
 #[pyfunction]
 pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let message = payload_to_bytes(&payload, py)?;
@@ -223,7 +259,7 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     // `PyMail` are produced after re-attaching, where the interpreter is needed.
     let mail = py
         .detach(|| mail_parser::parse_email(message.as_slice()))
-        .map_err(|e| ParseError::new_err(format!("Message parsing error: {}", e)))?;
+        .map_err(to_py_err)?;
 
     Ok(PyMail::from_mail(mail))
 }
@@ -235,6 +271,9 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyAddress>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;
+    m.add("HeaderParseError", py.get_type::<HeaderParseError>())?;
+    m.add("MimeStructureError", py.get_type::<MimeStructureError>())?;
+    m.add("DecodeError", py.get_type::<DecodeError>())?;
 
     Ok(())
 }
