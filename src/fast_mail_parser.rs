@@ -16,6 +16,7 @@
 
 mod mail_parser;
 
+use mailparse::MailParseError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDateTime, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
@@ -48,13 +49,32 @@ create_exception!(
     "A part's Content-Transfer-Encoding could not be decoded."
 );
 
-/// Map a core parse failure onto the matching Python exception.
-fn to_py_err(failure: Box<mail_parser::ParseFailure>) -> PyErr {
-    let message = format!("Message parsing error: {failure}");
-    match *failure {
-        mail_parser::ParseFailure::Header(_) => HeaderParseError::new_err(message),
-        mail_parser::ParseFailure::MimeStructure(_) => MimeStructureError::new_err(message),
-        mail_parser::ParseFailure::Decode(_) => DecodeError::new_err(message),
+/// Classify a parse failure and build the matching Python exception.
+///
+/// Classification is by `MailParseError` variant, which is exact rather than a
+/// heuristic: in mailparse 0.16, transfer-decoding (`body.rs`) only ever yields
+/// the three decode variants, and `Generic` is produced solely by the
+/// header-parsing paths -- plus the two caps this crate originates itself, which
+/// are matched by their named constants.
+///
+/// Deliberately done here rather than by threading a typed error through the
+/// parser: an earlier attempt at that widened the `Result` carried by the
+/// per-part loop and the recursive traversal and cost ~30% throughput, which the
+/// benchmark gate caught. The classification is cold, so it belongs on the cold
+/// side of the boundary.
+fn to_py_err(error: MailParseError) -> PyErr {
+    let message = format!("Message parsing error: {error}");
+    match error {
+        MailParseError::Base64DecodeError(_)
+        | MailParseError::QuotedPrintableDecodeError(_)
+        | MailParseError::EncodingError(_) => DecodeError::new_err(message),
+        MailParseError::Generic(detail)
+            if detail == mail_parser::ERR_INPUT_TOO_LARGE
+                || detail == mail_parser::ERR_MIME_DEPTH =>
+        {
+            MimeStructureError::new_err(message)
+        }
+        MailParseError::Generic(_) => HeaderParseError::new_err(message),
     }
 }
 
