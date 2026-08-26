@@ -53,9 +53,7 @@ fn to_py_err(failure: mail_parser::ParseFailure) -> PyErr {
     let message = format!("Message parsing error: {failure}");
     match failure {
         mail_parser::ParseFailure::Header(_) => HeaderParseError::new_err(message),
-        mail_parser::ParseFailure::MimeStructure(_) => {
-            MimeStructureError::new_err(message)
-        }
+        mail_parser::ParseFailure::MimeStructure(_) => MimeStructureError::new_err(message),
         mail_parser::ParseFailure::Decode(_) => DecodeError::new_err(message),
     }
 }

@@ -11,9 +11,9 @@
 //! Python bindings.
 
 use charset::{decode_ascii, Charset};
-use std::fmt;
 use mailparse::*;
 use std::collections::HashMap;
+use std::fmt;
 
 // DoS hardening: `parse_email` runs on untrusted input. The two constants below
 // bound otherwise-unbounded resource use. Both limits sit far above any
