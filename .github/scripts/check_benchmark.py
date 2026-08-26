@@ -48,14 +48,24 @@ import json
 import os
 import sys
 
+# The gate reads these two benchmarks by exact name. Substring matching was
+# fragile: any new benchmark mentioning a library name -- for instance one added
+# for the published comparison table -- made the selection ambiguous and failed
+# the gate rather than being ignored.
+GATE_FAST = "test__fast_mail_parser___parse_message"
+GATE_BASELINE = "test__mail_parser___parse_message"
 
-def _min_for(benchmarks, predicate, label, path):
-    matches = [b for b in benchmarks if predicate(b["name"])]
+
+def _min_for(benchmarks, name, path):
+    matches = [b for b in benchmarks if b["name"] == name]
     if not matches:
-        sys.exit(f"::error::benchmark for {label} not found in {path}")
+        available = ", ".join(sorted(b["name"] for b in benchmarks)) or "none"
+        sys.exit(
+            f"::error::benchmark {name!r} not found in {path} "
+            f"(available: {available})"
+        )
     if len(matches) > 1:
-        names = ", ".join(b["name"] for b in matches)
-        sys.exit(f"::error::ambiguous benchmark match for {label} in {path}: {names}")
+        sys.exit(f"::error::benchmark {name!r} appears {len(matches)}x in {path}")
     return matches[0]["stats"]["min"]
 
 
@@ -63,16 +73,9 @@ def read_report(path):
     """Return (fast_seconds, baseline_seconds) from a pytest-benchmark report."""
     with open(path) as fh:
         benchmarks = json.load(fh)["benchmarks"]
-    fast = _min_for(
-        benchmarks, lambda n: "fast_mail_parser" in n, "fast_mail_parser", path
+    return _min_for(benchmarks, GATE_FAST, path), _min_for(
+        benchmarks, GATE_BASELINE, path
     )
-    baseline = _min_for(
-        benchmarks,
-        lambda n: "mail_parser" in n and "fast" not in n,
-        "mail-parser (baseline)",
-        path,
-    )
-    return fast, baseline
 
 
 def emit(summary):
