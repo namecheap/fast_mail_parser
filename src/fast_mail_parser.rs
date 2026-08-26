@@ -53,8 +53,8 @@ impl PyAttachment {
 
 /// A parsed email message exposed to Python.
 ///
-/// Note that [`attachments`](Self::attachments) is **not** limited to file
-/// attachments: it contains every node of the message's MIME tree.
+/// Body parts and [`attachments`](Self::attachments) are disjoint; `multipart/*`
+/// container nodes appear in neither.
 #[pyclass]
 pub struct PyMail {
     #[pyo3(get)]
@@ -65,17 +65,17 @@ pub struct PyMail {
     pub text_html: Vec<String>,
     #[pyo3(get)]
     pub date: String,
-    /// Every node of the message's MIME tree, not just file attachments.
+    /// The message's non-body parts: real attachments and inline resources.
     ///
-    /// This includes the text parts (`text/plain`, `text/html`, whose decoded
-    /// bodies also appear in `text_plain`/`text_html`) and the multipart
-    /// container nodes themselves (e.g. `multipart/mixed`, `multipart/alternative`).
-    /// Container nodes carry their MIME type but have empty `content`. A part is
-    /// only a real file attachment when its `filename` is non-empty.
+    /// Per RFC 2183 a part is body text -- and so absent here -- when it is
+    /// `text/plain` or `text/html` and is not marked `Content-Disposition:
+    /// attachment`. `multipart/*` container nodes are MIME structure and are not
+    /// reported. `filename` may still be empty, which is normal for an inline
+    /// image referenced only by `Content-ID`.
     #[pyo3(get)]
     pub attachments: Vec<PyAttachment>,
     #[pyo3(get)]
-    pub headers: HashMap<String, String>,
+    pub headers: HashMap<String, Vec<String>>,
 }
 
 impl PyMail {

@@ -67,7 +67,7 @@ pub(crate) struct Mail {
     pub(crate) text_html: Vec<String>,
     pub(crate) date: String,
     pub(crate) attachments: Vec<Attachment>,
-    pub(crate) headers: HashMap<String, String>,
+    pub(crate) headers: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -87,15 +87,31 @@ impl<'a> Mail {
 
         let mail = parse_mail(payload)?;
 
-        let headers: HashMap<String, String> = mail
+        // Keep every value for a repeated key, in the order the keys appear.
+        // Collapsing to one value per key kept only the last, discarding all but
+        // the final `Received`, `DKIM-Signature`, `Received-SPF`, ... -- which
+        // made delivery-path tracing and signature verification impossible
+        // (#12, #23).
+        let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+        for header in mail.get_headers() {
+            headers
+                .entry(header.get_key())
+                .or_default()
+                .push(header.get_value());
+        }
+
+        // Read these straight from the parsed headers rather than back out of the
+        // map above, so the dedicated fields do not inherit its representation
+        // (#28). `get_first_value` is the first occurrence, which is the correct
+        // choice for a header that should appear once.
+        let subject = mail
             .get_headers()
-            .into_iter()
-            .map(|h| (h.get_key(), h.get_value()))
-            .collect();
-
-        let subject = headers.get("Subject").map(String::from).unwrap_or_default();
-
-        let date = headers.get("Date").map(String::from).unwrap_or_default();
+            .get_first_value("Subject")
+            .unwrap_or_default();
+        let date = mail
+            .get_headers()
+            .get_first_value("Date")
+            .unwrap_or_default();
 
         let mut attachments = vec![];
         let mut text_plain = vec![];
