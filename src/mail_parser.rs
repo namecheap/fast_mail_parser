@@ -100,7 +100,10 @@ pub(crate) fn parse_many(
             // than a malformed-input case. Resuming the unwind keeps the
             // behaviour identical to the single-message path, where PyO3 turns a
             // panic into a Python exception instead of losing it.
-            .map(|handle| handle.join().unwrap_or_else(std::panic::resume_unwind))
+            .map(|handle| match handle.join() {
+                Ok(results) => results,
+                Err(payload) => std::panic::resume_unwind(payload),
+            })
             .collect()
     });
 
