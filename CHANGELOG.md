@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `parse_many(payloads, threads=0)` now raises `ValueError` instead of silently
+  behaving as `threads=None`. Treating 0 as "the machine's default" hid caller
+  bugs: `threads=os.cpu_count() - 1` on a one-core machine, or an unset config
+  value, quietly got full parallelism. Pass `None` to ask for the default. A
+  negative value already raised `OverflowError` at conversion.
+
 ## [0.7.0] - 2026-08-26
 
 ### Breaking

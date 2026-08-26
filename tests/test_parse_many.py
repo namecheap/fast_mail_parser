@@ -245,3 +245,47 @@ def test__gil_is_released_for_the_duration_of_the_batch():
     assert progressed > 0, (
         "a Python thread made no progress during the batch, so the GIL was held"
     )
+
+
+# --- argument contract -------------------------------------------------------
+
+
+def test__threads_zero_is_rejected():
+    # Silently meaning "the default" would hide a caller bug such as
+    # threads=os.cpu_count() - 1 on a one-core machine.
+    with pytest.raises(ValueError, match="threads must be at least 1"):
+        parse_many([_message("x")], threads=0)
+
+
+def test__negative_threads_is_rejected():
+    # `threads` is unsigned on the Rust side, so this fails at conversion.
+    with pytest.raises(OverflowError):
+        parse_many([_message("x")], threads=-1)
+
+
+def test__absurdly_large_thread_cap_is_harmless():
+    # Workers never outnumber the batch, so this must not try to spawn a billion.
+    results = parse_many([_message("a"), _message("b")], threads=10**9)
+
+    assert [r.subject for r in results] == ["a", "b"]
+
+
+@pytest.mark.parametrize(
+    "bad", [123, None, object()], ids=["int", "None", "object"]
+)
+def test__non_payload_entries_raise_type_error(bad: object):
+    with pytest.raises(TypeError):
+        parse_many([_message("ok"), bad])
+
+
+def test__a_sequence_other_than_a_list_is_accepted():
+    # The signature says list, but any Sequence works; a tuple is the common one.
+    results = parse_many((_message("a"), _message("b")))
+
+    assert [r.subject for r in results] == ["a", "b"]
+
+
+def test__threads_and_raise_on_error_are_keyword_only():
+    # Positional booleans at a call site read poorly, so they are keyword-only.
+    with pytest.raises(TypeError):
+        parse_many([_message("x")], 2)

@@ -292,6 +292,7 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
 /// fail-fast behaviour for callers who prefer it.
 ///
 /// `threads` caps the worker count; the default is the machine's parallelism.
+/// `threads=0` is rejected -- pass `None` to ask for the default.
 ///
 /// Memory: every parsed message is materialised before returning. A batch of ten
 /// thousand one-megabyte mails holds essentially all of it decoded at once, so
@@ -311,7 +312,19 @@ pub fn parse_many(
         .map(|payload| payload_to_bytes(payload, py))
         .collect::<PyResult<_>>()?;
 
-    let workers = threads.and_then(NonZeroUsize::new);
+    // `threads=0` is meaningless, and silently treating it as "the default"
+    // hides a caller bug: `threads=os.cpu_count() - 1` on a one-core machine, or
+    // an unset config value, would quietly get full parallelism instead. Reject
+    // it and let `None` be the way to ask for the default. `threads` is unsigned,
+    // so a negative value already raises OverflowError at conversion.
+    let workers = match threads {
+        Some(0) => {
+            return Err(exceptions::PyValueError::new_err(
+                "threads must be at least 1; pass threads=None for the default",
+            ));
+        }
+        other => other.and_then(NonZeroUsize::new),
+    };
 
     // The whole batch parses with the GIL released, so other Python threads keep
     // running for its full duration rather than per message.

@@ -221,6 +221,7 @@ from fast_mail_parser import ParseError, parse_many
 
 results = parse_many(payloads)              # list[str | bytes] in, results in input order
 results = parse_many(payloads, threads=8)   # cap the workers; default is the machine's
+                                            # threads=0 raises; use None for the default
 ```
 
 Each slot is a `PyMail` **or** a `ParseError` instance — returned, not raised —
