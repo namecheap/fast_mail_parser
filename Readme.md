@@ -261,8 +261,12 @@ messages are usually single-digit KB. For a few very large messages a thread poo
 is currently faster, because the serial copy dominates. Removing that copy is
 tracked in [#96](https://github.com/namecheap/fast_mail_parser/issues/96).
 
-These are ratios on one machine; re-measure for your own mix rather than trusting
-the crossover point.
+The size at which it flips is not portable, and neither is how much the bad case
+costs: the copy competes with memory bandwidth and the parse scales with cores.
+The 200 × 786 KB case above measures **1.5x slower** on that 4-vCPU runner but
+only **1.05x slower** on a 10-core laptop — near enough a wash. So treat the
+table as the shape of the trade-off, and measure your own mix before ruling
+`parse_many` out for large messages.
 
 ### Error handling
 
