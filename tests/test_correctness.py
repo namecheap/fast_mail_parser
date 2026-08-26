@@ -66,8 +66,8 @@ def test__plain_text_round_trip():
     mail = parse_email(_serialize(message))
 
     assert mail.subject == "Plain round trip"
-    assert mail.headers["From"] == "alice@example.com"
-    assert mail.headers["To"] == "bob@example.com"
+    assert mail.headers["From"] == ["alice@example.com"]
+    assert mail.headers["To"] == ["bob@example.com"]
     assert len(mail.text_plain) == 1
     assert "Hello, this is the plain body." in mail.text_plain[0]
     assert mail.text_html == []
@@ -177,7 +177,7 @@ def test__single_valued_header_round_trips(key: str, value: str):
 
     mail = parse_email(_serialize(message))
 
-    assert mail.headers[key] == value
+    assert mail.headers[key] == [value]
 
 
 def test__returns_pymail_for_every_shape():

@@ -23,6 +23,11 @@ class PyAttachment:
 class PyMail:
     """A parsed message.
 
+    ``headers`` maps each header name to **every** value it appeared with, in
+    order, so repeated keys such as ``Received`` or ``DKIM-Signature`` are
+    preserved. Single-valued headers are one-element lists:
+    ``headers["From"] == ["a@example.com"]``.
+
     Body parts and attachments are disjoint. A part is body text -- reaching
     ``text_plain`` or ``text_html`` -- when it is ``text/plain`` or ``text/html``
     and is not marked ``Content-Disposition: attachment``; every other part is an
@@ -37,7 +42,7 @@ class PyMail:
         text_html: list[str],
         date: str,
         attachments: list[PyAttachment],
-        headers: dict[str, str],
+        headers: dict[str, list[str]],
     ) -> None:
         self.subject = subject
         self.text_plain = text_plain

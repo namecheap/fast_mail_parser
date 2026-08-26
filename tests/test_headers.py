@@ -6,7 +6,7 @@ def test__total_number_is_valid(valid_mail: PyMail):
 
 
 def test__header_is_accessible_by_key(valid_mail: PyMail):
-    assert valid_mail.headers['Reply-To'] == 'Red Hat OpenShift <noreply@openshift.com>'
+    assert valid_mail.headers['Reply-To'] == ['Red Hat OpenShift <noreply@openshift.com>']
 
 
 def test__subject_is_available_via_property(valid_mail: PyMail):

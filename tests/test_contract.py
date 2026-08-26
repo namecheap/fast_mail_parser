@@ -68,8 +68,10 @@ def test__pymail_attribute_types(valid_mail: PyMail):
 
     assert isinstance(valid_mail.headers, dict)
     assert all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in valid_mail.headers.items()
+        isinstance(key, str)
+        and isinstance(values, list)
+        and all(isinstance(value, str) for value in values)
+        for key, values in valid_mail.headers.items()
     )
 
     assert isinstance(valid_mail.attachments, list)

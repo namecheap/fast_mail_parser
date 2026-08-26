@@ -120,10 +120,23 @@ Legend:
 | `date` | `str` | Date header (empty string if missing). |
 | `text_plain` | `list[str]` | All `text/plain` bodies. |
 | `text_html` | `list[str]` | All `text/html` bodies. |
-| `headers` | `dict[str, str]` | All message headers. |
+| `headers` | `dict[str, list[str]]` | All values of every header, in order. |
 | `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
 
 Each `PyAttachment` has `mimetype: str`, `filename: str`, and `content: bytes`.
+
+### Headers
+
+`headers` maps each header name to a **list** of every value it appeared with,
+in message order, so repeated fields survive:
+
+```python
+mail.headers["Received"]   # ['from mx1...', 'from mx2...', 'from mx3...']
+mail.headers["From"]       # ['sender@example.com'] -- always a list
+```
+
+`subject` and `date` are read from the parsed headers directly rather than out
+of this map, so they always reflect the first occurrence of their field.
 
 ### Bodies vs. attachments
 
@@ -162,9 +175,16 @@ except ParseError as e:
 print("Subject:", email.subject)
 print("Date:", email.date)
 
-# headers is a dict[str, str].
-for name, value in email.headers.items():
-    print(f"{name}: {value}")
+# headers is a dict[str, list[str]]: every occurrence of a repeated header is
+# kept, in the order it appeared. Single-valued headers are one-element lists.
+for name, values in email.headers.items():
+    for value in values:
+        print(f"{name}: {value}")
+
+# So a delivery path stays intact -- for Received, the first entry is the most
+# recent hop.
+for hop in email.headers.get("Received", []):
+    print("Received:", hop)
 
 # text_plain and text_html are lists of strings (one entry per matching part).
 for body in email.text_plain:

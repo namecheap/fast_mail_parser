@@ -28,8 +28,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Both shapes are common in Outlook-generated mail.
 
+- **`headers` is now `dict[str, list[str]]`.** It was `dict[str, str]`, backed by
+  a Rust `HashMap<String, String>`, so a repeated key kept only its **last**
+  value. Every earlier `Received`, `DKIM-Signature`, `Received-SPF` and so on was
+  silently discarded, which made delivery-path tracing and signature
+  verification impossible (#12, #23). Each key now maps to every value it
+  appeared with, in message order. Single-valued headers are one-element lists,
+  so callers never branch on `str`-vs-`list`:
+
+  ```python
+  mail.headers["Received"]   # ['from mx1...', 'from mx2...', 'from mx3...']
+  mail.headers["From"]       # ['sender@example.com']
+  ```
+
+  Migration: index the list — `mail.headers["From"]` becomes
+  `mail.headers["From"][0]`, or `mail.headers.get("From", [""])[0]` to keep a
+  missing-header fallback.
+
 ### Fixed
 
+- `subject` and `date` are read from the parsed headers directly instead of back
+  out of the collected header map, so they no longer inherit that map's
+  representation and always reflect the first occurrence of their field (#28).
 - `PyAttachment.filename` is read from the `Content-Disposition` `filename`
   parameter, including RFC 2231 extended values (`filename*=utf-8''...`),
   falling back to `Content-Type; name` as before. Attachments that declare a
