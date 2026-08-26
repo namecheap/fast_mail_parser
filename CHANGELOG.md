@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI: the benchmark gate now compares against the base revision** instead of
+  gating an absolute ratio against pure-Python `mail-parser`. Both revisions are
+  built and measured in the same job, so between-runner variance cancels.
+
+  The old gate was measurably unreliable. Four consecutive runs of the same
+  binary in one job spread **0.3%** (1.895-1.902 ms), while the same source
+  across jobs spread **26%** (1.885-2.378 ms) — and `mail-parser` barely moved
+  (14.2-14.5 ms), so the two implementations do not scale together and the ratio
+  moved with the runner's CPU. A 7.0x floor therefore sat inside the noise band:
+  it failed honest PRs, and any floor loose enough to stop flaking would also
+  have missed the ~26% regression class it existed to catch (#120).
+
+  The absolute ratio is still reported and still gated, but only as a loose
+  catastrophic-drift net (5.0x) far below the observed range. The regression
+  threshold against the base is +7%, which is ~20x the measured within-job noise.
+
+
 ## [0.7.0] - 2026-08-26
 
 ### Breaking
