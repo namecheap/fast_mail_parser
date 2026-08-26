@@ -1,3 +1,5 @@
+from datetime import datetime
+
 __all__ = [
     "parse_email",
     "PyMail",
@@ -55,6 +57,11 @@ class PyAttachment:
 class PyMail:
     """A parsed message.
 
+    ``date_parsed`` is ``date`` resolved to a timezone-aware ``datetime`` in UTC,
+    or ``None`` when the header is absent or unparseable. It is computed on
+    access, so reading it is the only cost. The instant is exact; the header's
+    original offset is not retained -- read ``date`` for that.
+
     Address headers are parsed into ``PyAddress`` values, taken from the first
     occurrence of each header. RFC 5322 groups (``To: team: a@x, b@x;``) are
     flattened to their members. An address header that does not parse yields an
@@ -99,6 +106,9 @@ class PyMail:
         self.reply_to = reply_to
         self.attachments = attachments
         self.headers = headers
+
+    @property
+    def date_parsed(self) -> datetime | None: ...
 
 
 class ParseError(Exception):

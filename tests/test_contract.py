@@ -23,6 +23,7 @@ EXPECTED_MAIL_ATTRS = {
     "text_plain",
     "text_html",
     "date",
+    "date_parsed",
     "from_",
     "to",
     "cc",

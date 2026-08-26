@@ -47,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PyMail.date_parsed`** — `date` resolved to a timezone-aware `datetime` in
+  UTC, or `None`. Completes #98. It is a getter computed on access rather than a
+  field built during parsing, so callers that never read it pay nothing.
+
+  Note the failure mode this deliberately avoids: `mailparse::dateparse` returns
+  `Ok(0)` for input it never actually parsed — its loop simply never advances
+  state and the function still returns its initial `0` — so a naive wrapper would
+  report `not a date` as **1970-01-01** instead of `None`. Silently wrong is
+  worse than absent, so a date is only trusted when a recognized month token is
+  present, which the parser cannot reach a real result without. A legitimate
+  epoch-0 date (`Thu, 01 Jan 1970 00:00:00 +0000`) still parses.
 - **A migration guide, `docs/migrating.md`** — covering the 0.6.x -> 0.7.0
   breaking changes and the move from the stdlib `email` module, plus an honest
   list of what this library deliberately does not do (building or mutating
