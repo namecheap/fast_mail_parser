@@ -319,6 +319,20 @@ jobs:
             python .github/scripts/check_benchmark.py head.json
           fi
 
+      - name: Render the cross-library comparison table
+        if: always()
+        run: |
+          # Published in Readme.md and regenerable locally with `make bench-table`.
+          # Emitted here every run so the numbers behind it are never stale
+          # guesses, and so a reader can point at a specific run.
+          {
+            echo "### Cross-library comparison (equivalent work)"
+            echo
+            "$RUNNER_TEMP/venv-head/bin/python" \
+              .github/scripts/bench_table.py head.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          "$RUNNER_TEMP/venv-head/bin/python" .github/scripts/bench_table.py head.json
+
       - name: Upload benchmark reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
