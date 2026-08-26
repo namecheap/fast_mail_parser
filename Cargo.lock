@@ -41,7 +41,7 @@ dependencies = [
 
 [[package]]
 name = "fast_mail_parser"
-version = "0.6.1"
+version = "0.7.0"
 dependencies = [
  "charset",
  "mailparse",

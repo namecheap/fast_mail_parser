@@ -121,9 +121,28 @@ Legend:
 | `text_plain` | `list[str]` | All `text/plain` bodies. |
 | `text_html` | `list[str]` | All `text/html` bodies. |
 | `headers` | `dict[str, str]` | All message headers. |
-| `attachments` | `list[PyAttachment]` | Attachments (see below). |
+| `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
 
 Each `PyAttachment` has `mimetype: str`, `filename: str`, and `content: bytes`.
+
+### Bodies vs. attachments
+
+The two are disjoint — a part appears in exactly one place. Classification
+follows RFC 2183 rather than the media type alone:
+
+- A part is **body text** (`text_plain` / `text_html`) when it is `text/plain`
+  or `text/html` **and** is not marked `Content-Disposition: attachment`. A
+  `Content-Type; name` parameter does not change this — an inline text part
+  stays in the body.
+- Every other part is an **attachment**. That includes a `text/plain` part
+  marked `Content-Disposition: attachment` (its lines are *not* mixed into the
+  body) and inline images referenced by `Content-ID`.
+- `multipart/*` container nodes are MIME structure and appear in neither list.
+
+`filename` comes from the `Content-Disposition` `filename` parameter — including
+RFC 2231 extended values such as `filename*=utf-8''...` — falling back to the
+`Content-Type` `name` parameter. It is `""` when the part declares neither,
+which is normal for inline images.
 
 ```python
 import sys

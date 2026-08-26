@@ -175,6 +175,29 @@ def folded_header():
     return msg
 
 
+def inline_text_with_name_param():
+    # RFC 2183 vs RFC 1341: a text part carrying a Content-Type `name` param but
+    # NO `Content-Disposition: attachment`. A `name` alone must not demote a body
+    # to an attachment -- the part is still inline body text (#25).
+    msg = _base()
+    msg["Subject"] = "Inline text with name param"
+    msg.set_content("This inline part carries a name parameter but is still body text.\n")
+    msg.set_param("name", "notes.txt")
+    return msg
+
+
+def disposition_only_text_attachment():
+    # RFC 2183: a text/plain part whose filename lives only in
+    # Content-Disposition. It is an attachment, not body text -- the disposition
+    # decides, not the media type (#25).
+    msg = _base()
+    msg["Subject"] = "Text attachment via disposition"
+    msg.set_content("The real body.\n")
+    # A str payload yields text/plain; `filename` sets the attachment disposition.
+    msg.add_attachment("log line one\nlog line two\n", filename="log.txt")
+    return _fix_boundaries(msg, "dispatt")
+
+
 BUILDERS = {
     "rfc5322_plain": rfc5322_plain,
     "multipart_alternative": multipart_alternative,
@@ -189,6 +212,8 @@ BUILDERS = {
     "utf8_8bit_body": utf8_8bit_body,
     "empty_body": empty_body,
     "folded_header": folded_header,
+    "inline_text_with_name_param": inline_text_with_name_param,
+    "disposition_only_text_attachment": disposition_only_text_attachment,
 }
 
 

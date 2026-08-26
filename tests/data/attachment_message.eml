@@ -20,7 +20,7 @@ HTML here
 --===============8544575414772382491==
 Content-Type: image/png
 Content-Transfer-Encoding: base64
-Content-Disposition: inline
+Content-Disposition: inline; filename="image.png"
 
 UE5HIGhlcmU=
 --===============8544575414772382491==

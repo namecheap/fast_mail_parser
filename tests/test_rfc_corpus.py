@@ -5,12 +5,15 @@ These tests pin fast_mail_parser's *actual* output per feature so that any drift
 — across releases or native-binding upgrades — is caught. The fixtures are
 generated deterministically by tests/generate_rfc_corpus.py.
 
-Behaviors intentionally locked here (current contract, including quirks):
-- Every node of the MIME tree is reported as an attachment — text parts and the
-  multipart *containers* themselves (containers carry empty content).
-- `filename` is read from the Content-Type `name` parameter, not from
-  Content-Disposition `filename`; attachments declared only via
-  Content-Disposition therefore report an empty filename.
+Behaviors intentionally locked here (current contract):
+- `attachments` holds only real attachments. `multipart/*` container nodes are
+  MIME structure and are not reported; body parts belong to `text_plain` /
+  `text_html`, not to `attachments`.
+- RFC 2183 decides body-vs-attachment: a part is body text when it is
+  `text/plain` or `text/html` and is not marked `Content-Disposition:
+  attachment`. A `Content-Type; name` parameter alone does not demote a body.
+- `filename` prefers the Content-Disposition `filename` parameter (including
+  RFC 2231 extended values) and falls back to Content-Type `name`.
 - str input is decoded lossily (code point -> low byte), so arbitrary `.eml`
   files (which may contain raw UTF-8 under 8BITMIME/SMTPUTF8) are parsed from
   bytes here.
@@ -36,49 +39,49 @@ FOLDED_SUBJECT = (
 #   (subject, n_text_plain, n_text_html, n_attachments, ordered attachment mimetypes)
 CASES = {
     "rfc5322_plain": (
-        "Plain text message", 1, 0, 1, ["text/plain"],
+        "Plain text message", 1, 0, 0, [],
     ),
     "multipart_alternative": (
-        "Alternative parts", 1, 1, 3,
-        ["text/plain", "text/html", "multipart/alternative"],
+        "Alternative parts", 1, 1, 0, [],
     ),
     "multipart_mixed_attachment": (
-        "Message with attachment", 1, 0, 3,
-        ["text/plain", "image/png", "multipart/mixed"],
+        "Message with attachment", 1, 0, 1, ["image/png"],
     ),
     "base64_body": (
-        "Base64 body", 1, 0, 1, ["text/plain"],
+        "Base64 body", 1, 0, 0, [],
     ),
     "quoted_printable_body": (
-        "Quoted-printable body", 1, 0, 1, ["text/plain"],
+        "Quoted-printable body", 1, 0, 0, [],
     ),
     "rfc2047_encoded_subject": (
-        "Café ☕ — déjà vu update", 1, 0, 1, ["text/plain"],
+        "Café ☕ — déjà vu update", 1, 0, 0, [],
     ),
     "rfc2231_param_filename": (
-        "Attachment with encoded filename", 1, 0, 3,
-        ["text/plain", "application/pdf", "multipart/mixed"],
+        "Attachment with encoded filename", 1, 0, 1, ["application/pdf"],
     ),
     "multipart_related": (
-        "Related inline image", 0, 1, 3,
-        ["text/html", "image/png", "multipart/related"],
+        "Related inline image", 0, 1, 1, ["image/png"],
     ),
     "nested_multipart": (
-        "Nested multipart", 1, 1, 5,
-        ["text/plain", "text/html", "multipart/alternative",
-         "application/pdf", "multipart/mixed"],
+        "Nested multipart", 1, 1, 1, ["application/pdf"],
     ),
     "rfc6532_utf8_headers": (
-        "Письмо с UTF-8 заголовками", 1, 0, 1, ["text/plain"],
+        "Письмо с UTF-8 заголовками", 1, 0, 0, [],
     ),
     "utf8_8bit_body": (
-        "8bit UTF-8 body", 1, 0, 1, ["text/plain"],
+        "8bit UTF-8 body", 1, 0, 0, [],
     ),
     "empty_body": (
-        "No body", 1, 0, 1, ["text/plain"],
+        "No body", 1, 0, 0, [],
     ),
     "folded_header": (
-        FOLDED_SUBJECT, 1, 0, 1, ["text/plain"],
+        FOLDED_SUBJECT, 1, 0, 0, [],
+    ),
+    "inline_text_with_name_param": (
+        "Inline text with name param", 1, 0, 0, [],
+    ),
+    "disposition_only_text_attachment": (
+        "Text attachment via disposition", 1, 0, 1, ["text/plain"],
     ),
 }
 
@@ -161,16 +164,56 @@ def test__binary_attachment_survives_base64_round_trip():
     assert png.content[:8] == b"\x89PNG\r\n\x1a\n"  # PNG magic intact after decode
 
 
-def test__filename_is_read_from_content_type_name_not_disposition():
-    # add_attachment sets only Content-Disposition filename; the parser reads the
-    # Content-Type `name` param, so these attachments report empty filenames.
+def test__filename_is_read_from_disposition_and_rfc2231_decoded():
+    # add_attachment sets the filename only in Content-Disposition, here as an
+    # RFC 2231 extended value (filename*=utf-8''...). Both the disposition
+    # lookup and the 2231 decoding must apply.
     mail = _load("rfc2231_param_filename")
     pdf = next(a for a in mail.attachments if a.mimetype == "application/pdf")
-    assert pdf.filename == ""
+    assert pdf.filename == "résumé déjà.pdf"
 
 
-def test__multipart_container_nodes_are_reported_with_empty_content():
-    mail = _load("nested_multipart")
-    containers = [a for a in mail.attachments if a.mimetype.startswith("multipart/")]
-    assert containers, "expected the multipart container nodes to appear"
-    assert all(a.content == b"" for a in containers)
+def test__multipart_container_nodes_are_not_reported():
+    # Container nodes are MIME structure, not content. Reporting them produced
+    # phantom, filename-less attachment entries.
+    for name in ("nested_multipart", "multipart_alternative", "multipart_related"):
+        mail = _load(name)
+        assert not [a for a in mail.attachments if a.mimetype.startswith("multipart/")], (
+            f"{name}: multipart containers must not appear in attachments"
+        )
+
+
+def test__body_parts_are_not_reported_as_attachments():
+    # A plain single-part message has a body and no attachments at all.
+    mail = _load("rfc5322_plain")
+    assert len(mail.text_plain) == 1
+    assert mail.attachments == []
+
+    # An alternative pair yields two bodies and still no attachments.
+    mail = _load("multipart_alternative")
+    assert (len(mail.text_plain), len(mail.text_html)) == (1, 1)
+    assert mail.attachments == []
+
+
+def test__content_type_name_alone_does_not_demote_a_body():
+    # RFC 2183: only an `attachment` disposition makes a part a file. A
+    # Content-Type `name` param on an inline text part must not remove it from
+    # the body -- that silently lost body text.
+    mail = _load("inline_text_with_name_param")
+    assert len(mail.text_plain) == 1
+    assert "still body text" in mail.text_plain[0]
+    assert mail.attachments == []
+
+
+def test__text_attachment_by_disposition_is_not_body():
+    # A text/plain part marked `Content-Disposition: attachment` is a file. Its
+    # bytes must not be concatenated into the body.
+    mail = _load("disposition_only_text_attachment")
+
+    assert len(mail.text_plain) == 1
+    assert "The real body." in mail.text_plain[0]
+    assert "log line one" not in mail.text_plain[0]
+
+    attachment = next(a for a in mail.attachments if a.filename == "log.txt")
+    assert attachment.mimetype == "text/plain"
+    assert b"log line one" in attachment.content

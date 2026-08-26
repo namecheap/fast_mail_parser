@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-26
+
+### Breaking
+
+- **`attachments` now contains only real attachments.** Previously every node of
+  the MIME tree was reported, so body parts and `multipart/*` container nodes
+  appeared alongside genuine files — a one-image message yielded four entries,
+  three of them phantoms with empty filenames and, for containers, empty content
+  (#22). Bodies and attachments are now disjoint: `multipart/*` nodes are MIME
+  structure and appear in neither list. Code that counted `len(attachments)`, or
+  that filtered containers out by hand, will see different numbers.
+- **Body-vs-attachment classification now follows RFC 2183** instead of the media
+  type alone (#25). Two consequences, both previously wrong:
+  - A `text/plain` or `text/html` part marked `Content-Disposition: attachment`
+    is an attachment, and its content is no longer concatenated into
+    `text_plain` / `text_html`. Previously such a part corrupted the body.
+  - An inline text part carrying a `Content-Type; name` parameter stays in the
+    body. Previously a `name` alone removed it, silently losing body text.
+
+  Both shapes are common in Outlook-generated mail.
+
+### Fixed
+
+- `PyAttachment.filename` is read from the `Content-Disposition` `filename`
+  parameter, including RFC 2231 extended values (`filename*=utf-8''...`),
+  falling back to `Content-Type; name` as before. Attachments that declare a
+  filename only via the disposition — which is what `email.message.EmailMessage`
+  emits, and therefore most modern mail — previously reported `""`.
+
 ## [0.6.1] - 2026-08-26
 
 ### Changed
@@ -112,7 +141,8 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.4.0...v0.5.0
