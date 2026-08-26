@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bumped the pinned `encoding_rs` 0.8.30 -> 0.8.35 (lockfile only; `charset`
+  already allowed it via `^0.8.22`). 0.8.30 dates from 2021 and this crate does
+  the charset decoding for every text part, i.e. it runs on untrusted input.
+  0.8.30 also declared only `license-file = "COPYRIGHT"` with no SPDX `license`
+  field, which registries and licence tooling report as non-standard; 0.8.35
+  declares `(Apache-2.0 OR MIT) AND BSD-3-Clause` properly.
 - CI: `ruff.toml` targeted `py39` while `requires-python` is `>= 3.11`, which
   silently narrowed the pyupgrade rules — the lint reported "All checks passed"
   while four findings sat waiting at the correct target. Corrected, and the
