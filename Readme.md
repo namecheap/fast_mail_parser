@@ -32,8 +32,9 @@
 
 A very fast Python library for parsing `.eml` files. It is built on the Rust
 [mailparse](https://github.com/staktrace/mailparse) crate via
-[pyo3](https://github.com/PyO3/pyo3), and parses roughly **7–8x faster** than
-pure-Python implementations.
+[pyo3](https://github.com/PyO3/pyo3), and parses roughly **5–10x faster** than
+pure-Python implementations, depending on the CPU — see
+[Benchmark](#benchmark) for the measured spread and how to reproduce it.
 
 ## Quickstart
 
@@ -96,22 +97,35 @@ release is published via PyPI Trusted Publishing with PEP 740 attestations.
 
 ## Benchmark
 
-Parsing the same message, `fast_mail_parser` against the pure-Python
-`mail-parser`. CI enforces a floor of 7x on every pull request, so this margin
-is a gate rather than a claim.
+All three libraries asked for the **same result** — subject, both body lists, and
+attachments with their payloads decoded — on the same message:
 
-```
- -------------------------------------------------------------------------------------------- benchmark: 2 tests -------------------------------------------------------------------------------------------
-Name (time in ms)                              Min                Max               Mean            StdDev             Median               IQR            Outliers       OPS            Rounds  Iterations
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-test__fast_mail_parser___parse_message      1.8136 (1.0)       1.8938 (1.0)       1.8426 (1.0)      0.0176 (1.0)       1.8465 (1.0)      0.0277 (1.0)         180;0  542.7141 (1.0)         450           1
-test__mail_parser___parse_message          14.5583 (8.03)     15.8571 (8.37)     15.0264 (8.16)     0.2368 (13.49)    14.9702 (8.11)     0.2887 (10.42)         5;1   66.5495 (0.12)         32           1
------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Library | Work performed | Min time | Relative |
+| --- | --- | --- | --- |
+| **fast_mail_parser** | parse + decode bodies + decode attachments | 1.40 ms | 1.00x |
+| mail-parser | `from_string` + `.parse()` + read attributes | 11.90 ms | 8.50x |
+| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 14.01 ms | 10.01x |
 
-Legend:
-  Outliers: 1 Standard Deviation from Mean; 1.5 IQR (InterQuartile Range) from 1st Quartile and 3rd Quartile.
-  OPS: Operations Per Second, computed as 1 / Mean
-```
+Corpus: `tests/data/large_message.eml` (multipart/mixed, 6 MIME parts, 2 base64
+attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`),
+mail-parser 3.15.0, minimum of 45+ rounds.
+
+**These ratios move with the hardware, so treat them as a magnitude rather than a
+constant.** The identical comparison on an Apple Silicon laptop gives 5.25x and
+6.42x instead of 8.50x and 10.01x: the interpreted parsers and the Rust extension
+do not scale together across CPUs. Regenerate the table for your own machine with
+`make bench-table`, which prints its own methodology line; CI also renders it
+into the job summary of every benchmark run.
+
+Two things this table deliberately does *not* do:
+
+- It does not quote the CI gate's numbers. That gate compares a revision against
+  its base rather than against another library, precisely because absolute
+  cross-implementation ratios are unstable between machines — they were observed
+  to swing ~26% between CI runners while within-run noise was ~0.3%.
+- It does not reuse the gate's mail-parser baseline, which measures
+  `MailParser.from_string` alone. That call never invokes `.parse()`, so it is a
+  stable number for regression detection but not a fair cross-library figure.
 
 ## Usage
 

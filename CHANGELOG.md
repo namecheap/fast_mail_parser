@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An honest cross-library benchmark table** in the README, comparing
+  fast_mail_parser, mail-parser and the stdlib `email` module on *equivalent
+  work* — each asked for the same result, with a "work performed" column so the
+  comparison can be checked rather than trusted. Completes #103.
+
+  This corrected a mislabelled claim. The long-standing "~8x faster than
+  mail-parser" figure came from a benchmark calling `MailParser.from_string`,
+  which never invokes `.parse()` — so it timed a lazy structural scan, not
+  mail-parser's own logic. The claim turned out not to be inflated (that call
+  dominates the cost anyway), but it was measuring the wrong thing. The published
+  ratios now state the machine they came from, and note that the same comparison
+  yields 5.25x/6.42x on arm64 versus 8.50x/10.01x on CI's x86_64.
+
+  Regenerate with `make bench-table`; CI also renders the table into the
+  benchmark job summary on every run.
+- CI: the benchmark gate selects its two benchmarks by exact name rather than by
+  substring. A second benchmark whose name contained `fast_mail_parser` — such as
+  one added for the comparison table — previously made the selection ambiguous
+  and failed the gate instead of being ignored.
 - **A differential compatibility suite against the stdlib `email` module**
   (`tests/test_stdlib_parity.py`) plus `docs/compatibility.md` (part of #103).
   Both parsers run over the whole fixture corpus and are compared on nine
