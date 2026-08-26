@@ -26,7 +26,13 @@ EXPECTED_MAIL_ATTRS = {
     "attachments",
     "headers",
 }
-EXPECTED_ATTACHMENT_ATTRS = {"mimetype", "content", "filename"}
+EXPECTED_ATTACHMENT_ATTRS = {
+    "mimetype",
+    "content",
+    "filename",
+    "content_id",
+    "disposition",
+}
 
 # First line starts with whitespace, so it is an overhanging continuation with
 # no preceding header key — mailparse rejects this, surfacing as ParseError.

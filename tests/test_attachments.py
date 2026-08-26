@@ -1,4 +1,4 @@
-from fast_mail_parser import PyMail
+from fast_mail_parser import PyMail, parse_email
 
 
 def test__attachments_are_available(attachment_mail: PyMail):
@@ -34,3 +34,39 @@ def test__expected_attachments_are_present(large_mail: PyMail):
     attachments = [a for a in large_mail.attachments if a.filename in expected_attachment_names]
 
     assert len(attachments) == 2
+
+
+def test__content_id_is_none_when_absent(attachment_mail: PyMail):
+    # The fixture's PNG declares a disposition but no Content-ID.
+    attachment = attachment_mail.attachments[0]
+
+    assert attachment.content_id is None
+    assert attachment.disposition == "inline"
+
+
+def test__disposition_is_none_when_the_header_is_absent():
+    # An absent Content-Disposition is reported distinctly from an explicit
+    # `inline` -- mailparse defaults its parsed disposition to Inline, so the two
+    # would otherwise be indistinguishable.
+    raw = (
+        b"Subject: no disposition\r\n"
+        b"MIME-Version: 1.0\r\n"
+        b'Content-Type: multipart/mixed; boundary="b1"\r\n'
+        b"\r\n"
+        b"--b1\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"\r\n"
+        b"body\r\n"
+        b"--b1\r\n"
+        b"Content-Type: image/png\r\n"
+        b"Content-Transfer-Encoding: base64\r\n"
+        b"\r\n"
+        b"UE5HIGhlcmU=\r\n"
+        b"--b1--\r\n"
+    )
+    mail = parse_email(raw)
+
+    png = next(a for a in mail.attachments if a.mimetype == "image/png")
+    assert png.disposition is None
+    assert png.content_id is None
+    assert png.content == b"PNG here"

@@ -45,6 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mail.headers["From"][0]`, or `mail.headers.get("From", [""])[0]` to keep a
   missing-header fallback.
 
+### Added
+
+- `PyAttachment.content_id` — the part's `Content-ID` with angle brackets
+  stripped, or `None`. RFC 2392 `cid:` URLs reference that bracket-less form, so
+  resolving the inline images an HTML body points at is now a dictionary lookup.
+  It was previously impossible: the value was parsed and discarded at the FFI
+  boundary (#98).
+- `PyAttachment.disposition` — the raw `Content-Disposition` token, typically
+  `"inline"` or `"attachment"`, or `None` when the part declares no such header.
+  An absent header is reported distinctly from an explicit `inline`, which
+  mailparse's parsed value alone cannot express since it defaults to `Inline`
+  (#98).
+
 ### Fixed
 
 - `subject` and `date` are read from the parsed headers directly instead of back
