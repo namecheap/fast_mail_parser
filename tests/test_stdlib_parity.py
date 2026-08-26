@@ -24,8 +24,15 @@ import pytest
 
 from fast_mail_parser import parse_email
 
-FIXTURES = sorted(
-    glob.glob(os.path.join(os.path.dirname(__file__), "data", "rfc", "*.eml"))
+_DATA = os.path.join(os.path.dirname(__file__), "data")
+
+# The generated RFC corpus plus the hand-written fixtures, which are closer to
+# real-world mail and so likelier to surface a genuine divergence.
+# invalid_message.eml is excluded: it exists to fail parsing.
+FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
+    path
+    for path in glob.glob(os.path.join(_DATA, "*.eml"))
+    if os.path.basename(path) != "invalid_message.eml"
 )
 
 # (fixture, dimension) -> why the two legitimately differ.
@@ -70,7 +77,37 @@ def _stdlib_view(raw: bytes) -> dict[str, object]:
         "text_html": tuple(html),
         "attachments": sorted(attachments),
         "headers": sorted((k, str(v)) for k, v in message.items()),
+        "from": _stdlib_addresses(message, "From")[:1],
+        "to": _stdlib_addresses(message, "To"),
+        "cc": _stdlib_addresses(message, "Cc"),
+        "date": _stdlib_date(message),
     }
+
+
+def _stdlib_addresses(message, key: str) -> list[tuple[str | None, str]]:
+    """Mailboxes for one address header. `.addresses` already flattens groups."""
+    header = message[key]
+    if header is None:
+        return []
+    try:
+        return [
+            (address.display_name or None, address.addr_spec)
+            for address in header.addresses
+        ]
+    except (AttributeError, ValueError):
+        # A header the stdlib could not parse structurally.
+        return []
+
+
+def _stdlib_date(message) -> float | None:
+    header = message["Date"]
+    if header is None:
+        return None
+    try:
+        parsed = header.datetime
+    except (AttributeError, ValueError):
+        return None
+    return parsed.timestamp() if parsed is not None else None
 
 
 def _fmp_view(raw: bytes) -> dict[str, object]:
@@ -85,10 +122,28 @@ def _fmp_view(raw: bytes) -> dict[str, object]:
         "headers": sorted(
             (name, value) for name, values in mail.headers.items() for value in values
         ),
+        "from": (
+            [(mail.from_.display_name, mail.from_.address)] if mail.from_ else []
+        ),
+        "to": [(a.display_name, a.address) for a in mail.to],
+        "cc": [(a.display_name, a.address) for a in mail.cc],
+        "date": (
+            mail.date_parsed.timestamp() if mail.date_parsed is not None else None
+        ),
     }
 
 
-DIMENSIONS = ("subject", "text_plain", "text_html", "attachments", "headers")
+DIMENSIONS = (
+    "subject",
+    "text_plain",
+    "text_html",
+    "attachments",
+    "headers",
+    "from",
+    "to",
+    "cc",
+    "date",
+)
 
 
 def _render(value: object) -> str:
