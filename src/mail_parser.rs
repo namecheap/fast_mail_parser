@@ -104,8 +104,14 @@ impl<'a> Mail {
         // map above, so the dedicated fields do not inherit its representation
         // (#28). `get_first_value` is the first occurrence, which is the correct
         // choice for a header that should appear once.
-        let subject = mail.get_headers().get_first_value("Subject").unwrap_or_default();
-        let date = mail.get_headers().get_first_value("Date").unwrap_or_default();
+        let subject = mail
+            .get_headers()
+            .get_first_value("Subject")
+            .unwrap_or_default();
+        let date = mail
+            .get_headers()
+            .get_first_value("Date")
+            .unwrap_or_default();
 
         let mut attachments = vec![];
         let mut text_plain = vec![];

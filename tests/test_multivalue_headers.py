@@ -94,7 +94,11 @@ def test__repeated_header_in_real_fixture_is_preserved(attachment_mail: PyMail):
 def test__subject_and_date_are_independent_of_the_headers_map():
     # subject/date are read from the parsed headers directly, so a duplicated
     # Subject cannot make them disagree with the first occurrence.
-    raw = "Subject: the real one\r\nSubject: a later duplicate\r\nDate: Mon, 01 Jan 2024 12:00:00 +0000"
+    raw = (
+        "Subject: the real one\r\n"
+        "Subject: a later duplicate\r\n"
+        "Date: Mon, 01 Jan 2024 12:00:00 +0000"
+    )
     mail = parse_email(_build(raw))
 
     assert mail.subject == "the real one"
