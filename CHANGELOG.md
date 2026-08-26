@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`parse_many`** — batch parsing in one FFI call, in parallel, results in input
+  order (#96). Each slot is a `PyMail` or a `ParseError` *instance*, returned
+  rather than raised, so one malformed message does not cost the caller the rest
+  of the batch; `raise_on_error=True` restores fail-fast. `threads` caps the
+  worker count. The GIL is released for the whole batch rather than per message.
+
+  Implemented on `std::thread::scope` with a shared atomic cursor rather than a
+  thread-pool dependency: it adds nothing to the lockfile or the licence
+  allowlist, and the cursor gives dynamic work distribution, which is the
+  property that matters when message sizes are uneven — static chunking stalls a
+  worker that draws several large messages.
+
+  Note that every parsed message is materialised before returning, so large
+  workloads should be chunked at the caller.
 - **A `ParseError` hierarchy** (part of #100): `HeaderParseError`,
   `MimeStructureError` and `DecodeError`, all inheriting from `ParseError` so
   `except ParseError` keeps catching everything. Failures are categorised where
