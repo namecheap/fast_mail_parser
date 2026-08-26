@@ -47,6 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed address fields on `PyMail`:** `from_` (a `PyAddress` or `None`) plus
+  `to`, `cc`, `bcc` and `reply_to` (lists of `PyAddress`), each with
+  `display_name: str | None` and `address: str`. `mailparse` already parsed these
+  and the binding layer discarded them, leaving every consumer to dig through
+  `headers` and hand-roll RFC 5322 address parsing — display names, quoted
+  strings containing commas, groups, comments — which is the classic thing to get
+  wrong in a one-off regex (#98).
+
+  RFC 5322 groups are flattened to their member mailboxes. An address header that
+  does not parse yields an empty list (or `None`) rather than raising, so a
+  malformed `To:` cannot fail an otherwise good message; the raw value stays in
+  `headers`. Parsing goes through `addrparse_header` rather than the string form,
+  so an RFC 2047 display name that decodes to something containing a comma or
+  angle bracket cannot corrupt the address split.
 - `PyAttachment.content_id` — the part's `Content-ID` with angle brackets
   stripped, or `None`. RFC 2392 `cid:` URLs reference that bracket-less form, so
   resolving the inline images an HTML body points at is now a dictionary lookup.
