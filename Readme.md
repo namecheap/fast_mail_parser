@@ -118,6 +118,8 @@ Legend:
 | --- | --- | --- |
 | `subject` | `str` | Subject header (empty string if missing). |
 | `date` | `str` | Date header (empty string if missing). |
+| `from_` | `PyAddress \| None` | The `From` mailbox. Named `from_`; `from` is a keyword. |
+| `to` / `cc` / `bcc` / `reply_to` | `list[PyAddress]` | Recipients, groups flattened. |
 | `text_plain` | `list[str]` | All `text/plain` bodies. |
 | `text_html` | `list[str]` | All `text/html` bodies. |
 | `headers` | `dict[str, list[str]]` | All values of every header, in order. |
@@ -132,6 +134,26 @@ Each `PyAttachment` has:
 | `content` | `bytes` | Decoded bytes, transfer-encoding undone. |
 | `content_id` | `str \| None` | `Content-ID` with angle brackets stripped. |
 | `disposition` | `str \| None` | Raw `Content-Disposition` token, or `None` if absent. |
+
+### Addresses
+
+Address headers are parsed rather than handed back as strings — RFC 5322 address
+syntax (display names, quoted strings containing commas, groups, comments) is
+exactly what hand-rolled regexes get wrong:
+
+```python
+mail.from_.display_name   # 'Jane Doe'  (None for a bare address)
+mail.from_.address        # 'jane@example.com'
+
+[a.address for a in mail.to]   # ['a@example.com', 'b@example.com']
+```
+
+- RFC 5322 groups (`To: team: a@x, b@x;`) are **flattened** to their member
+  mailboxes; the group name is structure and is not exposed.
+- RFC 2047 encoded display names are decoded, including inside quoted names.
+- A header that does not parse yields an empty list (or `None` for `from_`)
+  rather than raising — a malformed `To:` never fails an otherwise good message,
+  and the raw value stays in `headers`.
 
 ### Headers
 

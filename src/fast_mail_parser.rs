@@ -23,6 +23,29 @@ use std::collections::HashMap;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
+/// One mailbox from an address header, exposed to Python.
+#[pyclass(skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyAddress {
+    /// The display name, or `None` when the header carries a bare address.
+    ///
+    /// RFC 2047 encoded-words are decoded, so a non-ASCII name arrives readable.
+    #[pyo3(get)]
+    pub display_name: Option<String>,
+    /// The `addr-spec` -- the `local@domain` part, without angle brackets.
+    #[pyo3(get)]
+    pub address: String,
+}
+
+impl PyAddress {
+    pub(crate) fn from_address(address: mail_parser::Address) -> Self {
+        PyAddress {
+            display_name: address.display_name,
+            address: address.address,
+        }
+    }
+}
+
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyAttachment {
@@ -80,6 +103,23 @@ pub struct PyMail {
     pub text_html: Vec<String>,
     #[pyo3(get)]
     pub date: String,
+    /// The `From` mailbox, or `None` when the header is absent or unparseable.
+    ///
+    /// Named `from_` because `from` is a Python keyword.
+    #[pyo3(get)]
+    pub from_: Option<PyAddress>,
+    /// `To` recipients. RFC 5322 groups are flattened to their members.
+    #[pyo3(get)]
+    pub to: Vec<PyAddress>,
+    /// `Cc` recipients, flattened as `to` is.
+    #[pyo3(get)]
+    pub cc: Vec<PyAddress>,
+    /// `Bcc` recipients, flattened as `to` is. Usually empty on received mail.
+    #[pyo3(get)]
+    pub bcc: Vec<PyAddress>,
+    /// `Reply-To` mailboxes, flattened as `to` is.
+    #[pyo3(get)]
+    pub reply_to: Vec<PyAddress>,
     /// The message's non-body parts: real attachments and inline resources.
     ///
     /// Per RFC 2183 a part is body text -- and so absent here -- when it is
@@ -100,6 +140,15 @@ impl PyMail {
             text_plain: mail.text_plain,
             text_html: mail.text_html,
             date: mail.date,
+            from_: mail.from_.map(PyAddress::from_address),
+            to: mail.to.into_iter().map(PyAddress::from_address).collect(),
+            cc: mail.cc.into_iter().map(PyAddress::from_address).collect(),
+            bcc: mail.bcc.into_iter().map(PyAddress::from_address).collect(),
+            reply_to: mail
+                .reply_to
+                .into_iter()
+                .map(PyAddress::from_address)
+                .collect(),
             attachments: mail
                 .attachments
                 .into_iter()
@@ -162,6 +211,7 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email, m)?)?;
     m.add_class::<PyMail>()?;
     m.add_class::<PyAttachment>()?;
+    m.add_class::<PyAddress>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;
 
     Ok(())

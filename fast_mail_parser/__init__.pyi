@@ -2,8 +2,22 @@ __all__ = [
     "parse_email",
     "PyMail",
     "PyAttachment",
+    "PyAddress",
     "ParseError",
 ]
+
+
+class PyAddress:
+    """One mailbox from an address header.
+
+    ``display_name`` is ``None`` when the header carries a bare address. RFC 2047
+    encoded-words are decoded, so a non-ASCII name arrives readable.
+    ``address`` is the ``addr-spec`` -- ``local@domain``, without angle brackets.
+    """
+
+    def __init__(self, display_name: str | None, address: str) -> None:
+        self.display_name = display_name
+        self.address = address
 
 class PyAttachment:
     """A non-body MIME part: a real attachment or an inline resource.
@@ -41,6 +55,13 @@ class PyAttachment:
 class PyMail:
     """A parsed message.
 
+    Address headers are parsed into ``PyAddress`` values, taken from the first
+    occurrence of each header. RFC 5322 groups (``To: team: a@x, b@x;``) are
+    flattened to their members. An address header that does not parse yields an
+    empty list (or ``None`` for ``from_``) rather than raising -- a malformed
+    ``To:`` must not fail an otherwise good message, and the raw value stays
+    available through ``headers``.
+
     ``headers`` maps each header name to **every** value it appeared with, in
     order, so repeated keys such as ``Received`` or ``DKIM-Signature`` are
     preserved. Single-valued headers are one-element lists:
@@ -59,6 +80,11 @@ class PyMail:
         text_plain: list[str],
         text_html: list[str],
         date: str,
+        from_: PyAddress | None,
+        to: list[PyAddress],
+        cc: list[PyAddress],
+        bcc: list[PyAddress],
+        reply_to: list[PyAddress],
         attachments: list[PyAttachment],
         headers: dict[str, list[str]],
     ) -> None:
@@ -66,6 +92,11 @@ class PyMail:
         self.text_plain = text_plain
         self.text_html = text_html
         self.date = date
+        self.from_ = from_
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.reply_to = reply_to
         self.attachments = attachments
         self.headers = headers
 

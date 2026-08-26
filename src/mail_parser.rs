@@ -87,12 +87,66 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
     })
 }
 
+/// One mailbox from an address header.
+#[derive(Debug, Clone)]
+pub(crate) struct Address {
+    pub(crate) display_name: Option<String>,
+    pub(crate) address: String,
+}
+
+impl Address {
+    fn from_single(info: &SingleInfo) -> Self {
+        Self {
+            display_name: info.display_name.clone(),
+            address: info.addr.clone(),
+        }
+    }
+}
+
+/// Parse one address header into a flat list of mailboxes.
+///
+/// RFC 5322 groups (`To: team: a@x, b@x;`) are flattened to their members: the
+/// group name is structure, and callers want the mailboxes.
+///
+/// Takes the header rather than its value so `addrparse_header` can tokenize
+/// RFC 2047 encoded-words separately from the address syntax. Parsing an
+/// already-decoded string would let a decoded display name containing `,` or
+/// `<` corrupt the address split.
+///
+/// A header that fails to parse yields an empty list rather than an error --
+/// mailparse rejects an address with no `@`, and a malformed `To:` must not fail
+/// an otherwise good message. The raw value stays available through `headers`.
+fn parse_addresses(header: Option<&MailHeader<'_>>) -> Vec<Address> {
+    let Some(header) = header else {
+        return Vec::new();
+    };
+    let Ok(parsed) = addrparse_header(header) else {
+        return Vec::new();
+    };
+
+    let mut addresses = Vec::new();
+    for entry in parsed.iter() {
+        match entry {
+            MailAddr::Single(info) => addresses.push(Address::from_single(info)),
+            MailAddr::Group(group) => {
+                addresses.extend(group.addrs.iter().map(Address::from_single));
+            }
+        }
+    }
+    addresses
+}
+
 #[derive(Debug)]
 pub(crate) struct Mail {
     pub(crate) subject: String,
     pub(crate) text_plain: Vec<String>,
     pub(crate) text_html: Vec<String>,
     pub(crate) date: String,
+    pub(crate) from_: Option<Address>,
+    pub(crate) to: Vec<Address>,
+    pub(crate) cc: Vec<Address>,
+    pub(crate) bcc: Vec<Address>,
+    pub(crate) reply_to: Vec<Address>,
     pub(crate) attachments: Vec<Attachment>,
     pub(crate) headers: HashMap<String, Vec<String>>,
 }
@@ -141,6 +195,17 @@ impl<'a> Mail {
             .get_headers()
             .get_first_value("Date")
             .unwrap_or_default();
+
+        // Address headers are parsed from their first occurrence, like Subject
+        // and Date. `From` is a single mailbox in practice, so it is exposed as
+        // one value; the first mailbox is taken if a message declares several.
+        let from_ = parse_addresses(mail.get_headers().get_first_header("From"))
+            .into_iter()
+            .next();
+        let to = parse_addresses(mail.get_headers().get_first_header("To"));
+        let cc = parse_addresses(mail.get_headers().get_first_header("Cc"));
+        let bcc = parse_addresses(mail.get_headers().get_first_header("Bcc"));
+        let reply_to = parse_addresses(mail.get_headers().get_first_header("Reply-To"));
 
         let mut attachments = vec![];
         let mut text_plain = vec![];
@@ -210,6 +275,11 @@ impl<'a> Mail {
             text_plain,
             text_html,
             date,
+            from_,
+            to,
+            cc,
+            bcc,
+            reply_to,
             attachments,
             headers,
         })
