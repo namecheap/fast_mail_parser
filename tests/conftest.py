@@ -41,6 +41,24 @@ def valid_message(read_mail: Callable) -> str:
 
 @pytest.fixture
 def invalid_message(read_mail: Callable) -> str:
+    """A malformed real-world message that nonetheless PARSES.
+
+    The name is misleading and has cost real time: `parse_email` does not raise
+    on this file. It is malformed in that its header block is never terminated --
+    a folded continuation line (` hello`) is followed directly by the MIME
+    boundary with no blank line between them.
+
+    The consequence is silent: the boundary is consumed as a header field, so the
+    `multipart/alternative` declared in Content-Type finds zero parts and the body
+    disappears. `text_plain` comes back empty and `headers` contains one entry
+    whose key is the boundary delimiter. The stdlib recovers the body; we do not.
+    Tracked in #150.
+
+    So this is not a substitute for a parse failure. Use an inline payload with a
+    broken transfer encoding for that -- see `tests/test_error_taxonomy.py`.
+    The stdlib-parity suite excludes this fixture for the same reason: the two
+    parsers disagree about it rather than either rejecting it.
+    """
     return read_mail('tests/data/invalid_message.eml')
 
 
