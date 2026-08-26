@@ -12,6 +12,13 @@
 # the fast compiler and keeps the 7.0x floor honest instead of lowering it.
 #
 # Before unpinning, benchmark the candidate toolchain and confirm it clears the
-# floor. `cargo audit` intentionally still runs on current stable.
+# floor.
+#
+# Precedence, verified in CI: this file beats dtolnay/rust-toolchain's
+# `toolchain:` input, and an explicit RUSTUP_TOOLCHAIN env var beats this file.
+# So a job requesting a different toolchain here still gets 1.97.1 — and if it
+# needs components (rustfmt, clippy) it must request them for 1.97.1 or cargo
+# reports them "not installed". `cargo audit` intentionally opts out via
+# RUSTUP_TOOLCHAIN=stable, so it audits against current stable.
 [toolchain]
 channel = "1.97.1"
