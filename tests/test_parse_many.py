@@ -65,8 +65,9 @@ def test__accepts_mixed_str_and_bytes():
 
 _DATA = os.path.join(os.path.dirname(__file__), "data")
 
-# Every real fixture. invalid_message.eml is excluded here and exercised
-# separately below, since it exists to fail parsing.
+# Every real fixture. invalid_message.eml is excluded because the two parsers
+# disagree about it -- it is malformed in a way both accept but interpret
+# differently -- not because it fails to parse; it does parse.
 CORPUS = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
     path
     for path in glob.glob(os.path.join(_DATA, "*.eml"))
@@ -132,10 +133,12 @@ def test__chunking_a_batch_changes_nothing():
     assert whole == chunked
 
 
-def test__an_unparseable_fixture_lands_in_its_own_slot():
-    invalid = open(os.path.join(_DATA, "invalid_message.eml"), "rb").read()
+def test__an_unparseable_payload_lands_in_its_own_slot_amid_real_messages():
+    # BROKEN rather than tests/data/invalid_message.eml: despite its name that
+    # fixture parses successfully (see issue filed from #149), so it cannot
+    # stand in for a parse failure.
     good = open(CORPUS[0], "rb").read()
-    payloads = [good, invalid, good]
+    payloads = [good, BROKEN, good]
 
     results = parse_many(payloads)
 

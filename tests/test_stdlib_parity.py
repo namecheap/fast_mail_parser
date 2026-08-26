@@ -28,7 +28,10 @@ _DATA = os.path.join(os.path.dirname(__file__), "data")
 
 # The generated RFC corpus plus the hand-written fixtures, which are closer to
 # real-world mail and so likelier to surface a genuine divergence.
-# invalid_message.eml is excluded: it exists to fail parsing.
+# invalid_message.eml is excluded, but NOT because it fails to parse -- despite
+# the name, both parsers accept it. It is a real-world message malformed such
+# that the two disagree on the body and the header set, which is a documented
+# divergence to classify rather than a fixture to compare blindly.
 FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
     path
     for path in glob.glob(os.path.join(_DATA, "*.eml"))
