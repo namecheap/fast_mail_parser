@@ -1,8 +1,9 @@
 [project]
-name = "fast_mail_parser"
+name = "fast-mail-parser-ng"
 dynamic = ["version"]
 description = "Very fast Python library for .eml files parsing."
 authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]
+maintainers = [{ name = "Namecheap" }]
 keywords = ["parser", "email", "rfc822", "mime", "maildir"]
 requires-python = ">= 3.11"
 readme = "Readme.md"
@@ -37,4 +38,5 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
+module-name = "fast_mail_parser.fast_mail_parser"
 sdist-include = ["src/*"]

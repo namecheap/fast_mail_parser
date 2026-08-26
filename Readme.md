@@ -1,8 +1,8 @@
 # fast_mail_parser
 
 ![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
-[![PyPI version](https://badge.fury.io/py/fast-mail-parser.svg)](https://badge.fury.io/py/fast-mail-parser)
-[![Downloads](https://pepy.tech/badge/fast-mail-parser)](https://pepy.tech/project/fast-mail-parser)
+[![PyPI version](https://badge.fury.io/py/fast-mail-parser-ng.svg)](https://badge.fury.io/py/fast-mail-parser-ng)
+[![Downloads](https://pepy.tech/badge/fast-mail-parser-ng)](https://pepy.tech/project/fast-mail-parser-ng)
 
 fast_mail_parser is a Python library for .eml files parsing.
 The main benefit is a performance: the library is much faster than python implementations.
@@ -26,11 +26,21 @@ Legend:
 
 ## Installation
 
-Use the package manager [pip](https://pypi.org/project/fast_mail_parser/) to install fast_mail_parser.
+Use the package manager [pip](https://pypi.org/project/fast-mail-parser-ng/) to install fast_mail_parser.
 
 ```bash
-pip install fast-mail-parser
+pip install fast-mail-parser-ng
 ```
+
+> **Note on the package name.** The distribution is `fast-mail-parser-ng`, but
+> the import path is plain `fast_mail_parser` — so only your requirements file
+> changes, never your code.
+>
+> The `fast-mail-parser` name on PyPI is a different, unmaintained upload
+> stuck at 0.2.5 (June 2022). It predates this repository's current
+> maintenance and we cannot publish to it; see
+> [CHANGELOG](CHANGELOG.md) for the full story. Install `fast-mail-parser-ng`
+> to get the maintained library.
 
 Wheels target the CPython stable ABI (`cp311-abi3`): one wheel per platform
 covers every supported CPython version, including versions released after the
