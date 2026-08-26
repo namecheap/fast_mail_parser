@@ -14,18 +14,18 @@ Scope and rationale:
   attachment count / mimetype / raw content bytes, and ordinary single-valued
   header values.
 
-Characterized quirks (current parser behavior, intentionally pinned):
-- Every MIME node is reported as an attachment, including the text parts and
-  the multipart *container* nodes (containers carry empty content). So the
-  attachment list length is the number of MIME nodes, not just the "real"
-  file attachments. Tests below filter by mimetype rather than asserting a bare
-  ``len(attachments)`` for multipart messages.
-- ``filename`` is read from the Content-Type ``name`` parameter, not from
-  Content-Disposition ``filename``. ``EmailMessage.add_attachment`` emits the
-  filename ONLY via Content-Disposition (no Content-Type ``name`` param), so for
-  these stdlib-built messages the parser reports ``filename == ""`` even though
-  the attachment content round-trips exactly. Tests assert that observed
-  behavior rather than expecting the disposition filename to surface.
+Characterized behavior (current parser contract, intentionally pinned):
+- ``attachments`` holds only real attachments. ``multipart/*`` container nodes
+  are MIME structure and are not reported, and body parts belong to
+  ``text_plain`` / ``text_html``. So a multipart/alternative message has an
+  empty attachment list.
+- RFC 2183 decides body-vs-attachment: a part is body text when it is
+  ``text/plain`` or ``text/html`` and is not marked ``Content-Disposition:
+  attachment``. ``EmailMessage.add_attachment`` always marks parts
+  ``attachment``, so even its text/plain parts are attachments, not body.
+- ``filename`` prefers the Content-Disposition ``filename`` parameter and falls
+  back to Content-Type ``name``. ``add_attachment`` emits only the former, and
+  it surfaces correctly.
 - Stdlib bodies are emitted with a trailing newline; the parser preserves it,
   so body comparisons use membership / ``strip`` rather than strict equality.
 """
@@ -96,11 +96,9 @@ def test__multipart_alternative_round_trip():
     assert len(mail.text_html) == 1
     assert html in mail.text_html[0]
 
-    # Container node is reported as an attachment alongside the two text nodes.
-    mimetypes = [attachment.mimetype for attachment in mail.attachments]
-    assert "text/plain" in mimetypes
-    assert "text/html" in mimetypes
-    assert "multipart/alternative" in mimetypes
+    # Both text parts are bodies and the container is MIME structure, so nothing
+    # is reported as an attachment.
+    assert mail.attachments == []
 
 
 # --- multipart/mixed with a binary attachment -------------------------------
@@ -127,9 +125,9 @@ def test__attachment_round_trip_preserves_content_and_mimetype():
 
     attachment = _attachment_by_mimetype(mail, "application/octet-stream")
     assert attachment.content == payload  # exact bytes survive base64 round trip
-    # add_attachment emits the filename via Content-Disposition only; the parser
-    # reads it from the Content-Type `name` param, so it surfaces as empty here.
-    assert attachment.filename == ""
+    # add_attachment emits the filename via Content-Disposition only, which the
+    # parser now reads (RFC 2183).
+    assert attachment.filename == "payload.bin"
 
 
 def test__text_attachment_content_round_trips():
@@ -148,14 +146,15 @@ def test__text_attachment_content_round_trips():
 
     mail = parse_email(_serialize(message))
 
-    # The disposition filename is not surfaced (see module docstring), so the
-    # attachment is located by its distinct decoded content, not by filename.
-    text_contents = [
-        a.content.decode("utf-8")
-        for a in mail.attachments
-        if a.mimetype == "text/plain"
-    ]
-    assert body in text_contents
+    # `add_attachment` marks the part `Content-Disposition: attachment`, so this
+    # text/plain part is a file rather than body text -- its lines must not leak
+    # into text_plain -- and it is now locatable by its disposition filename.
+    assert "Body before attachment." in mail.text_plain[0]
+    assert not any("line one" in part for part in mail.text_plain)
+
+    attachment = next(a for a in mail.attachments if a.filename == "notes.txt")
+    assert attachment.mimetype == "text/plain"
+    assert attachment.content.decode("utf-8") == body
 
 
 # --- header value fidelity --------------------------------------------------

@@ -45,6 +45,21 @@ fn decode_charset(body: &[u8], ctype: &ParsedContentType) -> String {
     }
 }
 
+/// Resolve a part's filename: RFC 2183 `Content-Disposition; filename` first,
+/// falling back to the legacy `Content-Type; name` parameter.
+///
+/// mailparse lowercases param keys, strips enclosing quotes, and folds RFC 2231
+/// extended values (`filename*=utf-8''...`) back into the plain `filename` key,
+/// so both lookups below are exact.
+fn part_filename(disposition: &ParsedContentDisposition, ctype: &ParsedContentType) -> String {
+    disposition
+        .params
+        .get("filename")
+        .or_else(|| ctype.params.get("name"))
+        .cloned()
+        .unwrap_or_default()
+}
+
 #[derive(Debug)]
 pub(crate) struct Mail {
     pub(crate) subject: String,
@@ -86,35 +101,56 @@ impl<'a> Mail {
         let mut text_plain = vec![];
         let mut text_html = vec![];
 
-        for mail in Self::extract_mail_parts(mail, 0)? {
-            let attachment_name = mail.ctype.params.get("name");
-            let mime = mail.ctype.mimetype.as_str();
+        for part in Self::extract_mail_parts(mail, 0)? {
+            let mime = part.ctype.mimetype.as_str();
+
+            // `multipart/*` nodes are MIME structure, not content: their body is
+            // the boundary-delimited concatenation of children already visited.
+            // Emitting them produced phantom, filename-less `attachments` entries
+            // (#22), so skip them before decoding anything.
+            if mime.starts_with("multipart/") {
+                continue;
+            }
+
+            let disposition = part.get_content_disposition();
+            let filename = part_filename(&disposition, &part.ctype);
+
+            // RFC 2183 decides body-vs-attachment -- not the media type, and not
+            // the mere presence of a filename (#25):
+            //   * `Content-Disposition: attachment` means "not for inline
+            //     display", so a `text/plain` part marked that way is a file whose
+            //     bytes must not be concatenated into the body.
+            //   * anything else that is `text/plain` or `text/html` is body text,
+            //     even when it carries a `Content-Type; name` parameter. A `name`
+            //     alone previously made the body vanish.
+            let is_body = disposition.disposition != DispositionType::Attachment
+                && matches!(mime, "text/plain" | "text/html");
 
             // Undo the Content-Transfer-Encoding (e.g. base64/quoted-printable)
             // exactly once. `?` propagates a broken transfer encoding instead of
             // swallowing it with `unwrap_or_default()`, which would silently turn
             // corruption into an empty body; the PyO3 layer surfaces the error to
             // Python as `ParseError`.
-            let content = mail.get_body_raw()?;
+            let content = part.get_body_raw()?;
 
-            // For text parts, build the Python-facing string from the bytes we
-            // just decoded instead of calling `get_body()`, which would re-run the
-            // identical transfer decode a second time. `decode_charset` performs
-            // only the charset step, so the result matches mailparse's `get_body`
-            // output byte-for-byte (see `decode_charset`).
-            if attachment_name.is_none() {
-                if mime == "text/plain" {
-                    text_plain.push(decode_charset(&content, &mail.ctype));
-                } else if mime == "text/html" {
-                    text_html.push(decode_charset(&content, &mail.ctype));
-                }
+            if !is_body {
+                attachments.push(Attachment {
+                    mimetype: mime.to_string(),
+                    content,
+                    filename,
+                });
+            } else if mime == "text/html" {
+                // For text parts, build the Python-facing string from the bytes
+                // just decoded rather than calling `get_body()`, which would re-run
+                // the identical transfer decode. `decode_charset` performs only the
+                // charset step, so the result matches mailparse's `get_body` output
+                // byte-for-byte (see `decode_charset`).
+                text_html.push(decode_charset(&content, &part.ctype));
+            } else {
+                // Only `text/plain` reaches here: `is_body` is false for every
+                // other media type.
+                text_plain.push(decode_charset(&content, &part.ctype));
             }
-
-            attachments.push(Attachment {
-                mimetype: mime.to_string(),
-                content,
-                filename: attachment_name.cloned().unwrap_or_default(),
-            });
         }
 
         Ok(Self {

@@ -1,0 +1,24 @@
+From: Sender <sender@example.com>
+To: Recipient <recipient@example.com>
+Date: Mon, 01 Jan 2024 12:00:00 +0000
+Message-ID: <fixture@fast-mail-parser.test>
+Subject: Text attachment via disposition
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=dispatt-0"
+
+------=dispatt-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+The real body.
+
+------=dispatt-0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+Content-Disposition: attachment; filename="log.txt"
+MIME-Version: 1.0
+
+log line one
+log line two
+
+------=dispatt-0--
