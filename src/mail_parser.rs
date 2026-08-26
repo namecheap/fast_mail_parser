@@ -5,6 +5,19 @@
 //! Python or PyO3, so it can be exercised and unit-tested independently of any
 //! Python runtime.
 //!
+//! ## Thread-safety invariant
+//!
+//! This module holds **no shared mutable state**: no `static mut`, no
+//! `OnceCell`/`OnceLock`, no `thread_local`, no interior mutability, and no
+//! `unsafe`. Every `static` here is a `const`. `parse_email` is a pure function
+//! of `&[u8]`, and `parse_many`'s workers each keep their own results,
+//! coordinating only through an atomic cursor.
+//!
+//! That is load-bearing, not incidental. It is what makes the free-threaded
+//! safety audit on issue #101 hold, and it is why `parse_many` needs no locking.
+//! **Introducing shared mutable state here -- a decode cache being the obvious
+//! candidate, see issue #97 -- invalidates that audit and must re-open it.**
+//!
 //! The companion `fast_mail_parser` module is the **PyO3 binding layer**:
 //! `PyMail`/`PyAttachment` wrap these core types and convert them into Python
 //! objects. Keeping the two models separate decouples the parsing logic from the
