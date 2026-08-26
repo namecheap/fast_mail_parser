@@ -12,10 +12,14 @@ discuss what you would like to change.
 
 ## Prerequisites
 
-- **Rust** — the toolchain is pinned in [`rust-toolchain`](rust-toolchain) to
-  **1.83**; if you use `rustup`, the correct version is selected automatically
-  in this directory. Some CI checks (`cargo audit`) run on **stable** rather
-  than the pinned version.
+- **Rust** — the toolchain is pinned in
+  [`rust-toolchain.toml`](rust-toolchain.toml) to **1.97.1**; if you use
+  `rustup`, the correct version is selected automatically in this directory.
+  The pin is deliberate: rustc 1.98.0 makes this crate ~26% slower and trips the
+  benchmark gate — see the comment in that file before changing it. The MSRV is
+  a separate, lower bound (**1.83**, declared as `rust-version` in
+  [`Cargo.toml`](Cargo.toml)). Some CI checks (`cargo audit`) run on **stable**
+  rather than the pinned version.
 - **Python** — **3.11–3.14** (`requires-python = ">= 3.11"` in
   [`pyproject.toml`](pyproject.toml)). The CI test matrix covers 3.11, 3.12,
   3.13, and 3.14.
