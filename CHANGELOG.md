@@ -7,100 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Bumped the benchmark baseline `mail-parser` 3.15.0 -> 4.6.4 (test dependency
-  only). The published comparison table names the version it was measured
-  against, so it is regenerated alongside.
-- **`parse_many`** — batch parsing in one FFI call, in parallel, results in input
-  order (#96). Each slot is a `PyMail` or a `ParseError` *instance*, returned
-  rather than raised, so one malformed message does not cost the caller the rest
-  of the batch; `raise_on_error=True` restores fail-fast. `threads` caps the
-  worker count. The GIL is released for the whole batch rather than per message.
-
-  Implemented on `std::thread::scope` with a shared atomic cursor rather than a
-  thread-pool dependency: it adds nothing to the lockfile or the licence
-  allowlist, and the cursor gives dynamic work distribution, which is the
-  property that matters when message sizes are uneven — static chunking stalls a
-  worker that draws several large messages.
-
-  Note that every parsed message is materialised before returning, so large
-  workloads should be chunked at the caller.
-- **A `ParseError` hierarchy** (part of #100): `HeaderParseError`,
-  `MimeStructureError` and `DecodeError`, all inheriting from `ParseError` so
-  `except ParseError` keeps catching everything. Failures are categorised where
-  they occur, so a caller can distinguish "this is not an email" from "one
-  attachment's base64 is broken" — the second usually means an otherwise
-  plausible message with one corrupt part, which is worth routing differently.
-  Existing tests for the oversized-input, MIME-depth and broken-encoding paths
-  now assert the specific subtype.
-- **An honest cross-library benchmark table** in the README, comparing
-  fast_mail_parser, mail-parser and the stdlib `email` module on *equivalent
-  work* — each asked for the same result, with a "work performed" column so the
-  comparison can be checked rather than trusted. Completes #103.
-
-  This corrected a mislabelled claim. The long-standing "~8x faster than
-  mail-parser" figure came from a benchmark calling `MailParser.from_string`,
-  which never invokes `.parse()` — so it timed a lazy structural scan, not
-  mail-parser's own logic. The claim turned out not to be inflated (that call
-  dominates the cost anyway), but it was measuring the wrong thing. The published
-  ratios now state the machine they came from, and note that the same comparison
-  yields 5.25x/6.42x on arm64 versus 8.50x/10.01x on CI's x86_64.
-
-  Regenerate with `make bench-table`; CI also renders the table into the
-  benchmark job summary on every run.
-- CI: the benchmark gate selects its two benchmarks by exact name rather than by
-  substring. A second benchmark whose name contained `fast_mail_parser` — such as
-  one added for the comparison table — previously made the selection ambiguous
-  and failed the gate instead of being ignored.
-- **A differential compatibility suite against the stdlib `email` module**
-  (`tests/test_stdlib_parity.py`) plus `docs/compatibility.md` (part of #103).
-  Both parsers run over the whole fixture corpus and are compared on nine
-  dimensions; a mismatch fails CI unless it is a declared, explained divergence,
-  and a declared divergence that stops occurring fails too — so the document
-  cannot drift from the code in either direction.
-
-  The corpus now matches the stdlib **byte for byte**, attachment payloads
-  included, on everything except five documented differences (body line endings
-  preserved rather than normalised to LF being the one most likely to bite) and
-  one case where this library is *more* correct: the stdlib surrogate-escapes raw
-  UTF-8 in address headers (RFC 6532) where this library decodes it.
-- CI: `cargo deny` now runs, enforcing the supply-chain policy in `deny.toml`
-  (advisories, licence allowlist, bans, source allowlist). The file had declared
-  all of it since it was added with nothing enforcing any of it, and had drifted:
-  `0BSD` was missing from the allowlist while `mailparse` -- the crate this
-  library is built on -- and its `quoted_printable` dependency are both 0BSD, so
-  the policy as written rejected the core dependency. `0BSD` is now allowed, with
-  the reasoning recorded next to it (#131).
-- The crate now declares `license = "Apache-2.0"` as an SPDX expression rather
-  than only pointing at the licence file, so tooling can classify it.
-- Bumped the pinned `encoding_rs` 0.8.30 -> 0.8.35 (lockfile only; `charset`
-  already allowed it via `^0.8.22`). 0.8.30 dates from 2021 and this crate does
-  the charset decoding for every text part, i.e. it runs on untrusted input.
-  0.8.30 also declared only `license-file = "COPYRIGHT"` with no SPDX `license`
-  field, which registries and licence tooling report as non-standard; 0.8.35
-  declares `(Apache-2.0 OR MIT) AND BSD-3-Clause` properly.
-- CI: `ruff.toml` targeted `py39` while `requires-python` is `>= 3.11`, which
-  silently narrowed the pyupgrade rules — the lint reported "All checks passed"
-  while four findings sat waiting at the correct target. Corrected, and the
-  findings fixed (test files only; no library change).
-- **CI: the benchmark gate now compares against the base revision** instead of
-  gating an absolute ratio against pure-Python `mail-parser`. Both revisions are
-  built and measured in the same job, so between-runner variance cancels.
-
-  The old gate was measurably unreliable. Four consecutive runs of the same
-  binary in one job spread **0.3%** (1.895-1.902 ms), while the same source
-  across jobs spread **26%** (1.885-2.378 ms) — and `mail-parser` barely moved
-  (14.2-14.5 ms), so the two implementations do not scale together and the ratio
-  moved with the runner's CPU. A 7.0x floor therefore sat inside the noise band:
-  it failed honest PRs, and any floor loose enough to stop flaking would also
-  have missed the ~26% regression class it existed to catch (#120).
-
-  The absolute ratio is still reported and still gated, but only as a loose
-  catastrophic-drift net (5.0x) far below the observed range. The regression
-  threshold against the base is +7%, which is ~20x the measured within-job noise.
-
-
 ## [0.7.0] - 2026-08-26
 
 ### Breaking
@@ -112,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#22). Bodies and attachments are now disjoint: `multipart/*` nodes are MIME
   structure and appear in neither list. Code that counted `len(attachments)`, or
   that filtered containers out by hand, will see different numbers.
+
 - **Body-vs-attachment classification now follows RFC 2183** instead of the media
   type alone (#25). Two consequences, both previously wrong:
   - A `text/plain` or `text/html` part marked `Content-Disposition: attachment`
@@ -152,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worse than absent, so a date is only trusted when a recognized month token is
   present, which the parser cannot reach a real result without. A legitimate
   epoch-0 date (`Thu, 01 Jan 1970 00:00:00 +0000`) still parses.
+
 - **A migration guide, `docs/migrating.md`** — covering the 0.6.x -> 0.7.0
   breaking changes and the move from the stdlib `email` module, plus an honest
   list of what this library deliberately does not do (building or mutating
@@ -160,6 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tests/test_docs_snippets.py`, in document order in one shared namespace, so a
   snippet that drifts from the API fails CI rather than misleading a reader
   (part of #103).
+
 - **Typed address fields on `PyMail`:** `from_` (a `PyAddress` or `None`) plus
   `to`, `cc`, `bcc` and `reply_to` (lists of `PyAddress`), each with
   `display_name: str | None` and `address: str`. `mailparse` already parsed these
@@ -174,22 +83,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `headers`. Parsing goes through `addrparse_header` rather than the string form,
   so an RFC 2047 display name that decodes to something containing a comma or
   angle bracket cannot corrupt the address split.
+
 - `PyAttachment.content_id` — the part's `Content-ID` with angle brackets
   stripped, or `None`. RFC 2392 `cid:` URLs reference that bracket-less form, so
   resolving the inline images an HTML body points at is now a dictionary lookup.
   It was previously impossible: the value was parsed and discarded at the FFI
   boundary (#98).
+
 - `PyAttachment.disposition` — the raw `Content-Disposition` token, typically
   `"inline"` or `"attachment"`, or `None` when the part declares no such header.
   An absent header is reported distinctly from an explicit `inline`, which
   mailparse's parsed value alone cannot express since it defaults to `Inline`
   (#98).
 
+- **`parse_many`** — batch parsing in one FFI call, in parallel, results in input
+  order (#96). Each slot is a `PyMail` or a `ParseError` *instance*, returned
+  rather than raised, so one malformed message does not cost the caller the rest
+  of the batch; `raise_on_error=True` restores fail-fast. `threads` caps the
+  worker count. The GIL is released for the whole batch rather than per message.
+
+  Implemented on `std::thread::scope` with a shared atomic cursor rather than a
+  thread-pool dependency: it adds nothing to the lockfile or the licence
+  allowlist, and the cursor gives dynamic work distribution, which is the
+  property that matters when message sizes are uneven — static chunking stalls a
+  worker that draws several large messages.
+
+  Note that every parsed message is materialised before returning, so large
+  workloads should be chunked at the caller.
+
+- **A `ParseError` hierarchy** (part of #100): `HeaderParseError`,
+  `MimeStructureError` and `DecodeError`, all inheriting from `ParseError` so
+  `except ParseError` keeps catching everything. Failures are categorised where
+  they occur, so a caller can distinguish "this is not an email" from "one
+  attachment's base64 is broken" — the second usually means an otherwise
+  plausible message with one corrupt part, which is worth routing differently.
+  Existing tests for the oversized-input, MIME-depth and broken-encoding paths
+  now assert the specific subtype.
+
+- **An honest cross-library benchmark table** in the README, comparing
+  fast_mail_parser, mail-parser and the stdlib `email` module on *equivalent
+  work* — each asked for the same result, with a "work performed" column so the
+  comparison can be checked rather than trusted. Completes #103.
+
+  This corrected a mislabelled claim. The long-standing "~8x faster than
+  mail-parser" figure came from a benchmark calling `MailParser.from_string`,
+  which never invokes `.parse()` — so it timed a lazy structural scan, not
+  mail-parser's own logic. The claim turned out not to be inflated (that call
+  dominates the cost anyway), but it was measuring the wrong thing. The published
+  ratios now state the machine they came from, and note that the same comparison
+  yields 5.25x/6.42x on arm64 versus 8.50x/10.01x on CI's x86_64.
+
+  Regenerate with `make bench-table`; CI also renders the table into the
+  benchmark job summary on every run.
+
+- **A differential compatibility suite against the stdlib `email` module**
+  (`tests/test_stdlib_parity.py`) plus `docs/compatibility.md` (part of #103).
+  Both parsers run over the whole fixture corpus and are compared on nine
+  dimensions; a mismatch fails CI unless it is a declared, explained divergence,
+  and a declared divergence that stops occurring fails too — so the document
+  cannot drift from the code in either direction.
+
+  The corpus now matches the stdlib **byte for byte**, attachment payloads
+  included, on everything except five documented differences (body line endings
+  preserved rather than normalised to LF being the one most likely to bite) and
+  one case where this library is *more* correct: the stdlib surrogate-escapes raw
+  UTF-8 in address headers (RFC 6532) where this library decodes it.
+
+### Changed
+
+- Bumped the benchmark baseline `mail-parser` 3.15.0 -> 4.6.4 (test dependency
+  only). The published comparison table names the version it was measured
+  against, so it is regenerated alongside.
+
+- CI: the benchmark gate selects its two benchmarks by exact name rather than by
+  substring. A second benchmark whose name contained `fast_mail_parser` — such as
+  one added for the comparison table — previously made the selection ambiguous
+  and failed the gate instead of being ignored.
+
+- CI: `cargo deny` now runs, enforcing the supply-chain policy in `deny.toml`
+  (advisories, licence allowlist, bans, source allowlist). The file had declared
+  all of it since it was added with nothing enforcing any of it, and had drifted:
+  `0BSD` was missing from the allowlist while `mailparse` -- the crate this
+  library is built on -- and its `quoted_printable` dependency are both 0BSD, so
+  the policy as written rejected the core dependency. `0BSD` is now allowed, with
+  the reasoning recorded next to it (#131).
+
+- The crate now declares `license = "Apache-2.0"` as an SPDX expression rather
+  than only pointing at the licence file, so tooling can classify it.
+
+- Bumped the pinned `encoding_rs` 0.8.30 -> 0.8.35 (lockfile only; `charset`
+  already allowed it via `^0.8.22`). 0.8.30 dates from 2021 and this crate does
+  the charset decoding for every text part, i.e. it runs on untrusted input.
+  0.8.30 also declared only `license-file = "COPYRIGHT"` with no SPDX `license`
+  field, which registries and licence tooling report as non-standard; 0.8.35
+  declares `(Apache-2.0 OR MIT) AND BSD-3-Clause` properly.
+
+- CI: `ruff.toml` targeted `py39` while `requires-python` is `>= 3.11`, which
+  silently narrowed the pyupgrade rules — the lint reported "All checks passed"
+  while four findings sat waiting at the correct target. Corrected, and the
+  findings fixed (test files only; no library change).
+
+- **CI: the benchmark gate now compares against the base revision** instead of
+  gating an absolute ratio against pure-Python `mail-parser`. Both revisions are
+  built and measured in the same job, so between-runner variance cancels.
+
+  The old gate was measurably unreliable. Four consecutive runs of the same
+  binary in one job spread **0.3%** (1.895-1.902 ms), while the same source
+  across jobs spread **26%** (1.885-2.378 ms) — and `mail-parser` barely moved
+  (14.2-14.5 ms), so the two implementations do not scale together and the ratio
+  moved with the runner's CPU. A 7.0x floor therefore sat inside the noise band:
+  it failed honest PRs, and any floor loose enough to stop flaking would also
+  have missed the ~26% regression class it existed to catch (#120).
+
+  The absolute ratio is still reported and still gated, but only as a loose
+  catastrophic-drift net (5.0x) far below the observed range. The regression
+  threshold against the base is +7%, which is ~20x the measured within-job noise.
+
 ### Fixed
 
 - `subject` and `date` are read from the parsed headers directly instead of back
   out of the collected header map, so they no longer inherit that map's
   representation and always reflect the first occurrence of their field (#28).
+
 - `PyAttachment.filename` is read from the `Content-Disposition` `filename`
   parameter, including RFC 2231 extended values (`filename*=utf-8''...`),
   falling back to `Content-Type; name` as before. Attachments that declare a
