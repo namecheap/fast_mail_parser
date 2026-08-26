@@ -118,6 +118,49 @@ jobs:
         run: cargo audit
 
   # ---------------------------------------------------------------------------
+  # Supply-chain policy. `deny.toml` had declared an advisory policy, a licence
+  # allowlist, ban rules and a source allowlist since it was added, with nothing
+  # enforcing any of them (#131) -- so the policy had drifted out of sync with
+  # the tree it was meant to govern.
+  #
+  # Like the cargo audit job, this sets RUSTUP_TOOLCHAIN=stable to override the
+  # 1.97.1 pin in rust-toolchain.toml: a supply-chain check should run current
+  # tooling regardless of which compiler the library is built with. It needs no
+  # Rust build at all, only the lockfile and the manifests.
+  #
+  # The version is pinned deliberately, and matters: 0.18.2 cannot parse the
+  # current RustSec database (it dies on RUSTSEC-2026-0066 with a TOML parse
+  # error), so an older cargo-deny fails on the advisories check no matter what
+  # this repository depends on.
+  # ---------------------------------------------------------------------------
+  supply-chain:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      # Bump to upgrade cargo-deny.
+      CARGO_DENY_VERSION: "0.20.2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: stable
+      - name: Install cargo-deny
+        run: |
+          v="$CARGO_DENY_VERSION"
+          base="https://github.com/EmbarkStudios/cargo-deny/releases/download/${v}"
+          asset="cargo-deny-${v}-x86_64-unknown-linux-musl.tar.gz"
+          curl -sSfL "$base/$asset" -o deny.tgz
+          curl -sSfL "$base/$asset.sha256" -o deny.tgz.sha256
+          # A supply-chain tool is exactly the wrong thing to install unverified.
+          echo "$(cat deny.tgz.sha256)  deny.tgz" | sha256sum -c -
+          tar xzf deny.tgz --strip-components=1 -C /usr/local/bin \
+            "cargo-deny-${v}-x86_64-unknown-linux-musl/cargo-deny"
+          cargo-deny --version
+      - name: cargo deny check
+        run: cargo deny check
+
+  # ---------------------------------------------------------------------------
   # Build once, test everywhere — the real merge gate. A single cp311-abi3
   # wheel is built (stable ABI, see pyo3/abi3-py311 in Cargo.toml), then that
   # SAME wheel is installed and tested on every supported CPython (3.11–3.14).
