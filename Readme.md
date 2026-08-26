@@ -4,12 +4,95 @@
 [![PyPI version](https://badge.fury.io/py/fast-mail-parser-ng.svg)](https://badge.fury.io/py/fast-mail-parser-ng)
 [![Downloads](https://pepy.tech/badge/fast-mail-parser-ng)](https://pepy.tech/project/fast-mail-parser-ng)
 
-fast_mail_parser is a Python library for .eml files parsing.
-The main benefit is a performance: the library is much faster than python implementations.
+> ## 📦 Now published as `fast-mail-parser-ng`
+>
+> **Install it under the new name:**
+>
+> ```bash
+> pip install fast-mail-parser-ng
+> ```
+>
+> **Your code does not change.** The import path is still `fast_mail_parser`:
+>
+> ```python
+> from fast_mail_parser import parse_email
+> ```
+>
+> Migrating from `fast-mail-parser`? Change the name in your requirements file
+> and nothing else — no code edits, same API.
+>
+> ```diff
+> - fast-mail-parser
+> + fast-mail-parser-ng
+> ```
+>
+> Looking for the old `fast-mail-parser` package? It is a different,
+> unmaintained upload frozen at 0.2.5 (June 2022) that this project cannot
+> publish to. See [Why the name changed](#why-the-name-changed).
 
-Based on [mailparse](https://github.com/staktrace/mailparse) library using [pyo3](https://github.com/PyO3/pyo3).
+A very fast Python library for parsing `.eml` files. It is built on the Rust
+[mailparse](https://github.com/staktrace/mailparse) crate via
+[pyo3](https://github.com/PyO3/pyo3), and parses roughly **7–8x faster** than
+pure-Python implementations.
+
+## Quickstart
+
+```bash
+pip install fast-mail-parser-ng
+```
+
+```python
+from fast_mail_parser import parse_email
+
+with open("message.eml", "rb") as f:
+    email = parse_email(f.read())
+
+print(email.subject)
+print(email.text_plain[0])
+```
+
+That is the whole surface for the common case. See [Usage](#usage) for the full
+API, and [Python support](#python-support) for wheel coverage.
+
+## Why the name changed
+
+The `fast-mail-parser` name on PyPI belongs to a PyPI account this project no
+longer controls, and it is frozen at an unmaintained **0.2.5 from June 2022**.
+Only a project owner can publish to a name, so fixes could not reach it — the
+PEP 541 transfer request
+([pypi/support#11044](https://github.com/pypi/support/issues/11044)) has been
+open and unattended since June 2026.
+
+Rather than hold releases behind that queue indefinitely, this project publishes
+under a name it owns. The import path was deliberately left as
+`fast_mail_parser` so the change costs you one line in a requirements file and
+no code. If the transfer is ever granted, `fast-mail-parser` will resume as an
+alias.
+
+Full history in the [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md).
+
+## Python support
+
+Wheels target the CPython stable ABI (`cp311-abi3`): one wheel per platform
+covers every supported CPython version, including versions released after the
+package — a new Python no longer has to wait for a new release.
+
+| Python | Support |
+| --- | --- |
+| CPython 3.11+ (including future versions) | Prebuilt wheel |
+| CPython 3.13t/3.14t (free-threaded) | Builds from source; the extension currently re-enables the GIL on import ([#101](https://github.com/namecheap/fast_mail_parser/issues/101)) |
+| CPython ≤ 3.10 | Not supported (last compatible release: 0.2.5) |
+| PyPy | Not supported |
+
+13 prebuilt wheels ship per release: manylinux and musllinux across x86_64,
+i686, aarch64, armv7, s390x and ppc64le; Windows x64 and x86; macOS arm64. Every
+release is published via PyPI Trusted Publishing with PEP 740 attestations.
 
 ## Benchmark
+
+Parsing the same message, `fast_mail_parser` against the pure-Python
+`mail-parser`. CI enforces a floor of 7x on every pull request, so this margin
+is a gate rather than a claim.
 
 ```
  -------------------------------------------------------------------------------------------- benchmark: 2 tests -------------------------------------------------------------------------------------------
@@ -23,35 +106,6 @@ Legend:
   Outliers: 1 Standard Deviation from Mean; 1.5 IQR (InterQuartile Range) from 1st Quartile and 3rd Quartile.
   OPS: Operations Per Second, computed as 1 / Mean
 ```
-
-## Installation
-
-Use the package manager [pip](https://pypi.org/project/fast-mail-parser-ng/) to install fast_mail_parser.
-
-```bash
-pip install fast-mail-parser-ng
-```
-
-> **Note on the package name.** The distribution is `fast-mail-parser-ng`, but
-> the import path is plain `fast_mail_parser` — so only your requirements file
-> changes, never your code.
->
-> The `fast-mail-parser` name on PyPI is a different, unmaintained upload
-> stuck at 0.2.5 (June 2022). It predates this repository's current
-> maintenance and we cannot publish to it; see
-> [CHANGELOG](CHANGELOG.md) for the full story. Install `fast-mail-parser-ng`
-> to get the maintained library.
-
-Wheels target the CPython stable ABI (`cp311-abi3`): one wheel per platform
-covers every supported CPython version, including versions released after the
-package — a new Python no longer has to wait for a new release.
-
-| Python | Support |
-| --- | --- |
-| CPython 3.11+ (including future versions) | Prebuilt wheel |
-| CPython 3.13t/3.14t (free-threaded) | Builds from source; the extension currently re-enables the GIL on import ([#101](https://github.com/namecheap/fast_mail_parser/issues/101)) |
-| CPython ≤ 3.10 | Not supported (last compatible release: 0.2.5) |
-| PyPy | Not supported |
 
 ## Usage
 
@@ -113,4 +167,4 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 
 Please make sure to update tests as appropriate.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build from source, run the tests, and the PR conventions (linting, CI, DCO sign-off).
+See [CONTRIBUTING.md](https://github.com/namecheap/fast_mail_parser/blob/master/CONTRIBUTING.md) for how to build from source, run the tests, and the PR conventions (linting, CI, DCO sign-off).

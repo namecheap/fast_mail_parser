@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-26
+
+### Changed
+
+- The PyPI description now leads with the rename. A PyPI project description is
+  immutable per release and is built from `Readme.md`, so 0.6.0's page opened
+  with badges and a wall of benchmark output before mentioning the new name —
+  anyone landing there saw neither the announcement nor how to install. The
+  README now opens with the package name, the install command, and proof that
+  the import path is unchanged, followed by a Quickstart. This release exists to
+  publish that text; there is no code change.
+- README links are absolute. Repo-relative links (`CHANGELOG.md`,
+  `CONTRIBUTING.md`) render as broken links on PyPI, which serves this file
+  outside the repository.
+
 ## [0.6.0] - 2026-08-26
 
 ### Changed
@@ -97,7 +112,8 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.3.0...v0.4.0
