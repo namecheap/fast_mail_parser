@@ -241,6 +241,29 @@ Pass `raise_on_error=True` to raise the first failure instead.
 returns, so a batch of ten thousand one-megabyte mails holds essentially all of it
 decoded at once. Feed it in chunks of a few hundred rather than a whole mailbox.
 
+#### When it helps
+
+`parse_email` already releases the GIL, so a Python thread pool over it is
+already parallel. What `parse_many` removes on top of that is per-call FFI and
+scheduling overhead — which is proportional to the **number** of messages, while
+its one cost, copying each payload before parsing starts, is proportional to
+**total bytes**. Measured against `ThreadPoolExecutor(max_workers=4)` +
+`parse_email` on a 4-vCPU runner, best of 5:
+
+| Messages | Size each | Total | vs thread pool |
+| --- | --- | --- | --- |
+| 2000 | 1 KB | 2.1 MB | **12x faster** |
+| 400 | 50 KB | 20 MB | 1.2x slower |
+| 200 | 786 KB | 157 MB | 1.5x slower |
+
+So **use `parse_many` for many small messages** — the mail-pipeline case, where
+messages are usually single-digit KB. For a few very large messages a thread pool
+is currently faster, because the serial copy dominates. Removing that copy is
+tracked in [#96](https://github.com/namecheap/fast_mail_parser/issues/96).
+
+These are ratios on one machine; re-measure for your own mix rather than trusting
+the crossover point.
+
 ### Error handling
 
 `parse_email` raises a subtype of `ParseError`, chosen by what actually went

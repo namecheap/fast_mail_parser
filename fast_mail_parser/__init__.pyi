@@ -182,4 +182,10 @@ def parse_many(
 
     Every parsed message is materialised before returning, so chunk large
     workloads at the caller.
+
+    Best suited to **many small messages**: the overhead it removes scales with
+    the message count, while its one cost -- copying each payload before parsing
+    begins -- scales with total bytes. For a few very large messages a Python
+    thread pool over ``parse_email`` is currently faster. See the README for
+    measured figures.
     """
