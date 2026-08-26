@@ -123,7 +123,15 @@ Legend:
 | `headers` | `dict[str, list[str]]` | All values of every header, in order. |
 | `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
 
-Each `PyAttachment` has `mimetype: str`, `filename: str`, and `content: bytes`.
+Each `PyAttachment` has:
+
+| Attribute | Type | Description |
+| --- | --- | --- |
+| `mimetype` | `str` | The part's media type. |
+| `filename` | `str` | See below; `""` when the part declares none. |
+| `content` | `bytes` | Decoded bytes, transfer-encoding undone. |
+| `content_id` | `str \| None` | `Content-ID` with angle brackets stripped. |
+| `disposition` | `str \| None` | Raw `Content-Disposition` token, or `None` if absent. |
 
 ### Headers
 
@@ -137,6 +145,27 @@ mail.headers["From"]       # ['sender@example.com'] -- always a list
 
 `subject` and `date` are read from the parsed headers directly rather than out
 of this map, so they always reflect the first occurrence of their field.
+
+### Resolving inline images (`cid:`)
+
+`content_id` is exposed without angle brackets, which is the form RFC 2392
+`cid:` URLs use — so resolving the images an HTML body references is a lookup:
+
+```python
+import re
+
+mail = parse_email(raw)
+by_cid = {a.content_id: a for a in mail.attachments if a.content_id}
+
+for cid in re.findall(r'cid:([^"\'>\s]+)', mail.text_html[0]):
+    attachment = by_cid.get(cid)
+    if attachment:
+        print(cid, attachment.mimetype, len(attachment.content), "bytes")
+```
+
+`disposition` reports the part's raw `Content-Disposition` token, and
+distinguishes an absent header (`None`) from an explicit `inline` — the two are
+different statements about intent.
 
 ### Bodies vs. attachments
 

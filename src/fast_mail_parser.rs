@@ -31,6 +31,19 @@ pub struct PyAttachment {
     pub content: Vec<u8>,
     #[pyo3(get)]
     pub filename: String,
+    /// The part's `Content-ID` with angle brackets stripped, or `None`.
+    ///
+    /// RFC 2392 `cid:` URLs in an HTML body reference this bracket-less form, so
+    /// resolving inline images is a lookup keyed on this value.
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    /// The part's raw `Content-Disposition` token -- typically `"inline"` or
+    /// `"attachment"` -- or `None` when the part declares no such header.
+    ///
+    /// `None` and `"inline"` are reported distinctly: an absent header is not
+    /// the same statement as an explicit `inline`.
+    #[pyo3(get)]
+    pub disposition: Option<String>,
 }
 
 #[pymethods]
@@ -47,6 +60,8 @@ impl PyAttachment {
             mimetype: attachment.mimetype,
             content: attachment.content,
             filename: attachment.filename,
+            content_id: attachment.content_id,
+            disposition: attachment.disposition,
         }
     }
 }

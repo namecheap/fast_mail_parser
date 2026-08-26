@@ -21,6 +21,7 @@ Behaviors intentionally locked here (current contract):
 
 import glob
 import os
+import re
 
 import pytest
 
@@ -217,3 +218,43 @@ def test__text_attachment_by_disposition_is_not_body():
     attachment = next(a for a in mail.attachments if a.filename == "log.txt")
     assert attachment.mimetype == "text/plain"
     assert b"log line one" in attachment.content
+
+
+# --- Content-ID / inline resolution ----------------------------------------
+
+
+def test__content_id_is_normalized_without_angle_brackets():
+    # The fixture declares `Content-ID: <img1>`; RFC 2392 cid: URLs reference the
+    # bracket-less form, so that is what is exposed.
+    mail = _load("multipart_related")
+    png = next(a for a in mail.attachments if a.mimetype == "image/png")
+
+    assert png.content_id == "img1"
+
+
+def test__disposition_reports_the_raw_token():
+    mail = _load("multipart_related")
+    png = next(a for a in mail.attachments if a.mimetype == "image/png")
+    assert png.disposition == "inline"
+
+    # add_attachment marks parts `attachment`.
+    mail = _load("multipart_mixed_attachment")
+    png = next(a for a in mail.attachments if a.mimetype == "image/png")
+    assert png.disposition == "attachment"
+
+
+def test__cid_references_in_html_resolve_to_attachments():
+    # The canonical HTML-mail task, end to end: map every cid: URL in the body
+    # to the attachment that carries it.
+    mail = _load("multipart_related")
+
+    by_cid = {a.content_id: a for a in mail.attachments if a.content_id}
+    referenced = re.findall(r'cid:([^"\'>\s]+)', mail.text_html[0])
+
+    assert referenced, "fixture must reference at least one cid:"
+    for cid in referenced:
+        assert cid in by_cid, f"unresolved cid reference: {cid}"
+        assert by_cid[cid].content, f"cid {cid} resolved to an empty part"
+
+    assert referenced == ["img1"]
+    assert by_cid["img1"].content[:8] == b"\x89PNG\r\n\x1a\n"

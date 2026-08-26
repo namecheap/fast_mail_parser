@@ -60,6 +60,33 @@ fn part_filename(disposition: &ParsedContentDisposition, ctype: &ParsedContentTy
         .unwrap_or_default()
 }
 
+/// Strip the angle brackets from a `Content-ID` value, preserving case.
+///
+/// RFC 2392 `cid:` URLs reference the bracket-less form, so normalizing here is
+/// what turns `cid:` resolution into a plain lookup for callers.
+fn normalize_content_id(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_string()
+}
+
+/// The part's raw `Content-Disposition` token, or `None` when it declares none.
+///
+/// mailparse defaults the parsed disposition to `Inline` when the header is
+/// absent, which is indistinguishable from an explicit
+/// `Content-Disposition: inline`, so presence is confirmed against the raw
+/// headers before reporting a token.
+fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<String> {
+    part.get_headers().get_first_value("Content-Disposition")?;
+    Some(match kind {
+        DispositionType::Inline => "inline".to_owned(),
+        DispositionType::Attachment => "attachment".to_owned(),
+        DispositionType::FormData => "form-data".to_owned(),
+        DispositionType::Extension(other) => other.clone(),
+    })
+}
+
 #[derive(Debug)]
 pub(crate) struct Mail {
     pub(crate) subject: String,
@@ -75,6 +102,8 @@ pub(crate) struct Attachment {
     pub(crate) mimetype: String,
     pub(crate) content: Vec<u8>,
     pub(crate) filename: String,
+    pub(crate) content_id: Option<String>,
+    pub(crate) disposition: Option<String>,
 }
 
 impl<'a> Mail {
@@ -150,10 +179,17 @@ impl<'a> Mail {
             let content = part.get_body_raw()?;
 
             if !is_body {
+                let content_id = part
+                    .get_headers()
+                    .get_first_value("Content-ID")
+                    .map(|raw| normalize_content_id(&raw));
+
                 attachments.push(Attachment {
                     mimetype: mime.to_string(),
                     content,
                     filename,
+                    content_id,
+                    disposition: disposition_token(&part, &disposition.disposition),
                 });
             } else if mime == "text/html" {
                 // For text parts, build the Python-facing string from the bytes

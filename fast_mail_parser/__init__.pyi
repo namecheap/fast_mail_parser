@@ -12,12 +12,30 @@ class PyAttachment:
     parameter (RFC 2183, including RFC 2231 extended values), falling back to
     the ``Content-Type`` ``name`` parameter. It is ``""`` when the part declares
     neither -- common for inline images referenced only by ``Content-ID``.
+
+    ``content_id`` is the part's ``Content-ID`` with angle brackets stripped, or
+    ``None``. RFC 2392 ``cid:`` URLs in an HTML body reference this bracket-less
+    form, so resolving inline images is a lookup keyed on this value.
+
+    ``disposition`` is the raw ``Content-Disposition`` token (typically
+    ``"inline"`` or ``"attachment"``), or ``None`` when the part declares no such
+    header -- an absent header is reported distinctly from an explicit
+    ``inline``.
     """
 
-    def __init__(self, mimetype: str, content: bytes, filename: str) -> None:
+    def __init__(
+        self,
+        mimetype: str,
+        content: bytes,
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+    ) -> None:
         self.mimetype = mimetype
         self.content = content
         self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
 
 
 class PyMail:
