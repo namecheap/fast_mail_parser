@@ -10,7 +10,7 @@ handling -- mailparse's test suite asserts `17 Sep 2016 16:05:38 -1000 ==
 stdlib-derived values is a real cross-check rather than a restatement.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -50,7 +50,7 @@ def test__parsed_dates_are_timezone_aware(header: str):
     # tz-aware means utcoffset() is not None; naive datetimes silently misbehave
     # in comparisons and arithmetic, so this is the property that matters.
     assert parsed.utcoffset() is not None
-    assert parsed.tzinfo == timezone.utc
+    assert parsed.tzinfo == UTC
 
 
 def test__equal_instants_in_different_zones_compare_equal():
@@ -112,4 +112,4 @@ def test__legitimate_epoch_zero_is_not_mistaken_for_a_failure():
 
     assert mail.date_parsed is not None
     assert mail.date_parsed.timestamp() == 0
-    assert mail.date_parsed == datetime(1970, 1, 1, tzinfo=timezone.utc)
+    assert mail.date_parsed == datetime(1970, 1, 1, tzinfo=UTC)

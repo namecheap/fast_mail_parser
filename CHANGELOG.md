@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CI: `ruff.toml` targeted `py39` while `requires-python` is `>= 3.11`, which
+  silently narrowed the pyupgrade rules — the lint reported "All checks passed"
+  while four findings sat waiting at the correct target. Corrected, and the
+  findings fixed (test files only; no library change).
 - **CI: the benchmark gate now compares against the base revision** instead of
   gating an absolute ratio against pure-Python `mail-parser`. Both revisions are
   built and measured in the same job, so between-runner variance cancels.

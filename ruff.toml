@@ -2,7 +2,10 @@
 # Sensible, not-overly-strict rule set: pycodestyle errors (E), pyflakes (F),
 # import sorting (I), pyupgrade (UP), and flake8-bugbear (B).
 line-length = 100
-target-version = "py39"
+# Must track `requires-python` in pyproject.toml (>= 3.11). A stale, lower
+# value silently narrows the pyupgrade (UP) rules: at py39 this file reported
+# "All checks passed" while four UP findings were waiting at py311.
+target-version = "py311"
 
 # The Python surface is the thin fast_mail_parser/ wrapper; the Rust extension
 # is built into it. Test data/fixtures are not linted.
