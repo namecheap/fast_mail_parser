@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-26
+
+### Changed
+
+- **The distribution is now published as `fast-mail-parser-ng`.** Install with
+  `pip install fast-mail-parser-ng`. The import path is unchanged — existing
+  code keeps working as-is:
+
+  ```python
+  from fast_mail_parser import parse_email, ParseError
+  ```
+
+  Only the name in your requirements file changes. No code in this release
+  differs from 0.5.0; the version bump signals that consumers must update how
+  they install the package.
+
+  The `fast-mail-parser` name on PyPI still points at an unmaintained 0.2.5
+  from June 2022, published by the library's original author before he left
+  Namecheap. We do not control that name: the PEP 541 transfer request
+  ([pypi/support#11044](https://github.com/pypi/support/issues/11044)) has been
+  open and unattended since 2026-06-13. Rather than block releases on that
+  queue indefinitely, this repository publishes under a name we own. If the
+  transfer is ever granted, `fast-mail-parser` will resume as an alias.
+
 ## [0.5.0] - 2026-08-03
 
 ### Changed
@@ -70,7 +94,8 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/namecheap/fast_mail_parser/releases/tag/v0.3.0

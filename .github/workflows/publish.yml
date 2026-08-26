@@ -194,10 +194,20 @@ jobs:
       # Publish via PyPI Trusted Publishing (OIDC) — no long-lived credentials.
       # OIDC also enables PEP 740 attestations (attestations: true); these are
       # silently IGNORED if an explicit username/password is set, so do NOT add
-      # `user`/`password` here. Requires a one-time PyPI setup: add a Trusted
-      # Publisher for namecheap/fast_mail_parser, workflow "publish.yml" (no
-      # environment), at
-      # https://pypi.org/manage/project/fast-mail-parser/settings/publishing/
+      # `user`/`password` here.
+      #
+      # The distribution is `fast-mail-parser-ng` (the import path stays
+      # `fast_mail_parser`; see [tool.maturin] module-name in pyproject.toml).
+      # Requires a one-time PyPI setup — add a Trusted Publisher for
+      # namecheap/fast_mail_parser, workflow "publish.yml", environment blank:
+      #
+      #   before the project exists (pending publisher, creates it on first
+      #   upload):  https://pypi.org/manage/account/publishing/
+      #   afterwards:
+      #     https://pypi.org/manage/project/fast-mail-parser-ng/settings/publishing/
+      #
+      # The `environment:` field there must match this job exactly — this job
+      # declares none, so leave it blank.
       - name: Publish to PyPI
         if: ${{ github.event_name == 'release' && startsWith(github.ref, 'refs/tags/') }}
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
