@@ -30,6 +30,12 @@ const MAX_MIME_DEPTH: usize = 256;
 
 /// Why a parse failed.
 ///
+/// Always propagated boxed (`Result<_, Box<ParseFailure>>`). Failure is the cold
+/// path, and embedding a `MailParseError` inline made this type wider than the
+/// `Ok` values it travels with -- widening every `Result` in the per-part loop
+/// and the recursive traversal. Boxing keeps the error pointer-sized, so the hot
+/// path carries 8 bytes instead of ~40.
+///
 /// Categorised at the point of failure, where the context is known, so the
 /// binding layer can raise a specific Python exception instead of one opaque
 /// `ParseError`. A caller can then tell "this is not an email" from "this
@@ -54,7 +60,7 @@ impl fmt::Display for ParseFailure {
     }
 }
 
-pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, ParseFailure> {
+pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, Box<ParseFailure>> {
     Mail::new(payload)
 }
 
@@ -220,14 +226,15 @@ pub(crate) struct Attachment {
 }
 
 impl<'a> Mail {
-    pub(crate) fn new(payload: &'a [u8]) -> Result<Self, ParseFailure> {
+    pub(crate) fn new(payload: &'a [u8]) -> Result<Self, Box<ParseFailure>> {
         if payload.len() > MAX_INPUT_BYTES {
-            return Err(ParseFailure::MimeStructure(
+            return Err(Box::new(ParseFailure::MimeStructure(
                 "Input exceeds maximum allowed size",
-            ));
+            )));
         }
 
-        let mail = parse_mail(payload).map_err(ParseFailure::Header)?;
+        let mail = parse_mail(payload)
+            .map_err(|error| Box::new(ParseFailure::Header(error)))?;
 
         // Keep every value for a repeated key, in the order the keys appear.
         // Collapsing to one value per key kept only the last, discarding all but
@@ -300,7 +307,9 @@ impl<'a> Mail {
             // swallowing it with `unwrap_or_default()`, which would silently turn
             // corruption into an empty body; the PyO3 layer surfaces the error to
             // Python as `ParseError`.
-            let content = part.get_body_raw().map_err(ParseFailure::Decode)?;
+            let content = part
+                .get_body_raw()
+                .map_err(|error| Box::new(ParseFailure::Decode(error)))?;
 
             if !is_body {
                 let content_id = part
@@ -347,11 +356,11 @@ impl<'a> Mail {
     fn extract_mail_parts(
         mut mail: ParsedMail<'a>,
         depth: usize,
-    ) -> Result<Vec<ParsedMail<'a>>, ParseFailure> {
+    ) -> Result<Vec<ParsedMail<'a>>, Box<ParseFailure>> {
         if depth >= MAX_MIME_DEPTH {
-            return Err(ParseFailure::MimeStructure(
+            return Err(Box::new(ParseFailure::MimeStructure(
                 "MIME nesting exceeds maximum allowed depth",
-            ));
+            )));
         }
 
         let mut result = vec![];
