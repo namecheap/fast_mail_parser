@@ -11,3 +11,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # Python test dependencies from pyproject.toml's [project.optional-dependencies]
+  # (pytest, pytest-benchmark, mail-parser). Previously uncovered, so these were
+  # the only dependencies in the repo receiving no update PRs at all -- pytest
+  # sat on a 2023 release. Proposals only; a pytest major is a deliberate call.
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"

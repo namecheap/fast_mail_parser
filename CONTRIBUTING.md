@@ -88,19 +88,36 @@ a performance benchmark, not a correctness test — see below).
 The test suite includes:
 
 - [`tests/test_contract.py`](tests/test_contract.py) — freezes the **public API
-  contract**: the exported names (`parse_email`, `ParseError`, `PyMail`,
-  `PyAttachment`), the attribute set and types of `PyMail` / `PyAttachment`, the
+  contract**: the exported names (`parse_email`, `PyMail`, `PyAttachment`,
+  `PyAddress`, and the `ParseError` hierarchy — `HeaderParseError`,
+  `MimeStructureError`, `DecodeError`), the attribute set and types of each, the
   input types `parse_email` accepts (`str` and `bytes`), and the errors it
-  raises. A failure here means a consumer-visible change.
+  raises. The attribute and export sets are *frozen* there, so any addition has
+  to move them deliberately — a failure here means a consumer-visible change.
 - [`tests/test_rfc_corpus.py`](tests/test_rfc_corpus.py) — characterization
   tests over an **RFC-feature `.eml` corpus** in `tests/data/rfc/`, locking the
   parser's actual output per email/MIME RFC feature (multipart, base64,
   quoted-printable, RFC 2047/2231/6532, folded headers, etc.).
+- [`tests/test_stdlib_parity.py`](tests/test_stdlib_parity.py) — a
+  **differential suite against the stdlib `email` module**. Both parsers run over
+  the whole corpus and are compared on nine dimensions; a mismatch fails unless
+  it is a declared divergence in `DIVERGENCES`, and a declared divergence that
+  stops occurring fails too. It is the regression oracle for the correctness
+  work, and every row of [`docs/compatibility.md`](docs/compatibility.md) is a
+  key in that table.
+- [`tests/test_docs_snippets.py`](tests/test_docs_snippets.py) — executes every
+  Python snippet in [`docs/migrating.md`](docs/migrating.md) in document order
+  against the built wheel, so the migration guide cannot drift from the API.
 - [`tests/test_contents.py`](tests/test_contents.py),
   [`tests/test_attachments.py`](tests/test_attachments.py),
   [`tests/test_headers.py`](tests/test_headers.py),
+  [`tests/test_multivalue_headers.py`](tests/test_multivalue_headers.py),
+  [`tests/test_addresses.py`](tests/test_addresses.py),
+  [`tests/test_date_parsed.py`](tests/test_date_parsed.py),
+  [`tests/test_error_taxonomy.py`](tests/test_error_taxonomy.py),
   [`tests/test_empty_fields.py`](tests/test_empty_fields.py) — focused tests on
-  body text, attachments, headers, and empty-field handling.
+  body text, attachments, repeated headers, typed addresses, date parsing, the
+  error hierarchy, and empty-field handling.
 
 ### Regenerating the RFC corpus
 
@@ -120,13 +137,25 @@ add a fixture.
 
 ### Benchmark
 
-The benchmark compares `fast_mail_parser` against the pure-Python `mail-parser`
-baseline. Build with `--release` first, then:
+The benchmark suite serves two different purposes, and the tests are kept
+separate because of it.
+
+Two benchmarks are the **CI gate** and are deliberately stable rather than fair:
+the `mail-parser` baseline measures `MailParser.from_string`, which never calls
+`.parse()`. Three `*___full_read` benchmarks are the **published comparison**,
+asking each library for the same result.
+
+Build with `--release` first, then:
 
 ```bash
 maturin develop --release
-make benchmark
+make benchmark        # run the benchmarks
+make bench-table      # render the comparison table published in Readme.md
 ```
+
+`make bench-table` prints its own methodology line (corpus, CPython version,
+machine, library versions). Paste both together — the ratios move with the CPU,
+so a number without its machine is not a measurement.
 
 ## Linting
 
@@ -161,14 +190,23 @@ consists of:
 - **cargo audit** — a **blocking** supply-chain audit of the Rust dependency
   stack (PyO3 0.29) against the RustSec advisory database. A new advisory
   against any dependency fails the build.
+- **cargo deny** — **blocking**, enforcing `deny.toml`: the licence allowlist,
+  advisories, ban rules and source allowlist. Both this and cargo audit set
+  `RUSTUP_TOOLCHAIN=stable` to override the toolchain pin, because a
+  supply-chain check should see current tooling whatever the library is built
+  with.
 - **Test matrix** — the real merge gate. Builds and runs the suite on **CPython
   3.11, 3.12, 3.13, and 3.14** via `make install` / `make install-test` /
   `make test`.
-- **Benchmark quality gate** — runs the benchmark once and enforces that
-  `fast_mail_parser` stays at least **7x** faster than the pure-Python
-  `mail-parser` baseline (`BENCH_MIN_SPEEDUP`). The ratio is measured on the same
-  runner in the same run, so it is hardware-independent; getting faster always
-  passes, only a regression below the floor fails.
+- **Benchmark quality gate** — builds **both your revision and its base** in one
+  job and compares them, failing if yours is more than
+  `BENCH_MAX_REGRESSION_PCT` (7%) slower. Comparing two builds on the same runner
+  is what makes a few percent meaningful: within a job the noise is ~0.3%, while
+  the same source measured across *different* runners spreads ~26%. An absolute
+  ratio against `mail-parser` is still reported and still gated, but only as a
+  loose catastrophic-drift net (`BENCH_MIN_SPEEDUP`, 5x) far below the observed
+  range — it cannot be tightened without flaking, which is why the base
+  comparison exists. Getting faster always passes.
 
 All of these must pass (advisory checks aside) before a PR can merge.
 
