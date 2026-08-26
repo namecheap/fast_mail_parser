@@ -56,7 +56,9 @@ API, and [Python support](#python-support) for wheel coverage.
 
 Coming from the stdlib `email` module, or upgrading from 0.6.x? See the
 [migration guide](https://github.com/namecheap/fast_mail_parser/blob/master/docs/migrating.md) — its snippets are
-executed in CI, so they cannot go stale.
+executed in CI, so they cannot go stale — and
+[compatibility.md](https://github.com/namecheap/fast_mail_parser/blob/master/docs/compatibility.md) for every known
+difference from the stdlib, each one enforced by a test.
 
 ## Why the name changed
 

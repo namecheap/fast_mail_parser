@@ -39,7 +39,50 @@ FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
 #
 # Populated from observed behaviour; every entry is a documented, deliberate
 # difference, not a to-do. Anything not listed here must match.
-DIVERGENCES: dict[tuple[str, str], str] = {}
+DIVERGENCES: dict[tuple[str, str], str] = {
+    # fast_mail_parser is the more correct of the two here. RFC 6532 permits raw
+    # UTF-8 in header values; `email` with policy=default surrogate-escapes those
+    # bytes instead of decoding them, so `.addresses` yields lone surrogates
+    # ('\udcd0\udc9e...') where this library yields 'Отправитель'.
+    ("rfc6532_utf8_headers", "from"): (
+        "stdlib surrogate-escapes raw UTF-8 (RFC 6532) in address headers; "
+        "this library decodes it"
+    ),
+    # `headers` exposes header values as they appeared, only unfolded and
+    # RFC 2047-decoded. The stdlib additionally *normalises* structured headers,
+    # so a Date carrying an RFC 5322 comment loses it: '... +0200 (CEST)' becomes
+    # '... +0200'. Use `date_parsed` for an interpreted value.
+    ("attachment_message", "headers"): (
+        "stdlib strips RFC 5322 comments from structured headers "
+        "(Date '+0200 (CEST)' -> '+0200'); this library returns the raw value"
+    ),
+    # mailparse re-emits an address header's display name quoted and without the
+    # space before the angle bracket: 'Example Sender <a@b>' comes back as
+    # '"Example Sender"<a@b>'. Semantically equivalent per RFC 5322, textually
+    # not. Prefer the typed `from_`/`to` fields over parsing `headers` yourself.
+    ("large_message", "headers"): (
+        "mailparse re-serialises address-header display names as "
+        '\'"Name"<addr>\'; the stdlib preserves the original spelling'
+    ),
+    # The stdlib's text content manager normalises line endings to LF. This
+    # library returns the body as it appeared on the wire, so a message
+    # transmitted with CRLF keeps CRLF.
+    ("valid_message", "text_plain"): (
+        "stdlib normalises body line endings to LF; this library preserves the "
+        "wire form (CRLF)"
+    ),
+    ("valid_message", "text_html"): (
+        "stdlib normalises body line endings to LF; this library preserves the "
+        "wire form (CRLF)"
+    ),
+    # Both unfold folded headers, but differently: RFC 5322 folding whitespace is
+    # semantically a single space, which is what this library emits. The stdlib
+    # keeps the original run of spaces from the continuation lines.
+    ("valid_message", "headers"): (
+        "on unfolding, this library collapses folding whitespace to one space; "
+        "the stdlib preserves the original run"
+    ),
+}
 
 
 def _name(path: str) -> str:
