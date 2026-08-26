@@ -17,7 +17,7 @@
 mod mail_parser;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyString};
+use pyo3::types::{PyBytes, PyDateTime, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::collections::HashMap;
 
@@ -131,6 +131,28 @@ pub struct PyMail {
     pub attachments: Vec<PyAttachment>,
     #[pyo3(get)]
     pub headers: HashMap<String, Vec<String>>,
+}
+
+#[pymethods]
+impl PyMail {
+    /// `date` parsed to a timezone-aware `datetime`, or `None`.
+    ///
+    /// Computed on access rather than at parse time: most callers never read it,
+    /// and building a Python object for every parsed message would charge them
+    /// all for a field they do not use.
+    ///
+    /// The value is UTC. mailparse resolves the header's offset to an epoch, so
+    /// the instant is exact while the original offset is not retained -- read
+    /// `date` for that. An unparseable header yields `None`, leaving `date`
+    /// intact as the raw string.
+    #[getter]
+    fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
+        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
+            return Ok(None);
+        };
+        let utc = PyTzInfo::utc(py)?;
+        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+    }
 }
 
 impl PyMail {

@@ -148,6 +148,32 @@ for html in mail.text_html:
 `content_id` is exposed without angle brackets, which is the form RFC 2392
 `cid:` URLs use.
 
+### Dates
+
+`date` is the raw header string, as before. `date_parsed` resolves it to a
+timezone-aware `datetime` in UTC, computed on access:
+
+```python
+from datetime import timezone
+
+assert mail.date == "Mon, 01 Jan 2024 12:00:00 +0000"
+assert mail.date_parsed is not None
+assert mail.date_parsed.tzinfo == timezone.utc
+assert mail.date_parsed.timestamp() == 1704110400
+```
+
+Unlike the stdlib's `email.utils.parsedate_to_datetime`, which raises on
+malformed input, an unparseable header yields `None` and leaves `date` intact:
+
+```python
+undated = parse_email(b"Subject: x\r\nDate: not a date\r\n\r\nbody\r\n")
+assert undated.date_parsed is None
+assert undated.date == "not a date"
+```
+
+The instant is exact; the header's original UTC offset is not retained, so read
+`date` if you need the sender's local offset.
+
 ### Errors
 
 ```python
@@ -172,6 +198,4 @@ The stdlib is a full email *library*; this is a fast **parser**. Not provided:
   is no drop-in adapter.
 - **Header mutation.** `headers` is a plain dict snapshot; changing it changes
   nothing.
-- **`date` as a `datetime`.** `date` is the raw header string; parsing it is on
-  the caller for now (tracked in issue #98).
 - **Python ≤ 3.10 or PyPy.** CPython 3.11+ only.

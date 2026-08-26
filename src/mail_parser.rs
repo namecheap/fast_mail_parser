@@ -87,6 +87,38 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
     })
 }
 
+/// Month tokens `mailparse::dateparse` accepts.
+///
+/// Its state machine only advances past the month once one of these matches,
+/// and it returns an error on any other token in that position -- so a
+/// *successful* parse with none of these present means the machine never
+/// advanced at all. See `parse_date_epoch`.
+const MONTH_TOKENS: [&str; 12] = [
+    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+];
+
+/// Parse an RFC 5322 `Date` header to a Unix timestamp, or `None`.
+///
+/// Kept here rather than in the binding layer so the PyO3-free core owns all
+/// parsing; the binding layer only turns the result into a Python object.
+///
+/// Guards a sharp edge in `dateparse`: for input it never actually parses, its
+/// loop simply never advances state and the function still ends in
+/// `Ok(result)` with `result` at its initial 0. `dateparse("not a date")` is
+/// therefore `Ok(0)`, which would surface garbage to callers as 1970-01-01
+/// rather than as nothing at all -- silently wrong being worse than absent.
+///
+/// Requiring a month token rules that out, because the state machine cannot
+/// reach a real result without consuming one. A legitimate epoch-0 date still
+/// works: `Thu, 01 Jan 1970 00:00:00 +0000` contains `JAN`.
+pub(crate) fn parse_date_epoch(date: &str) -> Option<i64> {
+    let upper = date.to_uppercase();
+    if !MONTH_TOKENS.iter().any(|month| upper.contains(month)) {
+        return None;
+    }
+    dateparse(date).ok()
+}
+
 /// One mailbox from an address header.
 #[derive(Debug, Clone)]
 pub(crate) struct Address {

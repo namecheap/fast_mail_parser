@@ -122,6 +122,7 @@ Legend:
 | --- | --- | --- |
 | `subject` | `str` | Subject header (empty string if missing). |
 | `date` | `str` | Date header (empty string if missing). |
+| `date_parsed` | `datetime \| None` | `date` as a tz-aware UTC datetime; computed on access. |
 | `from_` | `PyAddress \| None` | The `From` mailbox. Named `from_`; `from` is a keyword. |
 | `to` / `cc` / `bcc` / `reply_to` | `list[PyAddress]` | Recipients, groups flattened. |
 | `text_plain` | `list[str]` | All `text/plain` bodies. |
