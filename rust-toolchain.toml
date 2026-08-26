@@ -1,0 +1,17 @@
+# Rust toolchain for this crate. Pinned deliberately — do not float to `stable`
+# without re-measuring the benchmark gate.
+#
+# rustc 1.98.0 makes this crate ~26% slower. Identical source, same
+# ubuntu-24.04 runner image, one week apart:
+#
+#   1.97.1 (2026-08-19)  parse 1.894 ms  ->  7.50x vs mail-parser  gate PASS
+#   1.98.0 (2026-08-26)  parse 2.378 ms  ->  6.08x vs mail-parser  gate FAIL
+#
+# The pure-Python baseline barely moved (14.205 -> 14.456 ms), so this is the
+# Rust extension's codegen, not runner noise. The pin keeps published wheels on
+# the fast compiler and keeps the 7.0x floor honest instead of lowering it.
+#
+# Before unpinning, benchmark the candidate toolchain and confirm it clears the
+# floor. `cargo audit` intentionally still runs on current stable.
+[toolchain]
+channel = "1.97.1"
