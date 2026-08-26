@@ -102,18 +102,19 @@ attachments with their payloads decoded — on the same message:
 
 | Library | Work performed | Min time | Relative |
 | --- | --- | --- | --- |
-| **fast_mail_parser** | parse + decode bodies + decode attachments | 1.40 ms | 1.00x |
-| mail-parser | `from_string` + `.parse()` + read attributes | 11.90 ms | 8.50x |
-| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 14.01 ms | 10.01x |
+| **fast_mail_parser** | parse + decode bodies + decode attachments | 2.09 ms | 1.00x |
+| mail-parser | `from_string` + `.parse()` + read attributes | 13.45 ms | 6.44x |
+| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 17.93 ms | 8.59x |
 
 Corpus: `tests/data/large_message.eml` (multipart/mixed, 6 MIME parts, 2 base64
 attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`),
-mail-parser 3.15.0, minimum of 45+ rounds.
+mail-parser 4.6.4, minimum of 31+ rounds.
 
 **These ratios move with the hardware, so treat them as a magnitude rather than a
-constant.** The identical comparison on an Apple Silicon laptop gives 5.25x and
-6.42x instead of 8.50x and 10.01x: the interpreted parsers and the Rust extension
-do not scale together across CPUs. Regenerate the table for your own machine with
+constant.** An earlier run of this same comparison on a faster CI runner recorded
+8.50x and 10.01x rather than 6.44x and 8.59x, and an Apple Silicon laptop gives
+5.25x and 6.42x: the interpreted parsers and the Rust extension do not scale
+together across CPUs. Regenerate the table for your own machine with
 `make bench-table`, which prints its own methodology line; CI also renders it
 into the job summary of every benchmark run.
 

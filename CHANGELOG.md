@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bumped the benchmark baseline `mail-parser` 3.15.0 -> 4.6.4 (test dependency
+  only). The published comparison table names the version it was measured
+  against, so it is regenerated alongside.
 - **`parse_many`** — batch parsing in one FFI call, in parallel, results in input
   order (#96). Each slot is a `PyMail` or a `ParseError` *instance*, returned
   rather than raised, so one malformed message does not cost the caller the rest
