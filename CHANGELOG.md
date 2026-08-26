@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open and unattended since 2026-06-13. Rather than block releases on that
   queue indefinitely, this repository publishes under a name we own. If the
   transfer is ever granted, `fast-mail-parser` will resume as an alias.
+- Wheels are now built with a pinned Rust toolchain (1.97.1). rustc 1.98.0
+  makes the parser ~26% slower, so the pin keeps 0.6.0's wheels as fast as
+  0.5.0's (#119, tracked in #120).
 
 ## [0.5.0] - 2026-08-03
 
