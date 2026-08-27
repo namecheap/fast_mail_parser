@@ -191,6 +191,126 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
     })
 }
 
+/// Every value of every header, keyed by name, in first-appearance key order.
+///
+/// Repeated keys keep all their values: collapsing to one kept only the last,
+/// discarding all but the final `Received`, `DKIM-Signature`, `Received-SPF`,
+/// ... -- which made delivery-path tracing and signature verification impossible
+/// (#12, #23).
+///
+/// A `HashMap` cannot carry the key order: its iteration order is randomised per
+/// instance, and that order became the Python dict's insertion order, so headers
+/// came back differently ordered on every parse of the same bytes (#157).
+///
+/// `positions` keeps insertion O(1). Scanning the vector for each field would be
+/// quadratic in the header count, which turns a message carrying thousands of
+/// headers into an amplification vector -- the sort of thing MAX_INPUT_BYTES and
+/// MAX_MIME_DEPTH exist to prevent elsewhere.
+///
+/// Shared by the flat view and the tree so the two cannot disagree about what a
+/// message's headers are.
+fn collect_headers(part: &ParsedMail<'_>) -> Vec<(String, Vec<String>)> {
+    let mut headers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut positions: HashMap<String, usize> = HashMap::new();
+
+    for header in part.get_headers() {
+        let key = header.get_key();
+        match positions.get(&key).copied() {
+            Some(position) => headers[position].1.push(header.get_value()),
+            None => {
+                positions.insert(key.clone(), headers.len());
+                headers.push((key, vec![header.get_value()]));
+            }
+        }
+    }
+
+    headers
+}
+
+#[allow(dead_code)]
+/// One node of the MIME tree, as the message actually nests it (#99).
+///
+/// `Mail` is a flattened projection of this: bodies in one list, attachments in
+/// another, containers dropped. Any flattening loses something -- which
+/// `text/html` corresponds to which `text/plain` sibling, whether a part was
+/// `multipart/alternative` or `multipart/mixed` -- and this keeps it.
+#[derive(Debug)]
+pub(crate) struct MimePart {
+    pub(crate) content_type: String,
+    pub(crate) headers: Vec<(String, Vec<String>)>,
+    pub(crate) filename: String,
+    pub(crate) content_id: Option<String>,
+    pub(crate) disposition: Option<String>,
+    pub(crate) is_message: bool,
+    /// Transfer-decoded bytes of a leaf. `None` for a `multipart/*` container,
+    /// whose body is just its children with boundaries between them.
+    pub(crate) content: Option<Vec<u8>>,
+    pub(crate) children: Vec<MimePart>,
+}
+
+impl MimePart {
+    fn build(part: &ParsedMail<'_>, depth: usize) -> Result<Self, MailParseError> {
+        if depth >= MAX_MIME_DEPTH {
+            return Err(MailParseError::Generic(ERR_MIME_DEPTH));
+        }
+
+        let mime = part.ctype.mimetype.as_str();
+        let disposition = part.get_content_disposition();
+
+        let (content, children) = if mime.starts_with("multipart/") {
+            // A container's body is the boundary-delimited concatenation of the
+            // children below it, so reporting it as content would report the same
+            // bytes twice.
+            let children = part
+                .subparts
+                .iter()
+                .map(|child| Self::build(child, depth + 1))
+                .collect::<Result<Vec<_>, _>>()?;
+            (None, children)
+        } else if mime == "message/rfc822" {
+            // An embedded message -- a bounce or a forward, which abuse pipelines
+            // are made of. mailparse hands it over as an opaque leaf; parsing it
+            // is the difference between "there is a message in here" and being
+            // able to read its headers.
+            //
+            // The nesting counts against the same depth cap, so an onion of
+            // forwards cannot recurse further than a multipart tree can.
+            let raw = part.get_body_raw()?;
+            let inner = {
+                let parsed = parse_mail(&raw)?;
+                Self::build(&parsed, depth + 1)?
+            };
+            (Some(raw), vec![inner])
+        } else {
+            (Some(part.get_body_raw()?), Vec::new())
+        };
+
+        Ok(MimePart {
+            content_type: mime.to_string(),
+            headers: collect_headers(part),
+            filename: part_filename(&disposition, &part.ctype),
+            content_id: part
+                .get_headers()
+                .get_first_value("Content-ID")
+                .map(|raw| normalize_content_id(&raw)),
+            disposition: disposition_token(part, &disposition.disposition),
+            is_message: mime == "message/rfc822",
+            content,
+            children,
+        })
+    }
+}
+
+/// Parse a message into its MIME tree, structure intact.
+#[allow(dead_code)]
+pub(crate) fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseError> {
+    if payload.len() > MAX_INPUT_BYTES {
+        return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
+    }
+
+    MimePart::build(&parse_mail(payload)?, 0)
+}
+
 /// Month tokens `mailparse::dateparse` accepts.
 ///
 /// Its state machine only advances past the month once one of these matches,
@@ -304,33 +424,7 @@ impl<'a> Mail {
 
         let mail = parse_mail(payload)?;
 
-        // Keys in the order they first appear, and every value for a repeated
-        // key in the order it appeared. Collapsing to one value per key kept only
-        // the last, discarding all but the final `Received`, `DKIM-Signature`,
-        // `Received-SPF`, ... -- which made delivery-path tracing and signature
-        // verification impossible (#12, #23).
-        //
-        // A `HashMap` cannot carry the key order: its iteration order is
-        // randomised per instance, and that order became the Python dict's
-        // insertion order, so `mail.headers` came back differently ordered on
-        // every parse of the same bytes (#157).
-        //
-        // `positions` keeps insertion O(1). Scanning `headers` for each field
-        // would be quadratic in the header count, which turns a message carrying
-        // thousands of headers into an amplification vector -- the sort of thing
-        // MAX_INPUT_BYTES and MAX_MIME_DEPTH exist to prevent elsewhere.
-        let mut headers: Vec<(String, Vec<String>)> = Vec::new();
-        let mut positions: HashMap<String, usize> = HashMap::new();
-        for header in mail.get_headers() {
-            let key = header.get_key();
-            match positions.get(&key).copied() {
-                Some(position) => headers[position].1.push(header.get_value()),
-                None => {
-                    positions.insert(key.clone(), headers.len());
-                    headers.push((key, vec![header.get_value()]));
-                }
-            }
-        }
+        let headers = collect_headers(&mail);
 
         // Read these straight from the parsed headers rather than back out of the
         // map above, so the dedicated fields do not inherit its representation
