@@ -10,6 +10,7 @@ import sys
 
 import fast_mail_parser
 from fast_mail_parser import (
+    DecodeError,
     ParseError,
     parse_email,
     parse_email_tree,
@@ -68,6 +69,67 @@ except ParseError:
     check("errors raise ParseError", True)
 else:
     check("errors raise ParseError", False)
+
+# --- the modes and the warnings channel ---------------------------------------
+#
+# Added after this script was first written. A source build is the one artifact
+# nothing else exercises, so every entry point the package advertises belongs
+# here -- an API that imports but does not work on a compiled-from-source install
+# is precisely what this job exists to catch.
+
+ATTACHMENT = (
+    b"Subject: lazy\r\n"
+    b'Content-Type: multipart/mixed; boundary="b"\r\n'
+    b"\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/plain\r\n"
+    b"\r\n"
+    b"body\r\n"
+    b"--b\r\n"
+    b'Content-Type: application/octet-stream; name="x.bin"\r\n'
+    b"Content-Disposition: attachment\r\n"
+    b"Content-Transfer-Encoding: base64\r\n"
+    b"\r\n"
+    b"aGVsbG8=\r\n"
+    b"--b--\r\n"
+)
+
+lazy = parse_email(ATTACHMENT, mode="lazy")
+attachment = lazy.attachments[0]
+check("lazy mode defers the decode", attachment.is_decoded is False)
+check("lazy content decodes on access", attachment.content == b"hello")
+check("lazy decode is recorded", lazy.attachments[0].is_decoded is True)
+check(
+    "lazy content is cached, not rebuilt",
+    lazy.attachments[0].content is attachment.content,
+)
+check(
+    "lazy agrees with full mode",
+    parse_email(ATTACHMENT).attachments[0].content == attachment.content,
+)
+
+described = parse_email(ATTACHMENT, mode="metadata").attachments[0]
+check("metadata reports the wire size", described.encoded_size > 0)
+
+# A quoted-printable escape a strict decoder rejects: reported, not raised.
+LOSSY = (
+    b"Subject: qp\r\n"
+    b"Content-Type: text/plain; charset=utf-8\r\n"
+    b"Content-Transfer-Encoding: quoted-printable\r\n"
+    b"\r\n"
+    b"before =ZZ after\r\n"
+)
+repaired = parse_email(LOSSY)
+check(
+    "a lossy repair is reported",
+    [w.kind for w in repaired.warnings] == ["transfer-decode-lossy"],
+)
+try:
+    parse_email(LOSSY, strict=True)
+except DecodeError:
+    check("strict mode raises it instead", True)
+else:
+    check("strict mode raises it instead", False)
 
 check("py.typed shipped", (
     __import__("pathlib").Path(fast_mail_parser.__file__).parent / "py.typed"
