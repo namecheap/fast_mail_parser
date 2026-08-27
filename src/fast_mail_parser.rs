@@ -79,6 +79,60 @@ fn to_py_err(error: MailParseError) -> PyErr {
     }
 }
 
+/// Build the exception `strict=True` promises for a lossy parse (#100).
+///
+/// Strict mode is implemented as a check *after* the parse rather than a flag
+/// threaded into it. Two reasons. The core never learns about strictness, so the
+/// per-part loop keeps the shape #135 measured -- a mode flag tested inside it
+/// would be a branch every message pays for a setting almost nobody sets. And
+/// the exception is the same one either way: the mapping below is total over the
+/// kinds the core emits, so "raise instead of warn" and "warn, then raise"
+/// differ only in that the second finishes the parse first and can therefore
+/// report how many repairs there were.
+///
+/// The mapping reuses the #135 hierarchy rather than adding types: a dropped
+/// address list is a header-level failure, a resynced header block is a
+/// structural one, and a charset fallback or an unreadable date is a value that
+/// could not be decoded.
+///
+/// `#[cold]` and out of line for the same reason as the `warn_*` helpers in the
+/// core: it formats, and it must not be inlined into a parse.
+#[cold]
+#[inline(never)]
+fn strict_rejection(warnings: &[mail_parser::Warning]) -> PyErr {
+    // Non-empty by construction: the callers check before calling.
+    let warning = &warnings[0];
+    let location = if warning.part_path.is_empty() {
+        "the message".to_owned()
+    } else {
+        format!("part {}", warning.part_path)
+    };
+    let message = format!(
+        "strict mode rejected a lossy parse: {} on {}: {} \
+         ({} warning(s) recorded; parse without strict=True to read them all)",
+        warning.kind,
+        location,
+        warning.detail,
+        warnings.len()
+    );
+    match warning.kind {
+        mail_parser::KIND_ADDRESS_UNPARSEABLE => HeaderParseError::new_err(message),
+        // Structure rather than header parsing: what the defect breaks is the
+        // boundary between the header block and the MIME body, and the message
+        // parses fine once that is restored -- so `HeaderParseError`, documented
+        // as "usually the input is not an email at all", would say the wrong
+        // thing about it.
+        mail_parser::KIND_UNTERMINATED_HEADERS => MimeStructureError::new_err(message),
+        mail_parser::KIND_CHARSET_FALLBACK | mail_parser::KIND_DATE_UNPARSEABLE => {
+            DecodeError::new_err(message)
+        }
+        // A kind added to the core without a row above still fails strict mode,
+        // just at the base of the hierarchy. Failing open would break the only
+        // promise strict mode makes, which is that nothing lossy gets through.
+        _ => ParseError::new_err(message),
+    }
+}
+
 /// Extract a readable message from a panic payload.
 ///
 /// `panic!` with a literal yields a `&str`; with a format string, a `String`.
@@ -360,6 +414,60 @@ impl PyMimePart {
     }
 }
 
+/// One lossy repair a parse performed, reported rather than raised (#100).
+///
+/// Read-only, three `str` fields, no interior mutability -- the same shape as
+/// [`PyAddress`], so the free-threading invariant recorded in the `mail_parser`
+/// module still holds.
+#[pyclass(skip_from_py_object)]
+#[derive(Clone)]
+pub struct ParseWarning {
+    /// A stable token naming what was repaired: `"charset-fallback"`,
+    /// `"address-unparseable"`, `"date-unparseable"`. This is the field to
+    /// match on; the set grows as repairs become observable, so treat an
+    /// unrecognised kind as "something was repaired" rather than as impossible.
+    #[pyo3(get)]
+    pub kind: String,
+    /// Where the affected part landed in the result -- `"text_plain[0]"`,
+    /// `"text_html[1]"` -- or `""` when the warning is about the message as a
+    /// whole rather than one part.
+    ///
+    /// A locator into the returned `PyMail` rather than MIME tree coordinates:
+    /// `parse_email` hands back a flat projection, and a coordinate naming
+    /// structure it has already discarded would be a locator the caller cannot
+    /// resolve. `parse_email_tree` is where tree coordinates belong.
+    #[pyo3(get)]
+    pub part_path: String,
+    /// Prose for whoever reads the log. Deliberately not a matching key: the
+    /// wording is free to improve, `kind` is not.
+    #[pyo3(get)]
+    pub detail: String,
+}
+
+#[pymethods]
+impl ParseWarning {
+    fn __repr__(&self) -> String {
+        format!(
+            "<ParseWarning {} {:?}: {}>",
+            self.kind,
+            self.part_path,
+            self.detail
+        )
+    }
+}
+
+impl ParseWarning {
+    /// Cold by construction: a well-formed message never reaches this.
+    #[inline(never)]
+    fn from_warning(warning: mail_parser::Warning) -> Self {
+        ParseWarning {
+            kind: warning.kind.to_owned(),
+            part_path: warning.part_path,
+            detail: warning.detail,
+        }
+    }
+}
+
 /// One mailbox from an address header, exposed to Python.
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
@@ -469,6 +577,20 @@ pub struct PyMail {
     /// Stored as ordered pairs, not a map: the key order is the point (#157).
     /// Exposed through the `headers` getter below.
     pub headers: Vec<(String, Vec<String>)>,
+    /// Every lossy repair this parse performed, in the order it performed them
+    /// (#100).
+    ///
+    /// **Empty means a pristine parse.** That is the guarantee worth having and
+    /// the reason this is a list rather than a log line: a pipeline can treat
+    /// `warnings == []` as "nothing here was patched up" and route everything
+    /// else to quarantine or review. Best-effort parsing was always the
+    /// behaviour; this is what makes it observable.
+    ///
+    /// Cheap when empty by construction, which is the case that matters: the
+    /// core builds a `Vec` that does not allocate until something is pushed, and
+    /// every push sits behind a branch well-formed mail does not take.
+    #[pyo3(get)]
+    pub warnings: Vec<ParseWarning>,
 }
 
 #[pymethods]
@@ -531,6 +653,12 @@ impl PyMail {
                 .map(PyAttachment::from_attachment)
                 .collect(),
             headers: mail.headers,
+            // Empty in the common case, where `collect` allocates nothing.
+            warnings: mail
+                .warnings
+                .into_iter()
+                .map(ParseWarning::from_warning)
+                .collect(),
         }
     }
 }
@@ -594,9 +722,22 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
 ///
 /// Raises `ParseError`, or more precisely one of its subtypes:
 /// `HeaderParseError`, `MimeStructureError` or `DecodeError`.
+///
+/// Repairs the parser makes on the way -- a charset label it could not
+/// recognise, an address header it could not parse, a header block it had to
+/// resync (#150) -- are recorded on `PyMail.warnings` rather than raised, so
+/// `warnings == []` is a statement a caller can act on. `strict=True` turns each
+/// of them into the matching `ParseError` subtype instead, for validation
+/// pipelines that would rather see a failure than a repair. It requires
+/// `mode="full"`, which is the only mode that can honour it.
 #[pyfunction]
-#[pyo3(signature = (payload, *, mode = "full"))]
-pub fn parse_email(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+#[pyo3(signature = (payload, *, mode = "full", strict = false))]
+pub fn parse_email(
+    py: Python<'_>,
+    payload: Py<PyAny>,
+    mode: &str,
+    strict: bool,
+) -> PyResult<Py<PyAny>> {
     // The default path is kept as close to what it was before the mode existed
     // as possible: one comparison, then the same closure. Everything else lives
     // behind an `inline(never)` boundary below.
@@ -605,16 +746,35 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<P
     // in one arm, which drags in the formatting machinery -- inside the closure
     // that `catch_panics` inlines cost the hot path 30%, for the second time in
     // one day (the first was #180). Code that never runs is not free here.
+    //
+    // `strict` rides into the closure as a plain bool and is read once, after the
+    // parse, by an `inline(never)` helper; the shape above is unchanged.
     if mode == "full" {
-        return catch_panics(|| Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()));
+        return catch_panics(|| {
+            let mail = parse_email_inner(py, payload, strict)?;
+            Ok(Py::new(py, mail)?.into_any())
+        });
     }
 
-    parse_email_other_mode(py, payload, mode)
+    parse_email_other_mode(py, payload, mode, strict)
 }
 
 #[inline(never)]
-fn parse_email_other_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+fn parse_email_other_mode(
+    py: Python<'_>,
+    payload: Py<PyAny>,
+    mode: &str,
+    strict: bool,
+) -> PyResult<Py<PyAny>> {
     match mode {
+        // `strict` is refused here rather than ignored, and rather than
+        // supported. Its promise is that nothing lossy got through, and metadata
+        // mode never reads a body -- so the strongest thing it could honestly
+        // say is "nothing in the headers was repaired". A flag that means
+        // something weaker than it says is worse than a flag that is unavailable,
+        // which is the same reasoning that leaves `text_plain` absent from this
+        // mode rather than empty.
+        "metadata" if strict => Err(strict_needs_full_mode()),
         "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
         other => Err(unknown_mode(other)),
     }
@@ -626,6 +786,15 @@ fn unknown_mode(mode: &str) -> PyErr {
     exceptions::PyValueError::new_err(format!(
         "mode must be \"full\" or \"metadata\", not {mode:?}"
     ))
+}
+
+#[cold]
+#[inline(never)]
+fn strict_needs_full_mode() -> PyErr {
+    exceptions::PyValueError::new_err(
+        "strict=True needs mode=\"full\": metadata mode does not read the \
+         bodies, so it cannot tell you that nothing in them was repaired",
+    )
 }
 
 /// Cold, and marked so. `parse_email`'s default path must not pay for this
@@ -642,7 +811,7 @@ fn parse_email_metadata_mode(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<
     Ok(Py::new(py, PyMailMetadata::from_metadata(metadata))?.into_any())
 }
 
-fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
+fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>, strict: bool) -> PyResult<PyMail> {
     let message = payload_to_bytes(&payload, py)?;
 
     // The actual parse is pure Rust and never touches the Python interpreter, so
@@ -655,6 +824,10 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let mail = py
         .detach(|| mail_parser::parse_email(message.as_ref()))
         .map_err(to_py_err)?;
+
+    if strict && !mail.warnings.is_empty() {
+        return Err(strict_rejection(&mail.warnings));
+    }
 
     Ok(PyMail::from_mail(mail))
 }
@@ -673,19 +846,25 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
 /// Memory: every parsed message is materialised before returning. A batch of ten
 /// thousand one-megabyte mails holds essentially all of it decoded at once, so
 /// chunk large workloads at the caller.
+///
+/// Warnings ride along per message on each `PyMail.warnings`; `strict=True`
+/// turns a lossy parse into that slot's error, exactly as it turns one into a
+/// raise for `parse_email`, so the two APIs agree on what "strict" means.
 #[pyfunction]
-#[pyo3(signature = (payloads, *, threads = None, raise_on_error = false))]
+#[pyo3(signature = (payloads, *, threads = None, raise_on_error = false, strict = false))]
 pub fn parse_many(
     py: Python<'_>,
     payloads: Vec<Py<PyAny>>,
     threads: Option<usize>,
     raise_on_error: bool,
+    strict: bool,
 ) -> PyResult<Py<PyList>> {
     // A panic fails the whole batch rather than one slot, unlike a parse error.
     // Per-item isolation would need the panic to ride in the core's error type,
     // and `MailParseError::Generic` holds a `&'static str`, so a payload cannot
     // travel that way -- worth revisiting only if a panic is ever actually seen.
-    catch_panics(|| parse_many_inner(py, payloads, threads, raise_on_error))
+    let inner = || parse_many_inner(py, payloads, threads, raise_on_error, strict);
+    catch_panics(inner)
 }
 
 fn parse_many_inner(
@@ -693,6 +872,7 @@ fn parse_many_inner(
     payloads: Vec<Py<PyAny>>,
     threads: Option<usize>,
     raise_on_error: bool,
+    strict: bool,
 ) -> PyResult<Py<PyList>> {
     // Resolve every payload *before* releasing the GIL: this touches Python
     // objects, which requires the interpreter. What is held afterwards is a
@@ -723,10 +903,22 @@ fn parse_many_inner(
 
     let items = PyList::empty(py);
     for result in parsed {
-        match result {
+        // Under `strict`, a lossy parse becomes this slot's failure. Folded into
+        // the same `Err` arm as a parse error so `raise_on_error` needs no second
+        // implementation: one notion of "this slot failed", two ways to reach it.
+        let outcome = match result {
+            Ok(mail) => {
+                if strict && !mail.warnings.is_empty() {
+                    Err(strict_rejection(&mail.warnings))
+                } else {
+                    Ok(mail)
+                }
+            }
+            Err(error) => Err(to_py_err(error)),
+        };
+        match outcome {
             Ok(mail) => items.append(Py::new(py, PyMail::from_mail(mail))?)?,
-            Err(error) => {
-                let err = to_py_err(error);
+            Err(err) => {
                 if raise_on_error {
                     return Err(err);
                 }
@@ -744,6 +936,11 @@ fn parse_many_inner(
 /// and raises the same `ParseError` subtypes, including the recursion and size
 /// caps -- an embedded `message/rfc822` counts against the same depth limit as a
 /// multipart nest, so an onion of forwards cannot go deeper than a multipart tree.
+///
+/// No warnings channel: this API hands back raw part bytes and never
+/// charset-decodes, so it makes none of the repairs `PyMail.warnings` reports.
+/// A tree-shaped channel would want real MIME coordinates, which this traversal
+/// has for free and the flat one does not -- see `ParseWarning.part_path`.
 #[pyfunction]
 pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
     catch_panics(|| parse_email_tree_inner(py, payload))
@@ -788,6 +985,7 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyAttachmentMetadata>()?;
     m.add_class::<PyAddress>()?;
+    m.add_class::<ParseWarning>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;
     m.add("HeaderParseError", py.get_type::<HeaderParseError>())?;
     m.add("MimeStructureError", py.get_type::<MimeStructureError>())?;

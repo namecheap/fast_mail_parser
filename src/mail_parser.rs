@@ -18,6 +18,11 @@
 //! **Introducing shared mutable state here -- a decode cache being the obvious
 //! candidate, see issue #97 -- invalidates that audit and must re-open it.**
 //!
+//! The parse-warning collector (#100) is deliberately *not* an exception to
+//! that: it is a plain `Vec` owned by one `Mail::new` call and threaded by
+//! `&mut`, so it is per-call state on the stack of whichever worker is parsing.
+//! Nothing is shared, and the audit is untouched.
+//!
 //! The companion `fast_mail_parser` module is the **PyO3 binding layer**:
 //! `PyMail`/`PyAttachment` wrap these core types and convert them into Python
 //! objects. Keeping the two models separate decouples the parsing logic from the
@@ -50,6 +55,103 @@ const MAX_MIME_DEPTH: usize = 256;
 // `to_py_err` in the binding layer).
 pub(crate) const ERR_INPUT_TOO_LARGE: &str = "Input exceeds maximum allowed size";
 pub(crate) const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed depth";
+
+// Warning kinds (#100). `&'static str` rather than an enum on purpose: the value
+// crosses into Python as a string and callers match on it there, so an enum
+// would buy a conversion in each direction and nothing else. The binding layer
+// maps these to exceptions for `strict=True`, matching on identity here rather
+// than re-typing the literals.
+pub(crate) const KIND_CHARSET_FALLBACK: &str = "charset-fallback";
+pub(crate) const KIND_ADDRESS_UNPARSEABLE: &str = "address-unparseable";
+pub(crate) const KIND_DATE_UNPARSEABLE: &str = "date-unparseable";
+pub(crate) const KIND_UNTERMINATED_HEADERS: &str = "unterminated-header-block";
+
+// Held as a const so the helper that uses it is one short line instead of a
+// chain across a multi-line literal.
+const DETAIL_UNTERMINATED_HEADERS: &str = "the header block was not \
+     terminated by an empty line (RFC 5322 2.1); the separator was restored \
+     before parsing, so no part was lost -- the stdlib calls this defect \
+     MissingHeaderBodySeparatorDefect";
+
+/// One lossy repair the parser performed, recorded instead of raised (#100).
+///
+/// The empty list is the contract worth having: `warnings == []` says nothing
+/// was patched up, which is what lets a consumer route everything else to
+/// quarantine. So it has to be exact rather than best-effort -- and it has to
+/// cost nothing when there is nothing to report, because that is essentially
+/// every message. An empty `Vec` performs no allocation, and every site that
+/// builds one of these sits behind a branch well-formed mail never takes.
+#[derive(Debug)]
+pub(crate) struct Warning {
+    pub(crate) kind: &'static str,
+    /// Where the affected part landed in the result -- `"text_plain[0]"` -- or
+    /// `""` when the warning is about the message rather than one part.
+    pub(crate) part_path: String,
+    pub(crate) detail: String,
+}
+
+// The three `warn_*` helpers below are `#[cold]` and `#[inline(never)]`, which
+// is load-bearing rather than decoration. Each one formats a message, and a
+// `format!` inlined into the per-part loop is exactly the shape that cost ~30%
+// on the hot path in #135 while never executing. Keeping the formatting out of
+// line leaves the callers with a branch and a call they do not take.
+
+#[cold]
+#[inline(never)]
+fn warn_charset(warnings: &mut Vec<Warning>, field: &str, index: usize, label: &str) {
+    warnings.push(Warning {
+        kind: KIND_CHARSET_FALLBACK,
+        part_path: format!("{field}[{index}]"),
+        detail: format!(
+            "unrecognised charset {label:?}; the part was decoded as us-ascii, \
+             so every non-ASCII byte in it is now U+FFFD"
+        ),
+    });
+}
+
+#[cold]
+#[inline(never)]
+fn warn_address(warnings: &mut Vec<Warning>, name: &'static str) {
+    warnings.push(Warning {
+        kind: KIND_ADDRESS_UNPARSEABLE,
+        part_path: String::new(),
+        detail: format!(
+            "the {name} header is not a parseable address list; no mailboxes \
+             were reported for it, and its raw value is in headers"
+        ),
+    });
+}
+
+/// Record that the header block had to be resynced before mailparse saw it.
+///
+/// Inserted at the front rather than pushed: the repair happens before the parse,
+/// so it precedes anything the parse itself could report, and `warnings[0]` --
+/// which is what strict mode names -- should be the defect that changed the
+/// input. The list holds a handful of entries at most and this is the cold path,
+/// so the shift costs nothing worth avoiding.
+#[cold]
+#[inline(never)]
+fn warn_separator(warnings: &mut Vec<Warning>) {
+    let warning = Warning {
+        kind: KIND_UNTERMINATED_HEADERS,
+        part_path: String::new(),
+        detail: DETAIL_UNTERMINATED_HEADERS.to_owned(),
+    };
+    warnings.insert(0, warning);
+}
+
+#[cold]
+#[inline(never)]
+fn warn_date(warnings: &mut Vec<Warning>, date: &str) {
+    warnings.push(Warning {
+        kind: KIND_DATE_UNPARSEABLE,
+        part_path: String::new(),
+        detail: format!(
+            "the Date header {date:?} is not a parseable date; date_parsed is \
+             None while date keeps the raw value"
+        ),
+    });
+}
 
 /// Restore the header/body separator when a message omits it, or `None` when the
 /// message has one and can be parsed exactly as it stands.
@@ -222,11 +324,18 @@ pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
 /// This mirrors mailparse's internal `get_body_as_string` exactly -- same crate,
 /// same logic -- so it can be fed the bytes from `get_body_raw` to produce the
 /// same result as `get_body` without decoding the transfer encoding twice.
-fn decode_charset(body: &[u8], ctype: &ParsedContentType) -> String {
+///
+/// The second value is `true` when the label was not recognised and the bytes
+/// were decoded as us-ascii instead -- a lossy repair, because `decode_ascii`
+/// turns every non-ASCII byte into U+FFFD. Reported as a flag rather than by
+/// taking the warning collector: this function is called once per body part and
+/// gets inlined into that loop, so it stays free of anything that allocates or
+/// formats. The caller pushes the warning, out of line.
+fn decode_charset(body: &[u8], ctype: &ParsedContentType) -> (String, bool) {
     if let Some(charset) = Charset::for_label(ctype.charset.as_bytes()) {
-        charset.decode(body).0.into_owned()
+        (charset.decode(body).0.into_owned(), false)
     } else {
-        decode_ascii(body).into_owned()
+        (decode_ascii(body).into_owned(), true)
     }
 }
 
@@ -402,13 +511,22 @@ fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError>
         .get_headers()
         .get_first_value("Date")
         .unwrap_or_default();
-    let from_ = parse_addresses(mail.get_headers().get_first_header("From"))
-        .into_iter()
-        .next();
-    let to = parse_addresses(mail.get_headers().get_first_header("To"));
-    let cc = parse_addresses(mail.get_headers().get_first_header("Cc"));
-    let bcc = parse_addresses(mail.get_headers().get_first_header("Bcc"));
-    let reply_to = parse_addresses(mail.get_headers().get_first_header("Reply-To"));
+    // Metadata mode collects warnings and drops them, which is deliberate rather
+    // than an omission (#100). The value of `warnings` is the empty list meaning
+    // "nothing was repaired", and this mode never reads a body -- so an empty
+    // list here could only ever mean "nothing in the *headers* was repaired".
+    // Exposing the same attribute with a weaker guarantee would break the one
+    // property it exists to provide, so the channel stays on the mode that can
+    // honour it, and `strict=True` is rejected for this one at the boundary. A
+    // metadata-specific channel, named for what it can actually see, is a
+    // separate decision from this one.
+    let mut discarded: Vec<Warning> = Vec::new();
+    let from_list = header_addresses(&mail, "From", &mut discarded);
+    let from_ = from_list.into_iter().next();
+    let to = header_addresses(&mail, "To", &mut discarded);
+    let cc = header_addresses(&mail, "Cc", &mut discarded);
+    let bcc = header_addresses(&mail, "Bcc", &mut discarded);
+    let reply_to = header_addresses(&mail, "Reply-To", &mut discarded);
 
     let mut attachments = vec![];
 
@@ -603,11 +721,19 @@ impl Address {
 /// A header that fails to parse yields an empty list rather than an error --
 /// mailparse rejects an address with no `@`, and a malformed `To:` must not fail
 /// an otherwise good message. The raw value stays available through `headers`.
-fn parse_addresses(header: Option<&MailHeader<'_>>) -> Vec<Address> {
+/// That silence is what `warnings` ends: the dropped mailboxes are recorded as
+/// an `address-unparseable` warning (#100). An *absent* header is not a repair
+/// and is not reported.
+fn parse_addresses(
+    header: Option<&MailHeader<'_>>,
+    name: &'static str,
+    warnings: &mut Vec<Warning>,
+) -> Vec<Address> {
     let Some(header) = header else {
         return Vec::new();
     };
     let Ok(parsed) = addrparse_header(header) else {
+        warn_address(warnings, name);
         return Vec::new();
     };
 
@@ -623,6 +749,20 @@ fn parse_addresses(header: Option<&MailHeader<'_>>) -> Vec<Address> {
     addresses
 }
 
+/// Parse one named address header from a message's first occurrence of it.
+///
+/// A thin wrapper so the five call sites in `Mail::new` stay one short line
+/// each: the header lookup has to happen inside the same expression as the
+/// parse, because `get_first_header` borrows the temporary `Headers` that
+/// `get_headers()` builds.
+fn header_addresses(
+    mail: &ParsedMail<'_>,
+    name: &'static str,
+    warnings: &mut Vec<Warning>,
+) -> Vec<Address> {
+    parse_addresses(mail.get_headers().get_first_header(name), name, warnings)
+}
+
 #[derive(Debug)]
 pub(crate) struct Mail {
     pub(crate) subject: String,
@@ -636,6 +776,10 @@ pub(crate) struct Mail {
     pub(crate) reply_to: Vec<Address>,
     pub(crate) attachments: Vec<Attachment>,
     pub(crate) headers: Vec<(String, Vec<String>)>,
+    /// Every lossy repair this parse made, in the order it made them. Empty for
+    /// a pristine parse, which is the overwhelmingly common case and the one
+    /// that must stay free -- see [`Warning`].
+    pub(crate) warnings: Vec<Warning>,
 }
 
 #[derive(Debug)]
@@ -661,14 +805,28 @@ impl Mail {
             return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
         }
 
-        let repaired = repair_missing_separator(payload);
-        Mail::from_payload(repaired.as_deref().unwrap_or(payload))
+        // The repair is what saves the body; the warning is what makes the
+        // repair observable, which is the half #150 left to #100. A message that
+        // has its separator -- every well-formed one -- takes the first branch
+        // and is untouched by any of this.
+        let Some(repaired) = repair_missing_separator(payload) else {
+            return Mail::from_payload(payload);
+        };
+
+        let mut mail = Mail::from_payload(&repaired)?;
+        warn_separator(&mut mail.warnings);
+        Ok(mail)
     }
 }
 
 impl<'a> Mail {
     fn from_payload(payload: &'a [u8]) -> Result<Self, MailParseError> {
         let mail = parse_mail(payload)?;
+
+        // `Vec::new` does not allocate, so a parse that repairs nothing -- which
+        // is nearly all of them -- pays three words of stack for this and
+        // nothing else.
+        let mut warnings: Vec<Warning> = Vec::new();
 
         let headers = collect_headers(&mail);
 
@@ -688,13 +846,22 @@ impl<'a> Mail {
         // Address headers are parsed from their first occurrence, like Subject
         // and Date. `From` is a single mailbox in practice, so it is exposed as
         // one value; the first mailbox is taken if a message declares several.
-        let from_ = parse_addresses(mail.get_headers().get_first_header("From"))
-            .into_iter()
-            .next();
-        let to = parse_addresses(mail.get_headers().get_first_header("To"));
-        let cc = parse_addresses(mail.get_headers().get_first_header("Cc"));
-        let bcc = parse_addresses(mail.get_headers().get_first_header("Bcc"));
-        let reply_to = parse_addresses(mail.get_headers().get_first_header("Reply-To"));
+        let from_list = header_addresses(&mail, "From", &mut warnings);
+        let from_ = from_list.into_iter().next();
+        let to = header_addresses(&mail, "To", &mut warnings);
+        let cc = header_addresses(&mail, "Cc", &mut warnings);
+        let bcc = header_addresses(&mail, "Bcc", &mut warnings);
+        let reply_to = header_addresses(&mail, "Reply-To", &mut warnings);
+
+        // A Date that does not parse loses nothing -- `date` keeps the raw
+        // string -- but `date_parsed` goes quietly to `None`, and "quietly" is
+        // what this channel exists to fix. Checked here rather than in the
+        // `date_parsed` getter because the warning list has to be complete when
+        // the parse returns; the cost is one `dateparse` over a ~30-byte header,
+        // and only for messages that carry a Date at all.
+        if !date.is_empty() && parse_date_epoch(&date).is_none() {
+            warn_date(&mut warnings, &date);
+        }
 
         let mut attachments = vec![];
         let mut text_plain = vec![];
@@ -751,11 +918,21 @@ impl<'a> Mail {
                 // the identical transfer decode. `decode_charset` performs only the
                 // charset step, so the result matches mailparse's `get_body` output
                 // byte-for-byte (see `decode_charset`).
-                text_html.push(decode_charset(&content, &part.ctype));
+                let (text, fell_back) = decode_charset(&content, &part.ctype);
+                if fell_back {
+                    let index = text_html.len();
+                    warn_charset(&mut warnings, "text_html", index, &part.ctype.charset);
+                }
+                text_html.push(text);
             } else {
                 // Only `text/plain` reaches here: `is_body` is false for every
                 // other media type.
-                text_plain.push(decode_charset(&content, &part.ctype));
+                let (text, fell_back) = decode_charset(&content, &part.ctype);
+                if fell_back {
+                    let index = text_plain.len();
+                    warn_charset(&mut warnings, "text_plain", index, &part.ctype.charset);
+                }
+                text_plain.push(text);
             }
         }
 
@@ -771,6 +948,7 @@ impl<'a> Mail {
             reply_to,
             attachments,
             headers,
+            warnings,
         })
     }
 

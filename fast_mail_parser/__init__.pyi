@@ -13,6 +13,7 @@ __all__ = [
     "PyAttachment",
     "PyAttachmentMetadata",
     "PyAddress",
+    "ParseWarning",
     "ParseError",
     "HeaderParseError",
     "MimeStructureError",
@@ -149,6 +150,32 @@ class PyAddress:
         self.display_name = display_name
         self.address = address
 
+class ParseWarning:
+    """One lossy repair a parse performed, reported rather than raised.
+
+    ``kind`` is the stable token to match on -- currently
+    ``"charset-fallback"``, ``"address-unparseable"`` or
+    ``"date-unparseable"``. The set grows as more repairs become observable, so
+    treat an unrecognised kind as "something was repaired" rather than as
+    impossible.
+
+    ``part_path`` says where the affected part landed in the result
+    (``"text_plain[0]"``, ``"text_html[1]"``), or is ``""`` when the warning is
+    about the message as a whole. It is a locator into the returned ``PyMail``
+    rather than MIME tree coordinates: ``parse_email`` returns a flat
+    projection, so a coordinate naming structure it has already dropped would
+    be one the caller could not resolve. Use ``parse_email_tree`` when the
+    structure is what matters.
+
+    ``detail`` is prose for a log, deliberately not a matching key: the wording
+    is free to improve, ``kind`` is not.
+    """
+
+    def __init__(self, kind: str, part_path: str, detail: str) -> None:
+        self.kind = kind
+        self.part_path = part_path
+        self.detail = detail
+
 class PyAttachment:
     """A non-body MIME part: a real attachment or an inline resource.
 
@@ -208,6 +235,12 @@ class PyMail:
     and is not marked ``Content-Disposition: attachment``; every other part is an
     attachment. ``multipart/*`` container nodes are MIME structure and appear in
     neither list.
+
+    ``warnings`` lists every lossy repair the parse performed, in order. **An
+    empty list means a pristine parse** -- the guarantee a pipeline can act on:
+    route ``warnings != []`` to quarantine or manual review rather than
+    classifying a message on content that was patched up. Parsing best-effort is
+    not new; being able to tell that it happened is.
     """
 
     def __init__(
@@ -223,6 +256,7 @@ class PyMail:
         reply_to: list[PyAddress],
         attachments: list[PyAttachment],
         headers: dict[str, list[str]],
+        warnings: list[ParseWarning],
     ) -> None:
         self.subject = subject
         self.text_plain = text_plain
@@ -235,6 +269,7 @@ class PyMail:
         self.reply_to = reply_to
         self.attachments = attachments
         self.headers = headers
+        self.warnings = warnings
 
     @property
     def date_parsed(self) -> datetime | None: ...
@@ -273,7 +308,7 @@ class DecodeError(ParseError):
 
 
 @overload
-def parse_email(payload: str | bytes) -> PyMail:
+def parse_email(payload: str | bytes, *, strict: bool = False) -> PyMail:
     """Parse raw content of email and return structured datatype.
 
     A missing ``Subject`` or ``Date`` header yields the empty string ``""``
@@ -292,11 +327,25 @@ def parse_email(payload: str | bytes) -> PyMail:
     ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle
     all of them. Note that ``mode="metadata"`` cannot raise ``DecodeError``,
     because it never decodes.
+
+    Repairs short of a failure -- an unrecognised charset label, an unparseable
+    address header, an unreadable ``Date``, a header block that had to be
+    resynced -- are recorded on ``PyMail.warnings`` instead of raising, so
+    ``warnings == []`` means nothing was patched up.
+
+    ``strict=True`` raises the matching ``ParseError`` subtype instead of
+    recording a warning, for validation pipelines that would rather fail than
+    accept a repair. It changes nothing about which messages parse cleanly, and
+    it requires ``mode="full"``: metadata mode never reads the bodies, so it
+    cannot promise nothing in them was repaired. Combining the two raises
+    ``ValueError``, and the overloads below reject it statically.
     """
 
 
 @overload
-def parse_email(payload: str | bytes, *, mode: Literal["full"]) -> PyMail: ...
+def parse_email(
+    payload: str | bytes, *, mode: Literal["full"], strict: bool = False
+) -> PyMail: ...
 
 
 @overload
@@ -328,6 +377,7 @@ def parse_many(
     *,
     threads: int | None = None,
     raise_on_error: bool = False,
+    strict: bool = False,
 ) -> list[PyMail | ParseError]:
     """Parse a batch of messages in one call, in parallel, in input order.
 
@@ -340,6 +390,11 @@ def parse_many(
                 ...
 
     Pass ``raise_on_error=True`` to raise the first failure instead.
+
+    Warnings ride along per message on each ``PyMail.warnings``.
+    ``strict=True`` makes a lossy parse that slot's failure, the same way it
+    makes one a raise for ``parse_email`` -- combined with
+    ``raise_on_error=True`` it fails the batch on the first repair.
 
     ``threads`` caps the worker count; the default is the machine's parallelism.
     ``threads=0`` raises ``ValueError`` -- pass ``None`` for the default. The GIL
