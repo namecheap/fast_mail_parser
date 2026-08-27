@@ -19,8 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The import path is unchanged**, as it has been throughout:
     `from fast_mail_parser import parse_email`.
   - On `fast-mail-parser-ng`? Change the name in your requirements file and
-    nothing else. That project stays on PyPI so nothing pinning it breaks, but it
-    receives no further releases.
+    nothing else. That project is archived on PyPI -- read-only, no further
+    releases -- and the three versions published under it stay installable, so
+    nothing pinning them breaks.
 
 ### Added
 

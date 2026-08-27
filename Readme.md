@@ -27,8 +27,9 @@
 > from fast_mail_parser import parse_email
 > ```
 >
-> `fast-mail-parser-ng` stays on PyPI so nothing installing it breaks, but new
-> releases go to `fast-mail-parser`. See [The name](#the-name).
+> `fast-mail-parser-ng` is archived on PyPI: the versions published under it stay
+> installable, so nothing pinning them breaks, but it takes no further releases.
+> See [The name](#the-name).
 
 A very fast Python library for parsing `.eml` files. It is built on the Rust
 [mailparse](https://github.com/staktrace/mailparse) crate via
@@ -75,10 +76,11 @@ queue, 0.6.0 through 0.7.0 shipped as `fast-mail-parser-ng`, with the import pat
 deliberately unchanged so the switch cost one line in a requirements file.
 
 Ownership has since been transferred directly, so releases go back to the
-original name from 0.8.0 on. `fast-mail-parser-ng` is left in place — the
-releases published under it keep working, and nothing pinning it breaks — but it
-receives no new versions. If you are on it, change the name in your requirements
-file; there is nothing else to do.
+original name from 0.8.0 on, and `fast-mail-parser-ng` is **archived** on PyPI:
+read-only, taking no further releases. The three versions published under it stay
+installable, so nothing pinning them breaks — archiving marks the project as
+finished rather than removing anything. If you are on it, change the name in your
+requirements file; there is nothing else to do.
 
 Full history in the [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md).
 
