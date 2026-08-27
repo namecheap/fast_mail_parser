@@ -278,3 +278,51 @@ def test__fast_mail_parser___parse_metadata(large_message: str, benchmark: Calla
         pytest.skip("this build predates parse_email(mode=...)")
 
     benchmark(lambda: parse_email(payload, mode="metadata"))
+
+
+def test__fast_mail_parser___parse_lazy_untouched(large_message: str, benchmark: Callable):
+    # #97's lazy mode with nothing read: the parse decodes the bodies and defers
+    # every attachment, so on this fixture -- 99% attachment by decoded content --
+    # this should land near `test__fast_mail_parser___parse_metadata` and far below
+    # `test__fast_mail_parser___parse_message`. Compare all three in the same run.
+    #
+    # Guarded like the metadata benchmark, and against `ValueError` as well as
+    # `TypeError`: the gate measures THIS revision's benchmarks against the BASE
+    # revision's build (#168), and a base that already has `mode=` rejects an
+    # unknown mode with `ValueError` rather than failing to accept the argument.
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    payload = large_message.encode()
+
+    try:
+        parse_email(payload, mode="lazy")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_email(mode="lazy")')
+
+    benchmark(lambda: parse_email(payload, mode="lazy"))
+
+
+def test__fast_mail_parser___parse_lazy_all_attachments(large_message: str, benchmark: Callable):
+    # The other end of the trade, measured rather than asserted: lazy mode plus
+    # reading every attachment does the full parse's work in a worse order --
+    # a copy of each part's encoded bytes, then a re-parse of its headers per
+    # attachment. Whoever is going to decode everything anyway should use the
+    # default mode, and this is the number that says so.
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    payload = large_message.encode()
+
+    try:
+        parse_email(payload, mode="lazy")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_email(mode="lazy")')
+
+    def read_everything():
+        mail = parse_email(payload, mode="lazy")
+        return [len(attachment.content) for attachment in mail.attachments]
+
+    benchmark(read_everything)

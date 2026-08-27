@@ -9,7 +9,10 @@ types parse_email accepts, and the errors it raises.
 The sets below are frozen, not descriptive: adding to one is a deliberate act.
 `warnings` on PyMail and the `ParseWarning` export were added that way for the
 parse-warnings channel (#100) -- purely additive, so nothing an existing
-consumer reads changed name or type.
+consumer reads changed name or type. `PyLazyMail`/`PyLazyAttachment` (#97) were
+added the same way, and are new types rather than changes to these ones for
+exactly that reason: `PyAttachment.content` still costs what it always cost and
+still raises where it always raised.
 
 A failure here means a consumer-visible change. Treat it as a deliberate API
 break (update consumers, bump the version) — do not loosen the test to make it
@@ -32,9 +35,11 @@ EXPECTED_EXPORTS = {
     "MimeStructureError",
     "DecodeError",
     "PyMail",
+    "PyLazyMail",
     "PyMailMetadata",
     "PyMimePart",
     "PyAttachment",
+    "PyLazyAttachment",
     "PyAttachmentMetadata",
     "PyAddress",
     "ParseWarning",

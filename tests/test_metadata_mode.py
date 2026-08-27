@@ -199,8 +199,9 @@ def test__explicit_full_mode_matches_the_default(valid_message: str):
 
 
 def test__an_unknown_mode_is_rejected(valid_message: str):
+    # Not `"lazy"`, which this asserted until lazy mode landed (#97).
     with pytest.raises(ValueError, match="mode must be"):
-        parse_email(valid_message, mode="lazy")
+        parse_email(valid_message, mode="headers")
 
 
 def test__mode_is_keyword_only(valid_message: str):

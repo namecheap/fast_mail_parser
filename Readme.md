@@ -334,11 +334,73 @@ The type follows the mode, so nothing changes for callers of the default:
 
 ```python
 parse_email(payload)                    # PyMail
+parse_email(payload, mode="lazy")       # PyLazyMail
 parse_email(payload, mode="metadata")   # PyMailMetadata
 ```
 
 If you want structure rather than an inventory, `parse_email_tree` is the API
 that keeps it.
+
+### Deferred attachment decoding
+
+The other high-volume shape is selective extraction: find the one PDF in a
+mailbox, and decode only that. `mode="lazy"` reads the bodies as usual and
+decodes each attachment on first access, caching the result.
+
+```python
+from fast_mail_parser import parse_email
+
+mail = parse_email(payload, mode="lazy")
+
+mail.subject, mail.text_plain, mail.warnings     # identical to full mode
+
+for part in mail.attachments:
+    print(part.filename, part.mimetype, part.encoded_size, part.is_decoded)
+
+pdf = next(p for p in mail.attachments if p.mimetype == "application/pdf")
+data = pdf.content        # decoded here, and only this one
+assert pdf.content is data   # every later read is the same object
+```
+
+`encoded_size` is available before anything is decoded, which is what makes the
+choice possible: picking an attachment must not require decoding all of them.
+`is_decoded` says whether reading `content` is free or is about to cost a decode.
+
+**On the attachment-heavy fixture** (767 KiB, 99% attachment by decoded content),
+median of three interleaved rounds:
+
+| | | |
+| --- | --- | --- |
+| `mode="metadata"` | 0.37 ms | decodes nothing |
+| `mode="lazy"`, nothing read | 0.38 ms | bodies decoded, attachments deferred |
+| `mode="full"` | 1.08 ms | the default |
+| `mode="lazy"`, every attachment read | 1.09 ms | the same work, in a worse order |
+
+So deferring saves about 65% when you were not going to decode everything, and
+costs about 1% when you were. **If you are going to read every attachment, use the
+default mode** — this one is for when you are not.
+
+Two things to know before choosing it:
+
+**It trades memory for decoding.** The encoded bytes of every attachment are
+retained until the message is dropped, and base64 is about 1.33x the size of what
+it encodes — so a retained part costs *more* than the decoded bytes it avoids
+producing. Right for one attachment out of twenty; wrong for all twenty.
+
+**A `DecodeError` moves.** A part whose `Content-Transfer-Encoding` cannot be
+decoded fails the whole parse in full mode, and fails on `content` here — so a
+message with one broken attachment parses, and only that attachment raises. A
+failed decode is not cached: the next read raises again.
+
+`content` is thread-safe. Several threads reading it concurrently all get the same
+object, the GIL is released for the decode so they overlap rather than serialise,
+and `PyLazyAttachment` has no other mutable state. The cache is a `OnceLock` on
+the Python object rather than anything shared or static, so the free-threading
+audit's invariant — no shared mutable state in the parsing core — still holds.
+
+`PyLazyAttachment` is a new type rather than a lazier `PyAttachment`: changing what
+an existing attribute costs, and where it raises, is a change to a shipped
+contract. `PyAttachment.content` is exactly what it was.
 
 ### The MIME tree
 
@@ -536,12 +598,18 @@ counts them all — parse without `strict=True` to read the rest.
 becomes that slot's exception rather than costing you the batch; add
 `raise_on_error=True` to fail the whole batch on the first repair.
 
-`strict=True` requires `mode="full"`. Combining it with `mode="metadata"` raises
-`ValueError` rather than being ignored: that mode never reads the bodies, so the
-strongest thing it could say is "nothing in the headers was repaired", and a flag
-that means something weaker than it says is worse than one that is unavailable.
-Metadata mode has no `warnings` attribute for the same reason — the same
-reasoning that leaves `text_plain` absent from it rather than empty.
+`strict=True` requires a mode that reads the bodies, so `mode="full"` or
+`mode="lazy"`. It means the same thing in both: lazy mode decodes every body part
+exactly as full mode does and finds every repair full mode finds, so its
+`warnings` is the same list — deferring attachment *content* changes when a
+`DecodeError` surfaces and nothing about what was repaired.
+
+Combining it with `mode="metadata"` raises `ValueError` rather than being ignored:
+that mode never reads the bodies, so the strongest thing it could say is "nothing
+in the headers was repaired", and a flag that means something weaker than it says
+is worse than one that is unavailable. Metadata mode has no `warnings` attribute
+for the same reason — the same reasoning that leaves `text_plain` absent from it
+rather than empty.
 
 **What is not reported.** A broken quoted-printable body is repaired silently by
 the decoder rather than reported by it — mailparse decodes quoted-printable in

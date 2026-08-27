@@ -1,10 +1,10 @@
 //! Fuzz target for the newer APIs, checking them against the flat parse.
 //!
-//! `parse_email` has had a fuzz target since #156. The two APIs added since --
-//! `parse_email_metadata` (#97) and `parse_email_tree` (#99) -- are re-derivations
-//! of the same message, and the interesting bugs in a re-derivation are the ones
-//! where it disagrees with the original. So this target asserts agreement rather
-//! than only absence of panics.
+//! `parse_email` has had a fuzz target since #156. The APIs added since --
+//! `parse_email_metadata` (#97), `parse_email_tree` (#99) and
+//! `parse_email_lazy` (#97) -- are re-derivations of the same message, and the
+//! interesting bugs in a re-derivation are the ones where it disagrees with the
+//! original. So this target asserts agreement rather than only absence of panics.
 //!
 //! Invariants on arbitrary input:
 //!
@@ -27,6 +27,14 @@
 //!    reports appears as some leaf's content, and the tree root's headers are the
 //!    flat parse's headers -- the root is the same message, so they cannot differ
 //!    without one derivation having drifted from the other.
+//! 7. **A deferred decode equals the full parse's content.** This is the load-
+//!    bearing one for lazy mode: it retains a copy of each part exactly as it sits
+//!    in the message and decodes that copy on demand, which reproduces the full
+//!    parse's bytes only if mailparse's `raw_bytes` really is that part and
+//!    nothing else. Arbitrary input is the right place to test a claim about a
+//!    parser's slicing. The envelope, the bodies and the whole warning list must
+//!    agree too -- the last of those is what lets `strict=True` mean the same
+//!    thing in both modes.
 
 #![no_main]
 
@@ -59,6 +67,22 @@ fn render(part: &mail_parser::MimePart, depth: usize, out: &mut String) {
     for child in &part.children {
         render(child, depth + 1, out);
     }
+}
+
+/// A warning list as comparable values. `Warning` is deliberately not `PartialEq`
+/// -- it is a report, not a key -- so the comparison spells out what "the same
+/// warnings" means: same kinds, same locators, same wording, same order.
+fn rendered_warnings(warnings: &[mail_parser::Warning]) -> Vec<(&str, &str, &str)> {
+    warnings
+        .iter()
+        .map(|warning| {
+            (
+                warning.kind,
+                warning.part_path.as_str(),
+                warning.detail.as_str(),
+            )
+        })
+        .collect()
 }
 
 /// Every leaf's content, for the containment check against the flat parse.
@@ -142,6 +166,58 @@ fuzz_target!(|data: &[u8]| {
                 "decoded size {} is more than double the encoded size {}",
                 decoded.content.len(),
                 described.encoded_size
+            );
+        }
+    }
+
+    let lazy = mail_parser::parse_email_lazy(data);
+
+    if let Ok(full) = &full {
+        let lazy = lazy.expect(
+            "lazy mode failed where the full parse succeeded, though it decodes \
+             strictly less: it defers the attachments and reads the same bodies",
+        );
+
+        assert_eq!(full.subject, lazy.subject, "subject disagrees");
+        assert_eq!(full.date, lazy.date, "date disagrees");
+        assert_eq!(full.headers, lazy.headers, "header map disagrees");
+        assert_eq!(full.text_plain, lazy.text_plain, "text_plain disagrees");
+        assert_eq!(full.text_html, lazy.text_html, "text_html disagrees");
+        assert_eq!(
+            rendered_warnings(&full.warnings),
+            rendered_warnings(&lazy.warnings),
+            "the warning lists disagree, so strict mode would not agree either"
+        );
+
+        assert_eq!(
+            full.attachments.len(),
+            lazy.attachments.len(),
+            "attachment count disagrees"
+        );
+
+        for (decoded, deferred) in full.attachments.iter().zip(&lazy.attachments) {
+            assert_eq!(decoded.mimetype, deferred.mimetype, "mimetype disagrees");
+            assert_eq!(decoded.filename, deferred.filename, "filename disagrees");
+            assert_eq!(
+                decoded.content_id, deferred.content_id,
+                "content id disagrees"
+            );
+            assert_eq!(
+                decoded.disposition, deferred.disposition,
+                "disposition disagrees"
+            );
+
+            // The claim lazy mode rests on: the retained part decodes to exactly
+            // what the full parse decoded from it. A part the full parse decoded
+            // must also decode from its retained bytes -- if it cannot, the
+            // retained slice is not the part.
+            let content = mail_parser::decode_part(&deferred.raw).expect(
+                "a part the full parse decoded failed to decode from its \
+                 retained bytes",
+            );
+            assert_eq!(
+                decoded.content, content,
+                "the deferred decode disagrees with the full parse"
             );
         }
     }
