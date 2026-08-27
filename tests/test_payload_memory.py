@@ -14,7 +14,8 @@ normally, the decoded result would dominate and hide it.
 **A subprocess.** `ru_maxrss` is a high-water mark that never falls, so any
 earlier test in this process that allocated more would leave `before` already
 above what the call reaches — and the assertion would pass without measuring
-anything.
+anything. It runs outside the repository root, so that the source package there
+does not shadow the installed extension.
 """
 import subprocess
 import sys
@@ -57,9 +58,16 @@ PROBE = textwrap.dedent(
 )
 
 
-def test__an_oversized_payload_is_not_copied_before_being_rejected():
+def test__an_oversized_payload_is_not_copied_before_being_rejected(tmp_path):
+    # Run it from somewhere other than the repository root. `python -c` puts the
+    # working directory first on sys.path, so from the root the source
+    # `fast_mail_parser/` package shadows the installed wheel and the probe
+    # imports a package with no compiled extension in it.
     probe = subprocess.run(
-        [sys.executable, "-c", PROBE], capture_output=True, text=True
+        [sys.executable, "-c", PROBE],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
     )
 
     assert probe.returncode == 0, probe.stderr
