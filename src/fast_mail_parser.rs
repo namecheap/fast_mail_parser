@@ -22,6 +22,7 @@ use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
+use std::sync::OnceLock;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
@@ -661,6 +662,246 @@ impl PyMail {
     }
 }
 
+/// A non-body part whose bytes are decoded on first access and cached (#97).
+///
+/// Returned in `attachments` by `parse_email(payload, mode="lazy")`. The fields
+/// of `PyAttachment` plus `encoded_size` and `is_decoded`, with `content` a
+/// property that does the work rather than a value the parse already paid for.
+///
+/// A new type rather than making `PyAttachment.content` lazy. Changing what an
+/// existing attribute costs -- and when it raises -- is a change to a shipped
+/// contract, and #104 batches those into one API-v2 window; adding a type is not
+/// a breaking change and needs no window. It is the same reasoning that gave
+/// metadata mode its own attachment type instead of widening `content` to
+/// `bytes | None`.
+#[pyclass(skip_from_py_object)]
+pub struct PyLazyAttachment {
+    #[pyo3(get)]
+    pub mimetype: String,
+    #[pyo3(get)]
+    pub filename: String,
+    /// The part's `Content-ID` with angle brackets stripped, or `None`.
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    /// The part's raw `Content-Disposition` token, or `None` when the part
+    /// declares no such header. `None` and `"inline"` are distinct statements.
+    #[pyo3(get)]
+    pub disposition: Option<String>,
+    /// Bytes the part occupies in the message, **before** transfer-decoding --
+    /// the same value and the same name as `PyAttachmentMetadata.encoded_size`.
+    ///
+    /// It is what makes selective extraction possible: choosing which attachment
+    /// to decode is exactly the decision this mode exists to serve, and a size
+    /// that required a decode to obtain would defeat it.
+    #[pyo3(get)]
+    pub encoded_size: usize,
+    /// The part as it sits in the message, still encoded.
+    raw: Vec<u8>,
+    /// The decoded bytes, published exactly once.
+    ///
+    /// `OnceLock<Py<PyBytes>>` rather than `OnceLock<Vec<u8>>` so that repeated
+    /// access returns the *same* Python object rather than an equal copy of it.
+    /// That is both what a cache should mean -- `a.content is a.content` -- and
+    /// cheaper, since the second read allocates nothing at all.
+    content: OnceLock<Py<PyBytes>>,
+}
+
+#[pymethods]
+impl PyLazyAttachment {
+    /// This part's transfer-decoded bytes, decoded on first access and cached.
+    ///
+    /// Every later read returns the same `bytes` object, so keeping a reference
+    /// and re-reading the attribute cost the same thing.
+    ///
+    /// Raises `DecodeError` when the part's `Content-Transfer-Encoding` cannot be
+    /// decoded. Full mode raises that from `parse_email`; this mode raises it
+    /// from here, because here is where the decode happens. A message with one
+    /// broken attachment therefore parses in this mode and fails only on that
+    /// attachment, which is usually the more useful of the two behaviours -- and
+    /// is the same trade metadata mode makes by never decoding at all.
+    #[getter]
+    fn content<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        if let Some(cached) = self.content.get() {
+            return Ok(cached.bind(py).clone());
+        }
+        self.decode(py)
+    }
+
+    /// Whether `content` has been decoded yet.
+    ///
+    /// Deliberately public rather than a test hook. It is the only way to observe
+    /// that this mode does what it claims, which turns "an attachment nobody
+    /// reads is never decoded" from a timing argument into an assertion; and it
+    /// answers a real question for a caller holding a large inventory, namely
+    /// whether reading `content` is free or is about to cost a decode.
+    #[getter]
+    fn is_decoded(&self) -> bool {
+        self.content.get().is_some()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyLazyAttachment {} {:?} encoded_size={} decoded={}>",
+            self.mimetype,
+            self.filename,
+            self.encoded_size,
+            self.content.get().is_some()
+        )
+    }
+}
+
+impl PyLazyAttachment {
+    fn from_lazy(attachment: mail_parser::LazyAttachment) -> Self {
+        PyLazyAttachment {
+            mimetype: attachment.mimetype,
+            filename: attachment.filename,
+            content_id: attachment.content_id,
+            disposition: attachment.disposition,
+            encoded_size: attachment.encoded_size,
+            raw: attachment.raw,
+            content: OnceLock::new(),
+        }
+    }
+
+    /// Decode this part, publish the result, and hand back whatever is published
+    /// -- which is not necessarily what this call decoded.
+    ///
+    /// Two threads can arrive here together, and then both decode: `OnceLock`
+    /// has no fallible `get_or_try_init` on stable, and initialising through a
+    /// closure that cannot fail would mean either panicking on a broken transfer
+    /// encoding or caching the failure. Duplicated work under a race is the
+    /// cheaper defect, and it is bounded -- the loser's `PyBytes` is dropped and
+    /// every caller, winner or loser, returns the object the cell holds. So the
+    /// promise callers actually depend on, that `content` is always the same
+    /// object, holds without a lock.
+    ///
+    /// The GIL is released for the decode, so several threads pulling different
+    /// attachments overlap rather than serialise. `raw` is owned by this object
+    /// and this object is immutable, so nothing can move underneath the slice
+    /// while it is detached.
+    ///
+    /// `#[cold]` and out of line: it runs at most once per attachment, and the
+    /// hot path through the getter above is the cached one.
+    #[cold]
+    #[inline(never)]
+    fn decode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let raw = self.raw.as_slice();
+        let decoded = py
+            .detach(|| mail_parser::decode_part(raw))
+            .map_err(to_py_err)?;
+        let bytes = PyBytes::new(py, decoded.as_slice()).unbind();
+
+        Ok(self.content.get_or_init(|| bytes).bind(py).clone())
+    }
+}
+
+/// A parsed message whose attachment content is decoded on demand (#97).
+///
+/// Returned by `parse_email(payload, mode="lazy")`. Everything except
+/// `attachments` is what `PyMail` carries, with the same meaning -- including
+/// `warnings`, which is the same list the full parse produces, because lazy mode
+/// decodes every body part and finds every repair the full parse finds. That is
+/// what lets `strict=True` mean the same thing here.
+#[pyclass(skip_from_py_object)]
+pub struct PyLazyMail {
+    #[pyo3(get)]
+    pub subject: String,
+    #[pyo3(get)]
+    pub text_plain: Vec<String>,
+    #[pyo3(get)]
+    pub text_html: Vec<String>,
+    #[pyo3(get)]
+    pub date: String,
+    #[pyo3(get)]
+    pub from_: Option<PyAddress>,
+    #[pyo3(get)]
+    pub to: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub cc: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub bcc: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub reply_to: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub warnings: Vec<ParseWarning>,
+    /// Held as Python objects rather than Rust values, which is what makes the
+    /// cache mean anything: the same `PyLazyAttachment` has to come back from
+    /// every read of this attribute, or each read would hand out a fresh cache
+    /// and nothing would ever be cached.
+    pub attachments: Vec<Py<PyLazyAttachment>>,
+    pub headers: Vec<(String, Vec<String>)>,
+}
+
+#[pymethods]
+impl PyLazyMail {
+    /// The message's non-body parts, in message order, undecoded.
+    #[getter]
+    fn attachments<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(py, self.attachments.iter().map(|part| part.clone_ref(py)))
+    }
+
+    /// Headers, every value kept, keys in wire order -- as in `PyMail` (#157).
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
+    /// The `Date` header as an aware `datetime`, or `None` if unparseable.
+    #[getter]
+    fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
+        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
+            return Ok(None);
+        };
+        let utc = PyTzInfo::utc(py)?;
+        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyLazyMail {:?} attachments={}>",
+            self.subject,
+            self.attachments.len()
+        )
+    }
+}
+
+impl PyLazyMail {
+    /// Cold by construction, and marked so: `parse_email`'s default path never
+    /// reaches this, and cold binding code in this module has already cost the
+    /// hot path 24% through nothing but lost inlining (#99).
+    #[inline(never)]
+    fn from_lazy(py: Python<'_>, mail: mail_parser::LazyMail) -> PyResult<Self> {
+        let attachments = mail
+            .attachments
+            .into_iter()
+            .map(|part| Py::new(py, PyLazyAttachment::from_lazy(part)))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(PyLazyMail {
+            subject: mail.subject,
+            text_plain: mail.text_plain,
+            text_html: mail.text_html,
+            date: mail.date,
+            from_: mail.from_.map(PyAddress::from_address),
+            to: addresses(mail.to),
+            cc: addresses(mail.cc),
+            bcc: addresses(mail.bcc),
+            reply_to: addresses(mail.reply_to),
+            warnings: mail
+                .warnings
+                .into_iter()
+                .map(ParseWarning::from_warning)
+                .collect(),
+            attachments,
+            headers: mail.headers,
+        })
+    }
+}
+
 /// Interpret a Python object as a byte buffer for parsing.
 ///
 /// Accepts `bytes` (used as-is) or `str` (decoded as its UTF-8 bytes; ASCII is
@@ -726,8 +967,12 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
 /// resync (#150) -- are recorded on `PyMail.warnings` rather than raised, so
 /// `warnings == []` is a statement a caller can act on. `strict=True` turns each
 /// of them into the matching `ParseError` subtype instead, for validation
-/// pipelines that would rather see a failure than a repair. It requires
-/// `mode="full"`, which is the only mode that can honour it.
+/// pipelines that would rather see a failure than a repair. It requires a mode
+/// that reads the bodies, so `"full"` or `"lazy"`.
+///
+/// `mode="lazy"` returns a [`PyLazyMail`]: the bodies decoded as today, and each
+/// attachment's content decoded on first access and cached. `mode="metadata"`
+/// returns a [`PyMailMetadata`] and decodes nothing at all.
 #[pyfunction]
 #[pyo3(signature = (payload, *, mode = "full", strict = false))]
 pub fn parse_email(
@@ -767,12 +1012,26 @@ pub fn parse_email(
     parse_email_other_mode(py, payload, mode)
 }
 
+/// One `catch_panics` call site for both non-default modes, rather than the more
+/// readable arm-per-mode. `catch_panics` is generic over its closure, so an arm
+/// of its own is an instantiation of its own -- and #99 is the record of a third
+/// instantiation stopping the one that wraps `parse_email` from being inlined and
+/// costing the hot path 24% while the new code never ran. Adding a mode should
+/// not add one.
 #[inline(never)]
 fn parse_email_other_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
-    match mode {
-        "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
-        other => Err(unknown_mode(other)),
-    }
+    let lazy = match mode {
+        "lazy" => true,
+        "metadata" => false,
+        other => return Err(unknown_mode(other)),
+    };
+
+    catch_panics(|| {
+        if lazy {
+            return parse_email_lazy_mode(py, payload);
+        }
+        parse_email_metadata_mode(py, payload)
+    })
 }
 
 /// `strict=True`: the same parse, and then a verdict on what it repaired.
@@ -782,22 +1041,42 @@ fn parse_email_other_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyR
 /// #99 says is not free either -- but that function carries `#[inline(always)]`
 /// for exactly this, and an instantiation is cheaper than a hot-path argument.
 ///
-/// Only `mode="full"` can honour it. Metadata mode never reads the bodies, so the
-/// strongest thing it could say is "nothing in the *headers* was repaired", and a
-/// flag meaning something weaker than it says is worse than one that is
-/// unavailable -- the same reasoning that leaves `text_plain` absent from that
-/// mode rather than empty.
+/// `mode="lazy"` honours it too, and it means the same thing there. That mode
+/// decodes every body part exactly as full mode does and finds every repair full
+/// mode finds -- the one attachment-level repair the parse can report is found by
+/// scanning the *encoded* bytes, which lazy mode still does -- so the warning list
+/// is the same list. Deferring attachment content changes when a `DecodeError`
+/// surfaces, and nothing about what was repaired.
+///
+/// Metadata mode cannot honour it. It never reads the bodies, so the strongest
+/// thing it could say is "nothing in the *headers* was repaired", and a flag
+/// meaning something weaker than it says is worse than one that is unavailable --
+/// the same reasoning that leaves `text_plain` absent from that mode rather than
+/// empty.
+///
+/// One `catch_panics` call site covers both modes, rather than the more readable
+/// branch around two. #99 measured what a further instantiation of that generic
+/// can do to the inlining of the one wrapping `parse_email`, and readability is
+/// not worth re-testing it for.
 #[cold]
 #[inline(never)]
 fn parse_email_strict_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
     if mode == "metadata" {
-        return Err(strict_needs_full_mode());
+        return Err(strict_needs_decoded_bodies());
     }
-    if mode != "full" {
+    let lazy = mode == "lazy";
+    if !lazy && mode != "full" {
         return Err(unknown_mode(mode));
     }
 
     catch_panics(|| {
+        if lazy {
+            let mail = parse_lazy_inner(py, payload)?;
+            if !mail.warnings.is_empty() {
+                return Err(strict_rejection(&mail.warnings));
+            }
+            return Ok(Py::new(py, mail)?.into_any());
+        }
         let mail = parse_email_inner(py, payload)?;
         if !mail.warnings.is_empty() {
             return Err(strict_rejection(&mail.warnings));
@@ -810,16 +1089,17 @@ fn parse_email_strict_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> Py
 #[inline(never)]
 fn unknown_mode(mode: &str) -> PyErr {
     exceptions::PyValueError::new_err(format!(
-        "mode must be \"full\" or \"metadata\", not {mode:?}"
+        "mode must be \"full\", \"lazy\" or \"metadata\", not {mode:?}"
     ))
 }
 
 #[cold]
 #[inline(never)]
-fn strict_needs_full_mode() -> PyErr {
+fn strict_needs_decoded_bodies() -> PyErr {
     exceptions::PyValueError::new_err(
-        "strict=True needs mode=\"full\": metadata mode does not read the \
-         bodies, so it cannot tell you that nothing in them was repaired",
+        "strict=True needs mode=\"full\" or mode=\"lazy\": metadata mode does \
+         not read the bodies, so it cannot tell you that nothing in them was \
+         repaired",
     )
 }
 
@@ -835,6 +1115,29 @@ fn parse_email_metadata_mode(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<
         .map_err(to_py_err)?;
 
     Ok(Py::new(py, PyMailMetadata::from_metadata(metadata))?.into_any())
+}
+
+/// Cold, and marked so, for the same reason as the metadata entry point above.
+#[inline(never)]
+fn parse_email_lazy_mode(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let mail = parse_lazy_inner(py, payload)?;
+
+    Ok(Py::new(py, mail)?.into_any())
+}
+
+#[inline(never)]
+fn parse_lazy_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyLazyMail> {
+    let message = payload_to_bytes(&payload, py)?;
+
+    // The GIL is released for the parse, as in every other mode. What the parse
+    // retains per attachment is a copy of that part's encoded bytes, so nothing
+    // borrows from the caller's `bytes` once this returns -- which is what lets
+    // the attachments outlive the payload.
+    let mail = py
+        .detach(|| mail_parser::parse_email_lazy(message.as_ref()))
+        .map_err(to_py_err)?;
+
+    PyLazyMail::from_lazy(py, mail)
 }
 
 fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
@@ -1005,9 +1308,11 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email_tree, m)?)?;
     m.add_function(wrap_pyfunction!(_panic_for_tests, m)?)?;
     m.add_class::<PyMail>()?;
+    m.add_class::<PyLazyMail>()?;
     m.add_class::<PyMailMetadata>()?;
     m.add_class::<PyMimePart>()?;
     m.add_class::<PyAttachment>()?;
+    m.add_class::<PyLazyAttachment>()?;
     m.add_class::<PyAttachmentMetadata>()?;
     m.add_class::<PyAddress>()?;
     m.add_class::<ParseWarning>()?;

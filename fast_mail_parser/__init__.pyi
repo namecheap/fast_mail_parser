@@ -8,9 +8,11 @@ __all__ = [
     "parse_many",
     "walk",
     "PyMail",
+    "PyLazyMail",
     "PyMailMetadata",
     "PyMimePart",
     "PyAttachment",
+    "PyLazyAttachment",
     "PyAttachmentMetadata",
     "PyAddress",
     "ParseWarning",
@@ -209,6 +211,101 @@ class PyAttachment:
         self.disposition = disposition
 
 
+class PyLazyAttachment:
+    """A non-body part whose content is decoded on first access, from ``mode="lazy"``.
+
+    The fields of ``PyAttachment`` plus ``encoded_size`` and ``is_decoded``, with
+    ``content`` a property that decodes rather than a value the parse already paid
+    for. Every read after the first returns **the same** ``bytes`` object.
+
+    ``content`` raises ``DecodeError`` when the part's
+    ``Content-Transfer-Encoding`` cannot be decoded. Full mode raises that from
+    ``parse_email``; here it is raised on access, because that is where the
+    decode happens -- so a message with one broken attachment parses, and fails
+    only on that attachment.
+
+    ``encoded_size`` is the bytes the part occupies in the message *before*
+    transfer-decoding, exactly as on ``PyAttachmentMetadata``. It is what makes
+    selective extraction work: choosing which attachment to decode must not
+    require decoding any of them.
+
+    ``is_decoded`` says whether ``content`` has been decoded yet -- so whether
+    reading it is free or is about to cost a decode.
+
+    A separate type rather than a lazy ``PyAttachment.content``: changing what an
+    existing attribute costs, and when it raises, is a change to a shipped
+    contract, and those batch into one API-v2 window. Adding a type is not.
+    """
+
+    def __init__(
+        self,
+        mimetype: str,
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+        encoded_size: int,
+    ) -> None:
+        self.mimetype = mimetype
+        self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
+        self.encoded_size = encoded_size
+
+    @property
+    def content(self) -> bytes:
+        """The transfer-decoded bytes, decoded on first access and cached."""
+
+    @property
+    def is_decoded(self) -> bool:
+        """Whether ``content`` has been decoded yet."""
+
+
+class PyLazyMail:
+    """A parsed message whose attachment content is decoded on demand.
+
+    Returned by ``parse_email(payload, mode="lazy")``. Everything except
+    ``attachments`` is what ``PyMail`` carries, with the same meaning --
+    including ``warnings``, which is the same list the full parse produces:
+    lazy mode decodes every body part and finds every repair full mode finds. So
+    ``strict=True`` means the same thing here as there.
+
+    ``attachments`` are ``PyLazyAttachment`` values, and the same objects on every
+    read of the attribute -- which is what makes their caches worth anything.
+    """
+
+    def __init__(
+        self,
+        subject: str,
+        text_plain: list[str],
+        text_html: list[str],
+        date: str,
+        from_: PyAddress | None,
+        to: list[PyAddress],
+        cc: list[PyAddress],
+        bcc: list[PyAddress],
+        reply_to: list[PyAddress],
+        attachments: list[PyLazyAttachment],
+        headers: dict[str, list[str]],
+        warnings: list[ParseWarning],
+    ) -> None:
+        self.subject = subject
+        self.text_plain = text_plain
+        self.text_html = text_html
+        self.date = date
+        self.from_ = from_
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.reply_to = reply_to
+        self.attachments = attachments
+        self.headers = headers
+        self.warnings = warnings
+
+    @property
+    def date_parsed(self) -> datetime | None:
+        """The ``Date`` header as an aware ``datetime``, or ``None``."""
+
+
 class PyMail:
     """A parsed message.
 
@@ -314,19 +411,27 @@ def parse_email(payload: str | bytes, *, strict: bool = False) -> PyMail:
     A missing ``Subject`` or ``Date`` header yields the empty string ``""``
     (not ``None``) on the returned ``PyMail``.
 
+    ``mode="lazy"`` decodes the bodies as usual and defers each attachment:
+    ``PyLazyAttachment.content`` decodes on first access and caches, so an
+    attachment nobody reads is never decoded. Returns a ``PyLazyMail``. It trades
+    memory for decoding -- the encoded bytes of every attachment are retained,
+    and base64 is about 1.33x the size of what it encodes -- so it is for
+    selective extraction, not for reading everything anyway.
+
     ``mode="metadata"`` reads the headers and the attachment inventory without
     transfer-decoding anything, and returns a ``PyMailMetadata``. On an
     attachment-heavy message that is most of the work skipped. The mode picks the
     return type through these overloads, so callers of the default path see no
     change at all.
 
-    ``mode`` must be ``"full"`` or ``"metadata"``; anything else raises
-    ``ValueError``. It is keyword-only.
+    ``mode`` must be ``"full"``, ``"lazy"`` or ``"metadata"``; anything else
+    raises ``ValueError``. It is keyword-only.
 
     Raises a ``ParseError`` subtype: ``HeaderParseError``,
     ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle
     all of them. Note that ``mode="metadata"`` cannot raise ``DecodeError``,
-    because it never decodes.
+    because it never decodes, and that ``mode="lazy"`` raises an attachment's
+    ``DecodeError`` from ``content`` rather than from here.
 
     Repairs short of a failure -- an unrecognised charset label, an unparseable
     address header, an unreadable ``Date``, a header block that had to be
@@ -336,9 +441,10 @@ def parse_email(payload: str | bytes, *, strict: bool = False) -> PyMail:
     ``strict=True`` raises the matching ``ParseError`` subtype instead of
     recording a warning, for validation pipelines that would rather fail than
     accept a repair. It changes nothing about which messages parse cleanly, and
-    it requires ``mode="full"``: metadata mode never reads the bodies, so it
-    cannot promise nothing in them was repaired. Combining the two raises
-    ``ValueError``, and the overloads below reject it statically.
+    it requires a mode that reads the bodies -- ``"full"`` or ``"lazy"``.
+    Metadata mode never reads them, so it cannot promise nothing in them was
+    repaired; combining the two raises ``ValueError``, and the overloads below
+    reject it statically.
     """
 
 
@@ -346,6 +452,12 @@ def parse_email(payload: str | bytes, *, strict: bool = False) -> PyMail:
 def parse_email(
     payload: str | bytes, *, mode: Literal["full"], strict: bool = False
 ) -> PyMail: ...
+
+
+@overload
+def parse_email(
+    payload: str | bytes, *, mode: Literal["lazy"], strict: bool = False
+) -> PyLazyMail: ...
 
 
 @overload

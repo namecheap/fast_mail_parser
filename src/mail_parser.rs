@@ -15,8 +15,15 @@
 //!
 //! That is load-bearing, not incidental. It is what makes the free-threaded
 //! safety audit on issue #101 hold, and it is why `parse_many` needs no locking.
-//! **Introducing shared mutable state here -- a decode cache being the obvious
-//! candidate, see issue #97 -- invalidates that audit and must re-open it.**
+//! **Introducing shared mutable state here invalidates that audit and must
+//! re-open it.**
+//!
+//! `mode="lazy"` (#97) is the case that note named as the obvious candidate, and
+//! it is deliberately not one: this module's contribution to it is
+//! [`decode_part`], a pure function of `&[u8]`. The decode-once cache is a
+//! `OnceLock` on the *Python object* that owns the retained bytes, in the binding
+//! layer, where the object's own lifetime bounds it and PyO3 owns the
+//! free-threading question. Nothing here is shared and nothing here is mutable.
 //!
 //! The parse-warning collector (#100) is deliberately *not* an exception to
 //! that: it is a plain `Vec` owned by one `Mail::new` call and threaded by
@@ -636,6 +643,218 @@ fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError>
         reply_to,
         attachments,
         headers,
+    })
+}
+
+/// A non-body part kept encoded, to be decoded on demand (#97).
+///
+/// `raw` is the part exactly as it sits in the message: its own headers, the
+/// separator, and its still-encoded body. That is what makes a later decode
+/// reproduce what the full parse produces now, and it is precisely what
+/// mailparse's `raw_bytes` is for a subpart -- `parse_mail_recursive` hands each
+/// part `&raw_data[ix_part_start..ix_part_end]`, where the start is past the
+/// boundary line's newline and the end has the trailing CRLF stripped by
+/// `strip_trailing_crlf`, and both the part's header slice and its body slice
+/// are taken from inside that same slice. Re-parsing it therefore yields the
+/// same body bytes and the same `Content-Transfer-Encoding`, so `get_body_raw`
+/// on it is byte-for-byte the full parse's `content`.
+///
+/// Asserted rather than assumed: over the whole fixture and RFC corpus in
+/// `tests/test_lazy_mode.py`, and on arbitrary input by the `parse_agreement`
+/// fuzz target.
+///
+/// The trade is memory for decoding. Base64 is about 1.33x the size of what it
+/// encodes, so a retained part costs *more* than the decoded bytes it avoids
+/// producing -- right for finding the one PDF in a mailbox, wrong for decoding
+/// everything anyway.
+#[derive(Debug)]
+pub(crate) struct LazyAttachment {
+    pub(crate) mimetype: String,
+    pub(crate) filename: String,
+    pub(crate) content_id: Option<String>,
+    pub(crate) disposition: Option<String>,
+    /// Bytes the part's body occupies before transfer-decoding -- the same value
+    /// and the same name as in metadata mode.
+    pub(crate) encoded_size: usize,
+    pub(crate) raw: Vec<u8>,
+}
+
+/// A message with its bodies decoded and its attachments deferred (#97).
+///
+/// Everything except `attachments` is what `Mail` holds, and holds it for the
+/// same reasons: lazy mode changes *when* attachment content is materialised and
+/// nothing else. `warnings` is therefore the same list the full parse produces,
+/// which is what lets `strict=True` mean the same thing in both modes.
+#[derive(Debug)]
+pub(crate) struct LazyMail {
+    pub(crate) subject: String,
+    pub(crate) text_plain: Vec<String>,
+    pub(crate) text_html: Vec<String>,
+    pub(crate) date: String,
+    pub(crate) from_: Option<Address>,
+    pub(crate) to: Vec<Address>,
+    pub(crate) cc: Vec<Address>,
+    pub(crate) bcc: Vec<Address>,
+    pub(crate) reply_to: Vec<Address>,
+    pub(crate) attachments: Vec<LazyAttachment>,
+    pub(crate) headers: Vec<(String, Vec<String>)>,
+    pub(crate) warnings: Vec<Warning>,
+}
+
+/// Decode one retained part, exactly as the full parse would have decoded it.
+///
+/// A pure function of the bytes -- no cache, no shared state, nothing static.
+/// The decode-once cache lives in the binding layer, on the Python object that
+/// owns the bytes, so the thread-safety invariant at the top of this module is
+/// untouched by lazy mode existing.
+///
+/// The re-parse is a header scan over one part, which is why the deferral is
+/// worth anything: the cost it defers is the transfer-decode and the copy, and
+/// the cost it adds is parsing a few hundred bytes of headers again.
+pub(crate) fn decode_part(raw: &[u8]) -> Result<Vec<u8>, MailParseError> {
+    let part = parse_mail(raw)?;
+    part.get_body_raw()
+}
+
+/// Parse a message, decoding the bodies and deferring the attachments (#97).
+///
+/// Split into two functions, and duplicating the envelope extraction of
+/// `Mail::new`, for the reasons recorded on `parse_email_metadata`: the borrow of
+/// the repaired local never leaves this frame, and threading a mode through
+/// `Mail::from_payload` instead is what cost the hot path 47% in #100.
+pub(crate) fn parse_email_lazy(payload: &[u8]) -> Result<LazyMail, MailParseError> {
+    if payload.len() > MAX_INPUT_BYTES {
+        return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
+    }
+
+    // The same repair as the flat path, the tree and metadata mode, so no two
+    // views of a message whose header block was never terminated can disagree
+    // about it (#150).
+    let repaired = repair_missing_separator(payload);
+    let mut mail = lazy_from_payload(repaired.as_deref().unwrap_or(payload))?;
+    if repaired.is_some() {
+        warn_separator(&mut mail.warnings);
+    }
+    Ok(mail)
+}
+
+#[inline(never)]
+fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
+    let mail = parse_mail(payload)?;
+
+    let mut warnings: Vec<Warning> = Vec::new();
+    let headers = collect_headers(&mail);
+
+    let subject = mail
+        .get_headers()
+        .get_first_value("Subject")
+        .unwrap_or_default();
+    let date = mail
+        .get_headers()
+        .get_first_value("Date")
+        .unwrap_or_default();
+
+    let from_list = header_addresses(&mail, "From", &mut warnings);
+    let from_ = from_list.into_iter().next();
+    let to = header_addresses(&mail, "To", &mut warnings);
+    let cc = header_addresses(&mail, "Cc", &mut warnings);
+    let bcc = header_addresses(&mail, "Bcc", &mut warnings);
+    let reply_to = header_addresses(&mail, "Reply-To", &mut warnings);
+
+    if !date.is_empty() && parse_date_epoch(&date).is_none() {
+        warn_date(&mut warnings, &date);
+    }
+
+    let mut attachments = vec![];
+    let mut text_plain = vec![];
+    let mut text_html = vec![];
+
+    for part in Mail::extract_mail_parts(mail, 0)? {
+        let mime = part.ctype.mimetype.as_str();
+
+        // Structure, not content -- as in every other mode (#22).
+        if mime.starts_with("multipart/") {
+            continue;
+        }
+
+        let disposition = part.get_content_disposition();
+        let filename = part_filename(&disposition, &part.ctype);
+
+        // The same RFC 2183 rule the full parse applies (#25), so the modes
+        // agree on what an attachment is.
+        let is_body = disposition.disposition != DispositionType::Attachment
+            && matches!(mime, "text/plain" | "text/html");
+
+        // Reads the *encoded* bytes and decodes nothing, so this check is as
+        // available here as in full mode -- which is why the two modes report
+        // the same warnings even for a part whose content is never decoded.
+        let lossy_escape = quoted_printable_invalid_escape(&part);
+
+        if !is_body {
+            if let Some(at) = lossy_escape {
+                warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
+            }
+
+            let content_id = part
+                .get_headers()
+                .get_first_value("Content-ID")
+                .map(|raw| normalize_content_id(&raw));
+
+            attachments.push(LazyAttachment {
+                mimetype: mime.to_string(),
+                filename,
+                content_id,
+                disposition: disposition_token(&part, &disposition.disposition),
+                encoded_size: encoded_size(&part),
+                // The one copy this mode makes, and what makes it a trade rather
+                // than a free win. It is the encoded part, not the decoded one.
+                raw: part.raw_bytes.to_vec(),
+            });
+            continue;
+        }
+
+        // Bodies are decoded exactly as the full parse decodes them, including
+        // the error a broken transfer encoding raises: this mode defers the
+        // attachments and nothing else.
+        let content = part.get_body_raw()?;
+        let (text, fell_back) = decode_charset(&content, &part.ctype);
+
+        if mime == "text/html" {
+            if fell_back {
+                let index = text_html.len();
+                warn_charset(&mut warnings, "text_html", index, &part.ctype.charset);
+            }
+            if let Some(at) = lossy_escape {
+                warn_transfer_decode(&mut warnings, "text_html", text_html.len(), at);
+            }
+            text_html.push(text);
+        } else {
+            // Only `text/plain` reaches here: `is_body` is false for every other
+            // media type.
+            if fell_back {
+                let index = text_plain.len();
+                warn_charset(&mut warnings, "text_plain", index, &part.ctype.charset);
+            }
+            if let Some(at) = lossy_escape {
+                warn_transfer_decode(&mut warnings, "text_plain", text_plain.len(), at);
+            }
+            text_plain.push(text);
+        }
+    }
+
+    Ok(LazyMail {
+        subject,
+        text_plain,
+        text_html,
+        date,
+        from_,
+        to,
+        cc,
+        bcc,
+        reply_to,
+        attachments,
+        headers,
+        warnings,
     })
 }
 
