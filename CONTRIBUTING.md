@@ -253,6 +253,11 @@ canary crashed and was reported, and fails when it did not, because a canary tha
 goes undetected means the alarm is broken. A normal run fails on any crash, as
 you would expect.
 
+The deep run is a matrix and that verdict is decided **per job**, so every target
+needs its own canary. A target without one fails a drill by reporting that the
+alarm is broken — true of that job, misleading about the alarm. Adding a target
+means adding the four-line `canary_armed` check to it.
+
 ## Performance
 
 There is a benchmark gate on every pull request. It builds this revision **and**
