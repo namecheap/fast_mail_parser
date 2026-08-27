@@ -179,8 +179,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       RUSTUP_TOOLCHAIN: nightly
-      # Bump to upgrade cargo-fuzz; also invalidates the binary cache.
-      CARGO_FUZZ_VERSION: "0.13.1"
+      # Bump to upgrade cargo-fuzz; also invalidates the binary cache. Keep this
+      # current: 0.13.1's lockfile pins rustix 0.36.5, which uses internal
+      # `rustc_*` attributes that today's nightly rejects, so an old cargo-fuzz
+      # fails to build regardless of this repository.
+      CARGO_FUZZ_VERSION: "0.13.2"
       # Long enough to exercise the seeds and some mutation, short enough that it
       # never dominates a PR run.
       FUZZ_SECONDS: "60"
