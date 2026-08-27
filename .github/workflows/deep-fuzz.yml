@@ -13,6 +13,14 @@ name: Deep fuzz
 #     seed deliberately, to stay reproducible; here that would mean repeating one
 #     search every week forever.
 #
+# Input size is capped, because leaving it uncapped made the run slow. libFuzzer
+# takes its default limit from the largest seed, and the seed corpus contains a
+# 0.75 MiB message -- so it generated inputs averaging ~59 KiB and managed only
+# ~158 executions per second, building a 57 MiB corpus in two minutes. Bugs per
+# minute is what matters here, and mail parsers do not need 700 KiB inputs to
+# expose them; behaviour on oversized input is covered directly by
+# tests/test_dos_limits.py instead.
+#
 # A crasher becomes an artifact, a minimized reproducer, and an entry on a single
 # pinned issue rather than a new issue per run.
 on:
@@ -29,6 +37,9 @@ on:
         description: "Plant the canary input to test the crash-reporting path"
         type: boolean
         default: false
+      max_len:
+        description: "Largest input libFuzzer will generate, bytes"
+        default: "65536"
 
 permissions:
   contents: read
@@ -49,6 +60,7 @@ jobs:
       # Keep in step with the short pass in test.yml.
       CARGO_FUZZ_VERSION: "0.13.2"
       FUZZ_SECONDS: ${{ inputs.seconds || 1800 }}
+      FUZZ_MAX_LEN: ${{ inputs.max_len || 65536 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -74,8 +86,8 @@ jobs:
           path: fuzz/corpus/parse_email
           # A cache entry is immutable, so each run writes a new key and inherits
           # the newest previous one by prefix.
-          key: fuzz-corpus-parse_email-${{ github.run_id }}
-          restore-keys: fuzz-corpus-parse_email-
+          key: fuzz-corpus-v2-parse_email-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v2-parse_email-
 
       - name: Evict any canary left in the corpus
         run: |
@@ -127,6 +139,7 @@ jobs:
           set -o pipefail
           if cargo fuzz run parse_email -- \
                -max_total_time="$FUZZ_SECONDS" \
+               -max_len="$FUZZ_MAX_LEN" \
                -print_final_stats=1 2>&1 | tee fuzz-output.log; then
             echo "crashed=false" >> "$GITHUB_OUTPUT"
           else
@@ -143,7 +156,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: fuzz/corpus/parse_email
-          key: fuzz-corpus-parse_email-${{ github.run_id }}
+          key: fuzz-corpus-v2-parse_email-${{ github.run_id }}
 
       - name: Minimize the crasher
         if: steps.fuzz.outputs.crashed == 'true'

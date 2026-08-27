@@ -206,6 +206,12 @@ minutes with no fixed seed and, importantly, **caches the corpus between runs**,
 so coverage compounds instead of restarting from the fixtures every week — that
 accumulation is most of what makes a scheduled run worth more than the PR pass.
 
+Generated inputs are capped at 64 KiB (`-max_len`). Uncapped, libFuzzer takes its
+limit from the largest seed — and the seed corpus contains a 0.75 MiB message — so
+it spent its time on ~59 KiB inputs at ~158 executions per second. Bugs per minute
+is the thing being bought here, and oversized-input behaviour is covered directly
+by `tests/test_dos_limits.py` rather than by hoping the fuzzer stumbles into it.
+
 A crasher there is minimised, uploaded, and reported onto a single pinned issue
 labelled `fuzz-crash`: one issue that gets comments, not a new issue per week,
 because a crasher stays in the corpus and keeps being found until it is fixed.
