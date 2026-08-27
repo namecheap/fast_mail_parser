@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`parse_email(payload, mode="lazy")`** decodes the bodies as usual and defers
+  each attachment: `PyLazyAttachment.content` decodes on first access and caches,
+  returning a `PyLazyMail` (#97). This completes the issue: `mode="metadata"`
+  shipped in 0.8.0, and the mode axis and the overload pattern it introduced were
+  built for this to slot into.
+  - **An attachment nobody reads is never decoded**, which is the whole point and
+    is asserted rather than timed: `is_decoded` is a public attribute, so
+    "reading one attachment leaves the others untouched" is a test rather than an
+    argument. It also answers a real question for a caller holding an inventory --
+    whether reading `content` is free or is about to cost a decode.
+  - **Repeated access returns the same object.** The cache holds the `bytes`
+    object, not the bytes, so `a.content is a.content` and the second read
+    allocates nothing.
+  - **Thread-safe without a lock.** The GIL is released for the decode, so
+    concurrent readers overlap; the cache is a `OnceLock` published once, so every
+    caller -- winner or loser of a race -- returns the object the cell holds. Two
+    threads arriving together can both decode, which is bounded duplicate work
+    rather than a correctness problem: `OnceLock` has no fallible init on stable,
+    and the alternatives were panicking on a broken transfer encoding or caching
+    the failure. A failed decode is not cached at all.
+  - The free-threading audit's invariant is intact. That audit's note named a
+    decode cache as the obvious way to break it; the cache is in the binding
+    layer, on the Python object that owns the retained bytes, and the parsing
+    core's contribution is a pure function of `&[u8]`. Nothing in the core is
+    shared or mutable.
+  - **`encoded_size` on `PyLazyAttachment`**, the same value and name as in
+    metadata mode. Without it the mode would not work: choosing which attachment
+    to decode must not require decoding any of them.
+  - **A `DecodeError` moves from the parse to the attribute.** A part whose
+    transfer encoding is broken fails `parse_email` in full mode and fails on
+    `content` here, so a message with one broken attachment stays readable. Pinned
+    as a test rather than left to be discovered, like metadata mode's inability to
+    report one at all.
+  - `strict=True` works with this mode and means exactly what it means in full
+    mode: lazy mode decodes every body and finds every repair full mode finds --
+    the one attachment-level repair the parse can report is found by scanning the
+    *encoded* bytes -- so `warnings` is the same list. Asserted per fixture across
+    the corpus, and on arbitrary input by the fuzz target.
+  - **The trade, stated plainly: memory for decoding.** The encoded bytes of every
+    attachment are retained, and base64 is ~1.33x the size of what it encodes, so
+    a retained part costs more than the decoded bytes it avoids producing. On the
+    attachment-heavy fixture, median of three interleaved rounds on the CI
+    runner: metadata 0.58 ms, lazy with nothing read 0.62 ms, full 1.77 ms, lazy
+    with every attachment read 1.79 ms. Deferring saves ~65% when you were not
+    going to decode everything and costs ~2% when you were. **Use the default
+    mode if you are going to read every attachment.**
+  - A new type rather than a lazier `PyAttachment.content`. Widening or
+    re-timing an existing attribute is a breaking change, and #104 batches those
+    into one API-v2 window; the default path is untouched, and `PyMail` and
+    `Attachment` are byte-identical.
+  - Implemented by retaining each part exactly as it sits in the message --
+    mailparse's `raw_bytes`, which for a subpart is precisely that part's headers,
+    separator and still-encoded body -- and re-parsing that copy on access. Which
+    reproduces the full parse's `content` only if that claim about mailparse's
+    slicing is true, so it is tested as one: equal for every attachment across the
+    fixture and RFC corpus, and asserted on arbitrary input by the
+    `parse_agreement` fuzz target, which now also compares the envelope, the
+    bodies and the whole warning list between the two modes.
+  - The default path is unchanged, and deliberately so at the source level: the
+    new mode is answered inside the `#[inline(never)]` helper that already handles
+    metadata mode, `parse_email`'s body is byte-for-byte what it was, and strict
+    mode gained a branch inside its existing `catch_panics` rather than a second
+    call site. #99 and #100 both measured what an extra instantiation of that
+    generic can cost the hot path while never executing.
+
 ## [0.8.0] - 2026-08-27
 
 ### Changed
@@ -104,70 +171,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     messages would count all of them.
   - It cannot report `DecodeError`, because it never decodes. Header errors are
     reported in both modes.
-- **`parse_email(payload, mode="lazy")`** decodes the bodies as usual and defers
-  each attachment: `PyLazyAttachment.content` decodes on first access and caches,
-  returning a `PyLazyMail` (#97). This completes the issue -- `mode="metadata"`
-  landed above; the mode axis and the overload pattern were built for this to slot
-  into, and it did.
-  - **An attachment nobody reads is never decoded**, which is the whole point and
-    is asserted rather than timed: `is_decoded` is a public attribute, so
-    "reading one attachment leaves the others untouched" is a test rather than an
-    argument. It also answers a real question for a caller holding an inventory --
-    whether reading `content` is free or is about to cost a decode.
-  - **Repeated access returns the same object.** The cache holds the `bytes`
-    object, not the bytes, so `a.content is a.content` and the second read
-    allocates nothing.
-  - **Thread-safe without a lock.** The GIL is released for the decode, so
-    concurrent readers overlap; the cache is a `OnceLock` published once, so every
-    caller -- winner or loser of a race -- returns the object the cell holds. Two
-    threads arriving together can both decode, which is bounded duplicate work
-    rather than a correctness problem: `OnceLock` has no fallible init on stable,
-    and the alternatives were panicking on a broken transfer encoding or caching
-    the failure. A failed decode is not cached at all.
-  - The free-threading audit's invariant is intact. That audit's note named a
-    decode cache as the obvious way to break it; the cache is in the binding
-    layer, on the Python object that owns the retained bytes, and the parsing
-    core's contribution is a pure function of `&[u8]`. Nothing in the core is
-    shared or mutable.
-  - **`encoded_size` on `PyLazyAttachment`**, the same value and name as in
-    metadata mode. Without it the mode would not work: choosing which attachment
-    to decode must not require decoding any of them.
-  - **A `DecodeError` moves from the parse to the attribute.** A part whose
-    transfer encoding is broken fails `parse_email` in full mode and fails on
-    `content` here, so a message with one broken attachment stays readable. Pinned
-    as a test rather than left to be discovered, like metadata mode's inability to
-    report one at all.
-  - `strict=True` works with this mode and means exactly what it means in full
-    mode: lazy mode decodes every body and finds every repair full mode finds --
-    the one attachment-level repair the parse can report is found by scanning the
-    *encoded* bytes -- so `warnings` is the same list. Asserted per fixture across
-    the corpus, and on arbitrary input by the fuzz target.
-  - **The trade, stated plainly: memory for decoding.** The encoded bytes of every
-    attachment are retained, and base64 is ~1.33x the size of what it encodes, so
-    a retained part costs more than the decoded bytes it avoids producing. On the
-    attachment-heavy fixture, median of three interleaved rounds on the CI
-    runner: metadata 0.58 ms, lazy with nothing read 0.62 ms, full 1.77 ms, lazy
-    with every attachment read 1.79 ms. Deferring saves ~65% when you were not
-    going to decode everything and costs ~2% when you were. **Use the default
-    mode if you are going to read every attachment.**
-  - A new type rather than a lazier `PyAttachment.content`. Widening or
-    re-timing an existing attribute is a breaking change, and #104 batches those
-    into one API-v2 window; the default path is untouched, and `PyMail` and
-    `Attachment` are byte-identical.
-  - Implemented by retaining each part exactly as it sits in the message --
-    mailparse's `raw_bytes`, which for a subpart is precisely that part's headers,
-    separator and still-encoded body -- and re-parsing that copy on access. Which
-    reproduces the full parse's `content` only if that claim about mailparse's
-    slicing is true, so it is tested as one: equal for every attachment across the
-    fixture and RFC corpus, and asserted on arbitrary input by the
-    `parse_agreement` fuzz target, which now also compares the envelope, the
-    bodies and the whole warning list between the two modes.
-  - The default path is unchanged, and deliberately so at the source level: the
-    new mode is answered inside the `#[inline(never)]` helper that already handles
-    metadata mode, `parse_email`'s body is byte-for-byte what it was, and strict
-    mode gained a branch inside its existing `catch_panics` rather than a second
-    call site. #99 and #100 both measured what an extra instantiation of that
-    generic can cost the hot path while never executing.
 - **`parse_email_tree(payload)`** returns the message's MIME tree with the
   structure intact, and **`walk(part)`** iterates it depth-first in the same order
   as the stdlib's `email.message.Message.walk` (#99). A pure addition:
