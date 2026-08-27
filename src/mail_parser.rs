@@ -323,10 +323,37 @@ pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
 ///
 /// `threads` caps the worker count; `None` uses the machine's parallelism.
 /// Callers with a batch smaller than the thread count do not spawn idle workers.
+///
+/// The batching itself lives in [`parse_many_as`], which the other modes reuse;
+/// this is the full-mode call into it (#202).
 pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
     payloads: &[P],
     threads: Option<NonZeroUsize>,
 ) -> Vec<Result<Mail, MailParseError>> {
+    parse_many_as(payloads, threads, Mail::new)
+}
+
+/// The scheduler above, with the per-message parse as a parameter (#202).
+///
+/// `mode=` on `parse_many` needs the identical batching for three different
+/// result types, and the batching is the part worth not having two copies of:
+/// the dynamic cursor and the order restoration are where a bug would be subtle,
+/// while the per-message parse is a single call. So the modes vary the call and
+/// share everything around it.
+///
+/// A `fn` pointer rather than `impl Fn`, so the number of instantiations is the
+/// number of result types and not also the number of call sites. Each of the
+/// three parse functions is a plain `fn` item, and the indirect call happens once
+/// per message around a whole parse.
+pub(crate) fn parse_many_as<P, T>(
+    payloads: &[P],
+    threads: Option<NonZeroUsize>,
+    parse: fn(&[u8]) -> Result<T, MailParseError>,
+) -> Vec<Result<T, MailParseError>>
+where
+    P: AsRef<[u8]> + Sync,
+    T: Send,
+{
     if payloads.is_empty() {
         return Vec::new();
     }
@@ -340,12 +367,12 @@ pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
     if workers == 1 {
         return payloads
             .iter()
-            .map(|payload| Mail::new(payload.as_ref()))
+            .map(|payload| parse(payload.as_ref()))
             .collect();
     }
 
     let cursor = AtomicUsize::new(0);
-    let collected: Vec<Vec<(usize, Result<Mail, MailParseError>)>> = thread::scope(|scope| {
+    let collected: Vec<Vec<(usize, Result<T, MailParseError>)>> = thread::scope(|scope| {
         let handles: Vec<_> = (0..workers)
             .map(|_| {
                 scope.spawn(|| {
@@ -358,7 +385,7 @@ pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
                         if index >= payloads.len() {
                             break;
                         }
-                        mine.push((index, Mail::new(payloads[index].as_ref())));
+                        mine.push((index, parse(payloads[index].as_ref())));
                     }
                     mine
                 })
@@ -379,7 +406,7 @@ pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
     });
 
     // Restore input order. Slots are filled exactly once, so no gaps.
-    let mut ordered: Vec<Option<Result<Mail, MailParseError>>> =
+    let mut ordered: Vec<Option<Result<T, MailParseError>>> =
         (0..payloads.len()).map(|_| None).collect();
     for (index, result) in collected.into_iter().flatten() {
         ordered[index] = Some(result);
@@ -942,6 +969,166 @@ pub(crate) fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseErro
     // message whose header block was never terminated (#150).
     let repaired = repair_missing_separator(payload);
     MimePart::build(&parse_mail(repaired.as_deref().unwrap_or(payload))?, 0)
+}
+
+/// What a tree node carries where full mode carries decoded bytes (#202).
+///
+/// One enum rather than a second and third node struct: the three cases below are
+/// what `mode=` varies about a tree node, and everything else about a node --
+/// content type, headers, filename, content id, disposition, children -- is the
+/// same in all three modes and is derived by the same code. Splitting the struct
+/// would have split that derivation too, which is the thing the modes must not
+/// disagree about.
+#[derive(Debug)]
+pub(crate) enum NodeBody {
+    /// A `multipart/*` container. Its body is its children with boundaries
+    /// between them, so it has none of its own -- the same statement full mode
+    /// makes by setting `content` to `None`.
+    Container,
+    /// A leaf's body, not decoded: its size on the wire, and `raw` set to the
+    /// part exactly as it sits in the message when the mode intends to decode it
+    /// later. `raw` is mailparse's `raw_bytes` for this part, which is what makes
+    /// a later `decode_part` reproduce full mode's `content` -- the same
+    /// mechanism, and the same claim, as flat lazy mode (#97). Metadata mode
+    /// leaves it `None` and keeps only the size.
+    Undecoded {
+        encoded_size: usize,
+        raw: Option<Vec<u8>>,
+    },
+    /// Decoded during the walk, because the structure below it needed it.
+    ///
+    /// Only `message/rfc822`. Its body *is* the embedded message, so parsing it
+    /// is what gives the node children at all -- and deferring the decode would
+    /// mean deferring the structure, which is the one thing every mode of a tree
+    /// API has to deliver eagerly. The bytes are already in hand by then, so they
+    /// are published rather than dropped and decoded again.
+    Decoded {
+        encoded_size: usize,
+        content: Vec<u8>,
+    },
+}
+
+impl NodeBody {
+    /// Bytes this body occupies before transfer-decoding, or `None` for a
+    /// container -- which has no body of its own.
+    pub(crate) fn encoded_size(&self) -> Option<usize> {
+        match self {
+            NodeBody::Container => None,
+            NodeBody::Undecoded { encoded_size, .. } | NodeBody::Decoded { encoded_size, .. } => {
+                Some(*encoded_size)
+            }
+        }
+    }
+}
+
+/// One node of the MIME tree with its body undecoded or merely described (#202).
+///
+/// Deliberately not `MimePart` with a wider `content`. `MimePart.content` is
+/// `Option<Vec<u8>>` and its `None` *means* "this is a container"; a mode where
+/// `None` could also mean "not decoded yet" would make the two
+/// indistinguishable, which is the silent-wrong-answer shape this crate has
+/// rejected twice already (#150, and metadata mode's absent `text_plain`).
+#[derive(Debug)]
+pub(crate) struct TreeNode {
+    pub(crate) content_type: String,
+    pub(crate) headers: Vec<(String, Vec<String>)>,
+    pub(crate) filename: String,
+    pub(crate) content_id: Option<String>,
+    pub(crate) disposition: Option<String>,
+    pub(crate) is_message: bool,
+    pub(crate) body: NodeBody,
+    pub(crate) children: Vec<TreeNode>,
+}
+
+/// Parse a message into its MIME tree without decoding the leaves (#202).
+///
+/// `defer` picks what a leaf keeps: a copy of the part, to decode on demand
+/// (`mode="lazy"`), or only the size its body occupies on the wire
+/// (`mode="metadata"`). The traversal, the classification and the caps are the
+/// same either way, which is what keeps the two modes agreeing with each other
+/// and with full mode about the shape of a message.
+///
+/// Unlike flat metadata mode this can still raise a decode failure, for one
+/// reason: a `message/rfc822` body has to be decoded before the message inside
+/// it can be parsed, and a tree that dropped those children in one mode would
+/// not be the same tree. Nothing else is decoded.
+pub(crate) fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<TreeNode, MailParseError> {
+    if payload.len() > MAX_INPUT_BYTES {
+        return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
+    }
+
+    // The same repair as every other entry point, so no two views of a message
+    // whose header block was never terminated can disagree about it (#150).
+    let repaired = repair_missing_separator(payload);
+    build_node(
+        &parse_mail(repaired.as_deref().unwrap_or(payload))?,
+        0,
+        defer,
+    )
+}
+
+/// `#[inline(never)]`, like `MimePart::build`: it recurses, it returns a large
+/// struct, and no hot path reaches it.
+#[inline(never)]
+fn build_node(
+    part: &ParsedMail<'_>,
+    depth: usize,
+    defer: bool,
+) -> Result<TreeNode, MailParseError> {
+    if depth >= MAX_MIME_DEPTH {
+        return Err(MailParseError::Generic(ERR_MIME_DEPTH));
+    }
+
+    let mime = part.ctype.mimetype.as_str();
+    let disposition = part.get_content_disposition();
+
+    let (body, children) = if mime.starts_with("multipart/") {
+        let children = part
+            .subparts
+            .iter()
+            .map(|child| build_node(child, depth + 1, defer))
+            .collect::<Result<Vec<_>, _>>()?;
+        (NodeBody::Container, children)
+    } else if mime == "message/rfc822" {
+        // Decoded here for the reason recorded on `NodeBody::Decoded`: the
+        // embedded message is this body, and it is the child.
+        let raw = part.get_body_raw()?;
+        let inner = {
+            let repaired = repair_missing_separator(&raw);
+            let parsed = parse_mail(repaired.as_deref().unwrap_or(raw.as_slice()))?;
+            build_node(&parsed, depth + 1, defer)?
+        };
+        let body = NodeBody::Decoded {
+            encoded_size: encoded_size(part),
+            content: raw,
+        };
+        (body, vec![inner])
+    } else {
+        let body = NodeBody::Undecoded {
+            encoded_size: encoded_size(part),
+            // The one copy lazy mode makes, and the encoded part rather than the
+            // decoded one. For the root of a single-part message that is the
+            // whole payload, since mailparse's `raw_bytes` for a root is the
+            // message -- see the note in the binding layer. Metadata mode keeps
+            // nothing.
+            raw: defer.then(|| part.raw_bytes.to_vec()),
+        };
+        (body, Vec::new())
+    };
+
+    Ok(TreeNode {
+        content_type: mime.to_string(),
+        headers: collect_headers(part),
+        filename: part_filename(&disposition, &part.ctype),
+        content_id: part
+            .get_headers()
+            .get_first_value("Content-ID")
+            .map(|raw| normalize_content_id(&raw)),
+        disposition: disposition_token(part, &disposition.disposition),
+        is_message: mime == "message/rfc822",
+        body,
+        children,
+    })
 }
 
 /// Month tokens `mailparse::dateparse` accepts.

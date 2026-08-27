@@ -415,6 +415,254 @@ impl PyMimePart {
     }
 }
 
+/// One node of a MIME tree, described but not decoded (#202).
+///
+/// Returned by `parse_email_tree(payload, mode="metadata")`. Everything
+/// `PyMimePart` says about the *shape* of a message it says too -- content type,
+/// headers, filename, content id, disposition, `is_message`, children -- with
+/// `content` replaced by `encoded_size`.
+///
+/// There is deliberately no `content`, not even `None`. `PyMimePart.content` is
+/// `None` for exactly one reason, that the node is a `multipart/*` container, and
+/// a mode where `None` also meant "not decoded" would make a leaf with no body
+/// indistinguishable from a container. A missing attribute fails loudly instead
+/// -- the same choice as `PyMailMetadata`, which omits `text_plain` rather than
+/// returning an empty list.
+#[pyclass(skip_from_py_object)]
+pub struct PyMimePartMetadata {
+    #[pyo3(get)]
+    pub content_type: String,
+    pub headers: Vec<(String, Vec<String>)>,
+    #[pyo3(get)]
+    pub filename: String,
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    #[pyo3(get)]
+    pub disposition: Option<String>,
+    #[pyo3(get)]
+    pub is_message: bool,
+    /// Bytes this part's body occupies in the message, **before**
+    /// transfer-decoding -- as on `PyAttachmentMetadata`. `None` for a
+    /// `multipart/*` container, in the same place and with the same meaning as
+    /// `PyMimePart.content`'s `None`: a container has no body of its own.
+    #[pyo3(get)]
+    pub encoded_size: Option<usize>,
+    pub children: Vec<Py<PyMimePartMetadata>>,
+}
+
+#[pymethods]
+impl PyMimePartMetadata {
+    /// This part's headers, every value kept, keys in wire order.
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
+    /// The parts nested directly inside this one, in message order.
+    #[getter]
+    fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyMimePartMetadata {} children={}>",
+            self.content_type,
+            self.children.len()
+        )
+    }
+}
+
+/// One node of a MIME tree whose bytes are decoded on first access (#202).
+///
+/// Returned by `parse_email_tree(payload, mode="lazy")`. `PyMimePart` plus
+/// `encoded_size` and `is_decoded`, with `content` a property that does the work
+/// rather than a value the parse already paid for -- the same relationship
+/// `PyLazyAttachment` has to `PyAttachment`, and a new type for the same reason:
+/// re-timing an existing attribute, and moving where it raises, is a change to a
+/// shipped contract that #104 batches into an API-v2 window.
+///
+/// Memory: a leaf retains a copy of itself as it sits in the message. For a
+/// single-part message that is the whole payload, because the root *is* the leaf
+/// -- so this mode is for walking a large multipart message and decoding one part
+/// of it, which is what the tree is for, and not for small mail in bulk.
+#[pyclass(skip_from_py_object)]
+pub struct PyLazyMimePart {
+    #[pyo3(get)]
+    pub content_type: String,
+    pub headers: Vec<(String, Vec<String>)>,
+    #[pyo3(get)]
+    pub filename: String,
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    #[pyo3(get)]
+    pub disposition: Option<String>,
+    #[pyo3(get)]
+    pub is_message: bool,
+    /// Bytes this part's body occupies before transfer-decoding, or `None` for a
+    /// `multipart/*` container -- the same value and name as on
+    /// `PyMimePartMetadata` and `PyLazyAttachment`. Choosing which part to decode
+    /// must not require decoding any of them, which is what this is for.
+    #[pyo3(get)]
+    pub encoded_size: Option<usize>,
+    /// The part as it sits in the message, still encoded. `None` for a container
+    /// and for a `message/rfc822` node, whose bytes are already published below.
+    raw: Option<Vec<u8>>,
+    /// The decoded bytes, published exactly once -- as on `PyLazyAttachment`, so
+    /// that `part.content is part.content`.
+    content: OnceLock<Py<PyBytes>>,
+    pub children: Vec<Py<PyLazyMimePart>>,
+}
+
+#[pymethods]
+impl PyLazyMimePart {
+    /// This part's headers, every value kept, keys in wire order.
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
+    /// The parts nested directly inside this one, in message order.
+    #[getter]
+    fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+    }
+
+    /// Transfer-decoded bytes of a leaf, decoded on first access and cached, or
+    /// `None` for a `multipart/*` container.
+    ///
+    /// `None` means what it means on `PyMimePart`: a container's body is its
+    /// children with boundaries between them, so returning it would hand back the
+    /// same bytes twice. It never means "not decoded" -- `is_decoded` answers
+    /// that, and reading this attribute is what changes the answer.
+    ///
+    /// Raises `DecodeError` when this part's `Content-Transfer-Encoding` cannot be
+    /// decoded, exactly as `PyLazyAttachment.content` does: full mode fails the
+    /// whole tree, this mode fails only the part.
+    #[getter]
+    fn content<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        if let Some(cached) = self.content.get() {
+            return Ok(Some(cached.bind(py).clone()));
+        }
+        let Some(raw) = self.raw.as_ref() else {
+            return Ok(None);
+        };
+        self.decode(py, raw).map(Some)
+    }
+
+    /// Whether reading `content` is free.
+    ///
+    /// True once the part has been decoded, and true from the start for a
+    /// container and for a `message/rfc822` node -- neither has a decode pending.
+    /// That is the question a caller holding a large tree actually has, and it is
+    /// also what makes "a part nobody reads is never decoded" an assertion rather
+    /// than a timing argument.
+    #[getter]
+    fn is_decoded(&self) -> bool {
+        self.content.get().is_some() || self.raw.is_none()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyLazyMimePart {} children={} decoded={}>",
+            self.content_type,
+            self.children.len(),
+            self.is_decoded()
+        )
+    }
+}
+
+impl PyLazyMimePart {
+    /// Decode this part and publish the result, exactly as `PyLazyAttachment`
+    /// does -- see the long note there for why a race duplicates work rather than
+    /// needing a lock, and why the GIL is released for the decode.
+    #[cold]
+    #[inline(never)]
+    fn decode<'py>(&self, py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
+        let decoded = py
+            .detach(|| mail_parser::decode_part(raw))
+            .map_err(to_py_err)?;
+        let bytes = PyBytes::new(py, decoded.as_slice()).unbind();
+
+        Ok(self.content.get_or_init(|| bytes).bind(py).clone())
+    }
+}
+
+/// Build the two deferred node types from one core tree.
+///
+/// Two `#[inline(never)]` recursions rather than one generic, because the two
+/// differ in what they do with the body and in nothing else, and a generic over
+/// that would be two instantiations of the same code with an extra layer to read.
+/// Both are cold by construction: no flat path reaches either.
+#[inline(never)]
+fn metadata_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyMimePartMetadata> {
+    let children = node
+        .children
+        .into_iter()
+        .map(|child| Py::new(py, metadata_node(py, child)?))
+        .collect::<PyResult<Vec<_>>>()?;
+
+    Ok(PyMimePartMetadata {
+        content_type: node.content_type,
+        headers: node.headers,
+        filename: node.filename,
+        content_id: node.content_id,
+        disposition: node.disposition,
+        is_message: node.is_message,
+        encoded_size: node.body.encoded_size(),
+        children,
+    })
+}
+
+#[inline(never)]
+fn lazy_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyLazyMimePart> {
+    let children = node
+        .children
+        .into_iter()
+        .map(|child| Py::new(py, lazy_node(py, child)?))
+        .collect::<PyResult<Vec<_>>>()?;
+
+    // A `message/rfc822` body was decoded to reach the children below it, so it
+    // arrives already decoded and is published rather than thrown away: the cell
+    // is filled here and `is_decoded` is true from the start.
+    let (encoded_size, raw, content) = match node.body {
+        mail_parser::NodeBody::Container => (None, None, OnceLock::new()),
+        mail_parser::NodeBody::Undecoded { encoded_size, raw } => {
+            (Some(encoded_size), raw, OnceLock::new())
+        }
+        mail_parser::NodeBody::Decoded {
+            encoded_size,
+            content,
+        } => {
+            let cell = OnceLock::new();
+            let bytes = PyBytes::new(py, content.as_slice()).unbind();
+            let _ = cell.set(bytes);
+            (Some(encoded_size), None, cell)
+        }
+    };
+
+    Ok(PyLazyMimePart {
+        content_type: node.content_type,
+        headers: node.headers,
+        filename: node.filename,
+        content_id: node.content_id,
+        disposition: node.disposition,
+        is_message: node.is_message,
+        encoded_size,
+        raw,
+        content,
+        children,
+    })
+}
+
 /// One lossy repair a parse performed, reported rather than raised (#100).
 ///
 /// Read-only, three `str` fields, no interior mutability -- the same shape as
@@ -1175,21 +1423,94 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
 /// Warnings ride along per message on each `PyMail.warnings`; `strict=True`
 /// turns a lossy parse into that slot's error, exactly as it turns one into a
 /// raise for `parse_email`, so the two APIs agree on what "strict" means.
+///
+/// `mode=` takes the same three values `parse_email` takes and means the same
+/// things, so each slot holds a `PyMail`, a `PyLazyMail` or a `PyMailMetadata`.
+/// The mode is uniform across the batch -- it picks the slot type through the
+/// stub's overloads, which is only sound because one call cannot mix them.
+/// `strict=True` with `mode="metadata"` raises `ValueError`, exactly as it does
+/// on `parse_email`, and for the same reason: that mode never reads the bodies.
 #[pyfunction]
-#[pyo3(signature = (payloads, *, threads = None, raise_on_error = false, strict = false))]
+#[pyo3(signature = (
+    payloads, *, mode = "full", threads = None, raise_on_error = false, strict = false
+))]
 pub fn parse_many(
     py: Python<'_>,
     payloads: Vec<Py<PyAny>>,
+    mode: &str,
     threads: Option<usize>,
     raise_on_error: bool,
     strict: bool,
 ) -> PyResult<Py<PyList>> {
+    // `mode` is answered first and then forgotten, so everything below this line
+    // is byte-for-byte the revision before the mode existed -- the pattern #100,
+    // #99 and #180 each arrived at the hard way, and the reason `parse_email`
+    // reads the way it does.
+    if mode != "full" {
+        return parse_many_other_mode(py, payloads, mode, threads, raise_on_error, strict);
+    }
+
     // A panic fails the whole batch rather than one slot, unlike a parse error.
     // Per-item isolation would need the panic to ride in the core's error type,
     // and `MailParseError::Generic` holds a `&'static str`, so a payload cannot
     // travel that way -- worth revisiting only if a panic is ever actually seen.
     let inner = || parse_many_inner(py, payloads, threads, raise_on_error, strict);
     catch_panics(inner)
+}
+
+/// One `catch_panics` call site for both non-default batch modes, as
+/// `parse_email_other_mode` is for the flat ones (#99).
+#[inline(never)]
+fn parse_many_other_mode(
+    py: Python<'_>,
+    payloads: Vec<Py<PyAny>>,
+    mode: &str,
+    threads: Option<usize>,
+    raise_on_error: bool,
+    strict: bool,
+) -> PyResult<Py<PyList>> {
+    let lazy = match mode {
+        "lazy" => true,
+        "metadata" => {
+            // The same rejection, with the same message, as `parse_email`. A
+            // batch of metadata cannot promise more about the bodies than one
+            // message of it can.
+            if strict {
+                return Err(strict_needs_decoded_bodies());
+            }
+            false
+        }
+        other => return Err(unknown_mode(other)),
+    };
+
+    catch_panics(|| {
+        if lazy {
+            return parse_many_lazy(py, payloads, threads, raise_on_error, strict);
+        }
+        parse_many_metadata(py, payloads, threads, raise_on_error)
+    })
+}
+
+/// Turn the `threads` argument into a worker cap, rejecting zero.
+///
+/// `threads=0` is meaningless, and silently treating it as "the default" hides a
+/// caller bug: `threads=os.cpu_count() - 1` on a one-core machine, or an unset
+/// config value, would quietly get full parallelism instead. Reject it and let
+/// `None` be the way to ask for the default. `threads` is unsigned, so a negative
+/// value already raises OverflowError at conversion.
+///
+/// Out of line and shared by all three modes rather than written three times: the
+/// message is part of the API, and three copies of it are three chances for them
+/// to stop agreeing. `#[inline(never)]` for the usual reason in this module --
+/// the error construction is cold and belongs nowhere near a caller's body.
+#[inline(never)]
+fn resolve_workers(threads: Option<usize>) -> PyResult<Option<NonZeroUsize>> {
+    match threads {
+        Some(0) => Err(exceptions::PyValueError::new_err(
+            "threads must be at least 1; pass threads=None for the default",
+        )),
+        other => Ok(other.and_then(NonZeroUsize::new)),
+    }
 }
 
 fn parse_many_inner(
@@ -1208,19 +1529,7 @@ fn parse_many_inner(
         .map(|payload| payload_to_bytes(payload, py))
         .collect::<PyResult<_>>()?;
 
-    // `threads=0` is meaningless, and silently treating it as "the default"
-    // hides a caller bug: `threads=os.cpu_count() - 1` on a one-core machine, or
-    // an unset config value, would quietly get full parallelism instead. Reject
-    // it and let `None` be the way to ask for the default. `threads` is unsigned,
-    // so a negative value already raises OverflowError at conversion.
-    let workers = match threads {
-        Some(0) => {
-            return Err(exceptions::PyValueError::new_err(
-                "threads must be at least 1; pass threads=None for the default",
-            ));
-        }
-        other => other.and_then(NonZeroUsize::new),
-    };
+    let workers = resolve_workers(threads)?;
 
     // The whole batch parses with the GIL released, so other Python threads keep
     // running for its full duration rather than per message.
@@ -1256,6 +1565,110 @@ fn parse_many_inner(
     Ok(items.unbind())
 }
 
+/// `parse_many(..., mode="metadata")`: headers and an attachment inventory per
+/// message, decoding nothing (#202).
+///
+/// The mailbox sweep the mode was built for. #96 measured the batch API at ~12x
+/// on 2000 small messages, and #97 measured metadata mode at ~4x on an
+/// attachment-heavy one; before this a caller had to pick one of the two.
+///
+/// No `strict`: rejected at the boundary above, as on `parse_email`.
+///
+/// `#[inline(never)]`, like every other cold binding function in this module.
+#[inline(never)]
+fn parse_many_metadata(
+    py: Python<'_>,
+    payloads: Vec<Py<PyAny>>,
+    threads: Option<usize>,
+    raise_on_error: bool,
+) -> PyResult<Py<PyList>> {
+    // Borrowed, not copied, exactly as in full mode (#96).
+    let messages: Vec<Payload> = payloads
+        .iter()
+        .map(|payload| payload_to_bytes(payload, py))
+        .collect::<PyResult<_>>()?;
+
+    let workers = resolve_workers(threads)?;
+
+    let parsed = py.detach(|| {
+        mail_parser::parse_many_as(&messages, workers, mail_parser::parse_email_metadata)
+    });
+
+    let items = PyList::empty(py);
+    for result in parsed {
+        match result {
+            Ok(metadata) => {
+                items.append(Py::new(py, PyMailMetadata::from_metadata(metadata))?)?;
+            }
+            Err(error) => {
+                let err = to_py_err(error);
+                if raise_on_error {
+                    return Err(err);
+                }
+                items.append(err.value(py))?;
+            }
+        }
+    }
+    Ok(items.unbind())
+}
+
+/// `parse_many(..., mode="lazy")`: bodies decoded, attachments deferred (#202).
+///
+/// `strict=True` means here what it means everywhere else, and is honoured
+/// per slot the way full mode honours it: lazy mode finds every repair the full
+/// parse finds, so the verdict is the same verdict.
+///
+/// Worth a caution the single-message mode does not need: this retains the
+/// encoded bytes of every attachment in the *whole batch* until the batch is
+/// dropped, which is the opposite of what the mode saves on one message. Use it
+/// to sweep a batch and pull a few parts out of it, not to hold ten thousand
+/// messages' attachments undecoded.
+#[inline(never)]
+fn parse_many_lazy(
+    py: Python<'_>,
+    payloads: Vec<Py<PyAny>>,
+    threads: Option<usize>,
+    raise_on_error: bool,
+    strict: bool,
+) -> PyResult<Py<PyList>> {
+    let messages: Vec<Payload> = payloads
+        .iter()
+        .map(|payload| payload_to_bytes(payload, py))
+        .collect::<PyResult<_>>()?;
+
+    let workers = resolve_workers(threads)?;
+
+    let parsed =
+        py.detach(|| mail_parser::parse_many_as(&messages, workers, mail_parser::parse_email_lazy));
+
+    let items = PyList::empty(py);
+    for result in parsed {
+        // Folded into one `Err` arm as in full mode: one notion of "this slot
+        // failed", two ways to reach it.
+        let outcome = match result {
+            Ok(mail) => {
+                let mail = PyLazyMail::from_lazy(py, mail)?;
+                if strict && !mail.warnings.is_empty() {
+                    Err(strict_rejection(&mail.warnings))
+                } else {
+                    Ok(mail)
+                }
+            }
+            Err(error) => Err(to_py_err(error)),
+        };
+        match outcome {
+            Ok(mail) => items.append(Py::new(py, mail)?)?,
+            Err(err) => {
+                if raise_on_error {
+                    return Err(err);
+                }
+                items.append(err.value(py))?;
+            }
+        }
+    }
+    Ok(items.unbind())
+}
+
 /// Parse a message into its MIME tree, structure intact.
 ///
 /// Additive: `parse_email` is untouched. Accepts the same `str`/`bytes` payloads
@@ -1269,9 +1682,54 @@ fn parse_many_inner(
 /// message. A tree-shaped channel is also the one that should carry real MIME
 /// coordinates, which this traversal has for free and the flat one does not --
 /// see `ParseWarning.part_path`. Both are one decision, and not this one.
+///
+/// `mode="lazy"` returns a [`PyLazyMimePart`] tree, whose leaves decode on first
+/// access -- walk a large message, decode the one part you want.
+/// `mode="metadata"` returns a [`PyMimePartMetadata`] tree, which decodes nothing
+/// and retains nothing. The shape is identical in all three modes; the modes
+/// differ only in what a leaf's bytes cost.
 #[pyfunction]
-pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
-    catch_panics(|| parse_email_tree_inner(py, payload))
+#[pyo3(signature = (payload, *, mode = "full"))]
+pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+    // `mode` is answered here and then forgotten, and the default arm is one
+    // comparison followed by the call this function has always made. Same shape
+    // as `parse_email` and for the same measured reason: in this crate a match
+    // with a `format!` arm, inlined into the closure `catch_panics` inlines, has
+    // cost the parse path 30% while never executing.
+    if mode == "full" {
+        return catch_panics(|| Ok(Py::new(py, parse_email_tree_inner(py, payload)?)?.into_any()));
+    }
+
+    parse_email_tree_other_mode(py, payload, mode)
+}
+
+/// One `catch_panics` call site for both deferred tree modes, as
+/// `parse_email_other_mode` is for the flat ones -- #99 is the record of a third
+/// instantiation of that generic costing the hot path 24% while never running.
+#[inline(never)]
+fn parse_email_tree_other_mode(
+    py: Python<'_>,
+    payload: Py<PyAny>,
+    mode: &str,
+) -> PyResult<Py<PyAny>> {
+    let defer = match mode {
+        "lazy" => true,
+        "metadata" => false,
+        other => return Err(unknown_mode(other)),
+    };
+
+    catch_panics(|| {
+        let message = payload_to_bytes(&payload, py)?;
+
+        let tree = py
+            .detach(|| mail_parser::parse_tree_deferred(message.as_ref(), defer))
+            .map_err(to_py_err)?;
+
+        if defer {
+            return Ok(Py::new(py, lazy_node(py, tree)?)?.into_any());
+        }
+        Ok(Py::new(py, metadata_node(py, tree)?)?.into_any())
+    })
 }
 
 #[inline(never)]
@@ -1311,6 +1769,8 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyLazyMail>()?;
     m.add_class::<PyMailMetadata>()?;
     m.add_class::<PyMimePart>()?;
+    m.add_class::<PyLazyMimePart>()?;
+    m.add_class::<PyMimePartMetadata>()?;
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyLazyAttachment>()?;
     m.add_class::<PyAttachmentMetadata>()?;

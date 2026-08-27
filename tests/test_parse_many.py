@@ -16,7 +16,15 @@ import time
 
 import pytest
 
-from fast_mail_parser import DecodeError, ParseError, PyMail, parse_email, parse_many
+from fast_mail_parser import (
+    DecodeError,
+    ParseError,
+    PyLazyMail,
+    PyMail,
+    PyMailMetadata,
+    parse_email,
+    parse_many,
+)
 
 
 def _message(subject: str) -> bytes:
@@ -287,3 +295,186 @@ def test__threads_and_raise_on_error_are_keyword_only():
     # Positional booleans at a call site read poorly, so they are keyword-only.
     with pytest.raises(TypeError):
         parse_many([_message("x")], 2)
+
+
+# --- mode= (#202) -------------------------------------------------------------
+#
+# The batch API and the mode axis were the two halves of the same saving and did
+# not compose: a caller who wanted headers for ten thousand messages had to pick
+# one. What has to hold is that a batch in a mode is exactly a loop of
+# `parse_email` in that mode -- the batching must not change what a message
+# parses to -- plus that the combinations which cannot mean anything are refused
+# rather than silently weakened.
+
+
+def _metadata_view(mail: PyMailMetadata) -> dict:
+    return {
+        "subject": mail.subject,
+        "date": mail.date,
+        "attachments": [
+            (a.mimetype, a.filename, a.encoded_size, a.content_id, a.disposition)
+            for a in mail.attachments
+        ],
+        "headers": {key: list(values) for key, values in mail.headers.items()},
+    }
+
+
+def _lazy_view(mail: PyLazyMail) -> dict:
+    return {
+        "subject": mail.subject,
+        "date": mail.date,
+        "text_plain": list(mail.text_plain),
+        "text_html": list(mail.text_html),
+        "attachments": [
+            (a.mimetype, a.filename, a.encoded_size, a.content)
+            for a in mail.attachments
+        ],
+        "headers": {key: list(values) for key, values in mail.headers.items()},
+        "warnings": [(w.kind, w.part_path) for w in mail.warnings],
+    }
+
+
+def test__the_default_mode_is_unchanged():
+    results = parse_many([_message("a")])
+
+    assert isinstance(results[0], PyMail)
+    assert isinstance(parse_many([_message("a")], mode="full")[0], PyMail)
+
+
+def test__metadata_mode_returns_metadata_per_slot():
+    results = parse_many([_message("a"), _message("b")], mode="metadata")
+
+    assert all(isinstance(result, PyMailMetadata) for result in results)
+    assert [result.subject for result in results] == ["a", "b"]
+
+
+def test__lazy_mode_returns_lazy_mail_per_slot():
+    results = parse_many([_message("a"), _message("b")], mode="lazy")
+
+    assert all(isinstance(result, PyLazyMail) for result in results)
+    assert [result.subject for result in results] == ["a", "b"]
+
+
+def test__metadata_batch_matches_the_single_parse_across_the_corpus():
+    payloads = [open(path, "rb").read() for path in CORPUS]
+
+    batch = parse_many(payloads, mode="metadata")
+
+    for path, payload, batched in zip(CORPUS, payloads, batch, strict=True):
+        assert _metadata_view(batched) == _metadata_view(
+            parse_email(payload, mode="metadata")
+        ), f"batch and single parse disagree on {os.path.basename(path)}"
+
+
+def test__lazy_batch_matches_the_single_parse_across_the_corpus():
+    payloads = [open(path, "rb").read() for path in CORPUS]
+
+    batch = parse_many(payloads, mode="lazy")
+
+    for path, payload, batched in zip(CORPUS, payloads, batch, strict=True):
+        assert _lazy_view(batched) == _lazy_view(
+            parse_email(payload, mode="lazy")
+        ), f"batch and single parse disagree on {os.path.basename(path)}"
+
+
+@pytest.mark.parametrize("mode", ["full", "lazy", "metadata"])
+def test__order_is_preserved_in_every_mode(mode: str):
+    payloads = [_message(f"msg-{i:03d}") for i in range(50)]
+
+    results = parse_many(payloads, mode=mode)
+
+    assert [r.subject for r in results] == [f"msg-{i:03d}" for i in range(50)]
+
+
+@pytest.mark.parametrize("mode", ["full", "lazy", "metadata"])
+def test__threads_still_caps_the_workers_in_every_mode(mode: str):
+    payloads = [_message(f"m{i}") for i in range(20)]
+
+    assert [r.subject for r in parse_many(payloads, mode=mode, threads=1)] == [
+        f"m{i}" for i in range(20)
+    ]
+
+
+@pytest.mark.parametrize("mode", ["lazy", "metadata"])
+def test__threads_zero_is_rejected_in_every_mode(mode: str):
+    with pytest.raises(ValueError, match="threads must be at least 1"):
+        parse_many([_message("x")], mode=mode, threads=0)
+
+
+@pytest.mark.parametrize("mode", ["full", "lazy", "metadata"])
+def test__an_empty_batch_is_empty_in_every_mode(mode: str):
+    assert parse_many([], mode=mode) == []
+
+
+def test__a_broken_message_occupies_its_slot_in_lazy_mode():
+    # Lazy mode defers the *attachments*, so a broken body still fails the parse
+    # and lands in the slot as an error instance -- exactly as in full mode.
+    results = parse_many([_message("ok"), BROKEN], mode="lazy")
+
+    assert isinstance(results[0], PyLazyMail)
+    assert isinstance(results[1], DecodeError)
+
+
+def test__metadata_mode_never_reaches_a_decode_failure():
+    # It does not decode, so the message that fails full mode parses here. The
+    # difference is the mode's, not the batch's.
+    results = parse_many([_message("ok"), BROKEN], mode="metadata")
+
+    assert all(isinstance(result, PyMailMetadata) for result in results)
+
+
+@pytest.mark.parametrize("mode", ["lazy", "metadata"])
+def test__raise_on_error_still_raises_in_every_mode(mode: str):
+    unparseable = b" unexpected continuation\r\n\r\nbody"
+
+    with pytest.raises(ParseError):
+        parse_many([_message("ok"), unparseable], mode=mode, raise_on_error=True)
+
+
+def test__strict_applies_per_slot_in_lazy_mode():
+    # Lazy mode finds every repair full mode finds, so the verdict is the same
+    # verdict -- see test_lazy_mode.py. Here it must also be reached per slot.
+    bad_date = b"Subject: s\r\nDate: not a date\r\n\r\nbody"
+
+    results = parse_many([_message("clean"), bad_date], mode="lazy", strict=True)
+
+    assert isinstance(results[0], PyLazyMail)
+    assert isinstance(results[1], ParseError)
+
+
+def test__strict_with_metadata_mode_is_rejected():
+    # The same refusal, with the same message, as parse_email: a mode that never
+    # reads the bodies cannot promise that nothing in them was repaired. Raised
+    # rather than quietly ignored, and raised before any parsing happens.
+    with pytest.raises(ValueError, match="strict=True needs"):
+        parse_many([_message("x")], mode="metadata", strict=True)
+
+
+def test__an_unknown_mode_is_rejected():
+    with pytest.raises(ValueError, match='"full", "lazy" or "metadata"'):
+        parse_many([_message("x")], mode="sweep")
+
+
+def test__mode_is_keyword_only():
+    with pytest.raises(TypeError):
+        parse_many([_message("x")], "metadata")
+
+
+@pytest.mark.parametrize("mode", ["lazy", "metadata"])
+def test__a_non_payload_entry_still_raises_type_error(mode: str):
+    with pytest.raises(TypeError):
+        parse_many([_message("ok"), 123], mode=mode)
+
+
+def test__a_lazy_batch_defers_every_attachment(attachment_message: str):
+    payloads = [attachment_message.encode()] * 4
+
+    results = parse_many(payloads, mode="lazy")
+
+    attachments = [a for mail in results for a in mail.attachments]
+    assert attachments, "the fixture must carry attachments"
+    assert not any(a.is_decoded for a in attachments)
+
+    assert isinstance(attachments[0].content, bytes)
+    assert attachments[0].is_decoded
+    assert not any(a.is_decoded for a in attachments[1:])

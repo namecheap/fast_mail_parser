@@ -9,6 +9,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`mode=` on `parse_many` and `parse_email_tree`** (#202), honouring the same
+  `"full"` / `"lazy"` / `"metadata"` values `parse_email` honours. The mode axis
+  shipped on one entry point of three; these are the two where it is worth the
+  most, and until now a caller had to choose between a mode and the API.
+  - **`parse_many(payloads, mode="metadata")`** is the mailbox sweep the mode was
+    built for. The batch API removes per-message overhead (#96: ~12x at
+    2000 × 0.8 KB) and metadata mode removes the decoding (#97: ~3x on an
+    attachment-heavy message); they now compose. Measured on the 767 KiB fixture,
+    8 messages, `threads=1`: full 8.96 ms, metadata 2.94 ms — **3.0x**, the same
+    ratio the single-message mode gets. On 2000 × 0.8 KB it is 2.80 ms against
+    3.04 ms, because small messages are mostly headers and there is little
+    decoding to skip.
+  - **`parse_email_tree(payload, mode="lazy")`** is the forensics case: walk the
+    structure of a large message and decode the one part you want. A full-mode
+    tree decodes every leaf, which is the wrong bill for exactly what the tree is
+    best at. `mode="metadata"` decodes nothing *and retains nothing*. On the same
+    fixture: full tree 1.10 ms, lazy with nothing read 0.38 ms, metadata
+    0.37 ms — **~2.9x**.
+  - **Two new node types, `PyLazyMimePart` and `PyMimePartMetadata`**, rather than
+    a wider `PyMimePart`. `PyMimePart.content` is `bytes | None` and its `None`
+    *means* "this node is a `multipart/*` container"; a mode where it also meant
+    "not decoded yet" would make a leaf indistinguishable from a container, which
+    is the silent-wrong-answer shape #150 and metadata mode's absent `text_plain`
+    were both about. A metadata node therefore has no `content` attribute at all
+    and reports `encoded_size` instead — `None` in the same place, and with the
+    same meaning, as `content`'s `None`. Making `PyMimePart.content` lazy would
+    also have re-timed a shipped attribute and moved where it raises, which is
+    what #104 batches into an API-v2 window; adding a type is not.
+  - **Two rather than one**, because the two differ in more than presentation:
+    lazy mode retains a copy of every leaf so it can decode one later, metadata
+    mode retains none. On a tree that difference is the memory, which is the point
+    of the sweep.
+  - **The tree is the same tree in every mode.** Every per-node field except the
+    body is asserted equal to full mode's across the whole fixture and RFC corpus,
+    and on arbitrary input by the `parse_agreement` fuzz target, which gained the
+    #202 derivations. A mode that quietly reshaped a message would be the exact
+    failure that target exists to catch, and it has caught two already.
+  - **`message/rfc822` is still decoded, in every mode.** Its body *is* the
+    embedded message, so parsing it is what gives the node children — deferring it
+    would defer the structure, which is the one thing a tree API has to deliver
+    eagerly. The bytes are published rather than dropped and decoded again, so
+    such a node has `is_decoded == True` from the start; and unlike
+    `parse_email(mode="metadata")`, a deferred tree can raise `DecodeError` for
+    such a part. Documented, and pinned as a test.
+  - **The lazy tree extends the `raw_bytes` claim to a root.** Flat lazy mode
+    defers only subparts; a single-part message's tree root *is* the leaf, so the
+    retained slice is the whole payload. That the re-parse still reproduces full
+    mode's bytes is asserted per fixture and on arbitrary input rather than
+    assumed.
+  - **Combinations that cannot mean anything are refused.** `strict=True` with
+    `mode="metadata"` raises `ValueError` on `parse_many` with the same message it
+    raises on `parse_email`, and before any parsing happens. `strict=True` with
+    `mode="lazy"` is honoured per slot and means what it means everywhere else.
+    The tree has no `strict` in any mode, because it has no warnings channel to be
+    strict about.
+  - `walk` accepts a node from any mode and yields nodes of the same type. Its
+    implementation was already duck-typed; the stub now says so with a
+    value-restricted `TypeVar`, which is non-breaking — walking a `PyMimePart`
+    still yields `PyMimePart`.
+  - **Measured, not assumed.** Interleaved A/B against `master`, three rounds a
+    side: worst treatment delta +0.5% against a 4.4% control noise floor, with
+    `parse_message` at -1.2% and `parse_many` at -0.2%. The default paths are
+    answered in the first lines of their entry points and are byte-for-byte what
+    they were; every new binding function carries `#[inline(never)]`, the two error
+    constructors are the existing `#[cold]` ones, and each new mode pair shares one
+    `catch_panics` call site. #99, #100, #135 and #180 are four records of code
+    that never executes costing this hot path 15-96%.
+  - The batch scheduler is now shared rather than copied: `parse_many_as` takes the
+    per-message parse as a `fn` pointer, and `parse_many` is a call to it. The
+    dynamic cursor and the order restoration are where a bug would be subtle, so
+    there is one of them and not three.
+
 - **`parse_email(payload, mode="lazy")`** decodes the bodies as usual and defers
   each attachment: `PyLazyAttachment.content` decodes on first access and caches,
   returning a `PyLazyMail` (#97). This completes the issue: `mode="metadata"`
