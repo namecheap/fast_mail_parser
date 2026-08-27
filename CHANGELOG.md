@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     classifying a message on content that was silently mended. Asserted over the
     whole fixture and RFC corpus, so good mail cannot start warning by accident.
   - Kinds emitted today: `charset-fallback`, `address-unparseable`,
-    `date-unparseable`, and `unterminated-header-block` — the last of which is
+    `date-unparseable`, `transfer-decode-lossy`, and `unterminated-header-block`
+    — the last of which is
     #150's repair becoming observable. That message's header block is never
     closed, so the payload is resynced before `mailparse` reads it; the repair is
     what saved the body, and this is what says the repair happened.

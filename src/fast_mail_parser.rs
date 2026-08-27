@@ -123,9 +123,9 @@ fn strict_rejection(warnings: &[ParseWarning]) -> PyErr {
         // as "usually the input is not an email at all", would say the wrong
         // thing about it.
         mail_parser::KIND_UNTERMINATED_HEADERS => MimeStructureError::new_err(message),
-        mail_parser::KIND_CHARSET_FALLBACK | mail_parser::KIND_DATE_UNPARSEABLE => {
-            DecodeError::new_err(message)
-        }
+        mail_parser::KIND_CHARSET_FALLBACK
+        | mail_parser::KIND_DATE_UNPARSEABLE
+        | mail_parser::KIND_TRANSFER_DECODE_LOSSY => DecodeError::new_err(message),
         // A kind added to the core without a row above still fails strict mode,
         // just at the base of the hierarchy. Failing open would break the only
         // promise strict mode makes, which is that nothing lossy gets through.

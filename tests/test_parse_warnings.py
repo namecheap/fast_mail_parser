@@ -523,3 +523,94 @@ def test__full_mode_accepts_strict_alongside_an_explicit_mode():
 
     with pytest.raises(DecodeError):
         parse_email(BAD_DATE, mode="full", strict=True)
+
+
+# --- transfer-decode-lossy -----------------------------------------------------
+#
+# mailparse decodes quoted-printable in robust mode, which passes an invalid
+# escape through as literal text rather than failing. So the parse succeeds and
+# the sender's intent is silently lost, which is the shape this channel is for.
+
+
+def _quoted_printable(body: bytes, content_type: bytes = b"text/plain") -> bytes:
+    return (
+        b"Subject: qp\r\n"
+        b"Content-Type: " + content_type + b"; charset=utf-8\r\n"
+        b"Content-Transfer-Encoding: quoted-printable\r\n"
+        b"\r\n" + body
+    )
+
+
+def test__an_invalid_quoted_printable_escape_is_reported():
+    # `=ZZ` is not a hex escape and not a soft line break, so a strict decoder
+    # rejects it and robust decoding keeps it as three literal characters.
+    mail = parse_email(_quoted_printable(b"before =ZZ after\r\n"))
+
+    kinds = [w.kind for w in mail.warnings]
+    assert kinds == ["transfer-decode-lossy"], kinds
+    assert mail.warnings[0].part_path == "text_plain[0]"
+    assert "hex digits" in mail.warnings[0].detail
+
+
+def test__the_invalid_escape_survives_in_the_content():
+    # The best-effort content is asserted alongside the warning: the escape is
+    # still there, undecoded, which is exactly the loss being reported.
+    mail = parse_email(_quoted_printable(b"before =ZZ after\r\n"))
+
+    assert "=ZZ" in mail.text_plain[0]
+
+
+def test__valid_escapes_and_soft_breaks_are_not_a_repair():
+    # `=3D` is a hex escape, `=\r\n` is a soft line break. Neither is lossy, and
+    # a channel whose empty list means something cannot cry wolf on ordinary mail.
+    mail = parse_email(_quoted_printable(b"a=3Db and a soft=\r\n break\r\n"))
+
+    assert mail.warnings == []
+    assert "a=b" in mail.text_plain[0]
+
+
+def test__a_bare_lf_body_is_not_reported_as_lossy():
+    # Robust mode also turns a bare LF into CRLF, which a strict decoder rejects
+    # too -- but reporting that would warn on most mail written with bare LFs.
+    # Deliberately out of scope; see the note on the scanner.
+    mail = parse_email(_quoted_printable(b"one\ntwo\nthree\n"))
+
+    assert mail.warnings == []
+
+
+def test__an_invalid_escape_in_an_attachment_names_the_attachment():
+    message = (
+        b"Subject: qp attachment\r\n"
+        b'Content-Type: application/octet-stream; name="x.bin"\r\n'
+        b"Content-Disposition: attachment\r\n"
+        b"Content-Transfer-Encoding: quoted-printable\r\n"
+        b"\r\n"
+        b"=ZZ\r\n"
+    )
+
+    mail = parse_email(message)
+
+    assert [w.kind for w in mail.warnings] == ["transfer-decode-lossy"]
+    assert mail.warnings[0].part_path == "attachments[0]"
+
+
+def test__strict_mode_rejects_an_invalid_escape():
+    with pytest.raises(DecodeError):
+        parse_email(_quoted_printable(b"before =ZZ after\r\n"), strict=True)
+
+
+def test__base64_is_not_scanned_for_quoted_printable_escapes():
+    # An `=` in base64 is padding, not an escape. Scanning it would report every
+    # padded attachment in existence.
+    message = (
+        b"Subject: b64\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"Content-Transfer-Encoding: base64\r\n"
+        b"\r\n"
+        b"aGVsbG8=\r\n"
+    )
+
+    mail = parse_email(message)
+
+    assert mail.warnings == []
+    assert mail.text_plain == ["hello"]
