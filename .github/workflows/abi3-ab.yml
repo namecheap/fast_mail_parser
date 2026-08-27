@@ -56,11 +56,21 @@ jobs:
           sed -i 's|, "pyo3/abi3-py311"||' Cargo.toml
           # Never trust a sed silently -- if the pattern drifts, the "candidate"
           # is the same build and the run reports a reassuring 0%.
-          if grep -q 'abi3' Cargo.toml; then
-            echo "::error::abi3 still present in Cargo.toml after the edit"
-            grep -n abi3 Cargo.toml
-            exit 1
-          fi
+          #
+          # Inspect the feature line, not the whole file: the comment above it
+          # explains abi3, so a file-wide grep always matched and failed the run
+          # while in fact proving the edit had worked.
+          features=$(grep -E '^default *=' Cargo.toml)
+          echo "default features now: $features"
+          case "$features" in
+            *abi3*)
+              echo "::error::the feature edit did not take: $features"
+              exit 1 ;;
+            *extension-module*) ;;
+            *)
+              echo "::error::unrecognised default features after the edit: $features"
+              exit 1 ;;
+          esac
           # A separate target dir, for the same reason cargo would otherwise hand
           # back the previous build's artifacts.
           CARGO_TARGET_DIR="$RUNNER_TEMP/target-versioned" \
