@@ -212,3 +212,16 @@ def test__threaded___threadpool_parse_email_small(benchmark: Callable):
 
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
         benchmark(lambda: list(pool.map(parse_email, batch)))
+
+
+def test__fast_mail_parser___parse_tree(large_message: str, benchmark: Callable):
+    # The structural API against the flat one, on the same message. #99 asks for
+    # the overhead to be measured rather than assumed, and the tree genuinely does
+    # more: it decodes every leaf, including parts the flat projection drops, and
+    # builds a Python object per part. Compare with
+    # `test__fast_mail_parser___parse_message` in the same run.
+    from fast_mail_parser import parse_email_tree
+
+    payload = large_message.encode()
+
+    benchmark(lambda: parse_email_tree(payload))
