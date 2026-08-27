@@ -169,6 +169,9 @@ malformed input, an unparseable header yields `None` and leaves `date` intact:
 undated = parse_email(b"Subject: x\r\nDate: not a date\r\n\r\nbody\r\n")
 assert undated.date_parsed is None
 assert undated.date == "not a date"
+
+# ...and says so, rather than leaving you to notice the None:
+assert [w.kind for w in undated.warnings] == ["date-unparseable"]
 ```
 
 The instant is exact; the header's original UTC offset is not retained, so read
@@ -189,6 +192,40 @@ A malformed transfer encoding also raises `ParseError` rather than silently
 yielding an empty body — specifically `DecodeError`, one of three subtypes
 (`HeaderParseError`, `MimeStructureError`, `DecodeError`). All inherit from
 `ParseError`, so catching that still catches everything.
+
+### Warnings, and strict mode
+
+The stdlib records what it had to work around on `message.defects`. The
+equivalent here is `mail.warnings`, and the useful half of the contract is the
+empty list: nothing in the list means nothing was repaired.
+
+```python
+from fast_mail_parser import DecodeError
+
+pristine = parse_email(b"Subject: x\r\nDate: Mon, 01 Jan 2024 12:00:00 +0000\r\n\r\nhi\r\n")
+assert pristine.warnings == []
+
+repaired = parse_email(b"Subject: x\r\nTo: not-an-address\r\n\r\nhi\r\n")
+assert [w.kind for w in repaired.warnings] == ["address-unparseable"]
+assert repaired.to == []                      # best-effort result, unchanged
+assert repaired.headers["To"] == ["not-an-address"]
+```
+
+Pass `strict=True` when you would rather fail than accept a repair. Each
+condition raises the matching `ParseError` subtype instead of being recorded:
+
+```python
+strict_rejected = False
+try:
+    parse_email(b"Subject: x\r\nDate: not a date\r\n\r\nbody\r\n", strict=True)
+except DecodeError:
+    strict_rejected = True
+assert strict_rejected
+
+# Unlike the stdlib's policies, this changes only what is rejected -- never how a
+# message that parses is interpreted.
+assert parse_email(b"Subject: x\r\n\r\nbody\r\n", strict=True).subject == "x"
+```
 
 ## Known differences from the stdlib
 

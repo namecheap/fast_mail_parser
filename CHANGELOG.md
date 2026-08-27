@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PyMail.warnings`** reports the lossy repairs a parse performed, and
+  **`parse_email(payload, strict=True)`** raises them instead (#100). Additive:
+  the default path is unchanged, and no existing attribute changed name or type.
+  - The parser has always been best-effort in the middle ground between "valid"
+    and "invalid" — an unresolvable charset label is decoded as us-ascii, an
+    unparseable address header yields no mailboxes, an unreadable `Date` leaves
+    `date_parsed` at `None`. All three returned a result and said nothing. The
+    new `list[ParseWarning]` says which, where, and what was lost.
+  - **The empty list is the contract.** `warnings == []` means nothing was
+    patched up, so a pipeline can route everything else to quarantine instead of
+    classifying a message on content that was silently mended. Asserted over the
+    whole fixture and RFC corpus, so good mail cannot start warning by accident.
+  - Kinds emitted today: `charset-fallback`, `address-unparseable`,
+    `date-unparseable`. `ParseWarning.part_path` locates the affected value in
+    the result (`"text_plain[0]"`), or is `""` for a message-level warning.
+  - `part_path` is a locator into the returned `PyMail` rather than MIME tree
+    coordinates, which the issue proposed. The flat parse discards the structure
+    a coordinate would name, and every way of reconstructing it charges *every*
+    message for bookkeeping almost none needs — in the same traversal where #135
+    measured a 30% regression from widening what it carries. Tree coordinates
+    belong on `parse_email_tree`, whose walk already has them.
+  - `strict=True` maps each kind onto the existing hierarchy —
+    `address-unparseable` to `HeaderParseError`, the other two to `DecodeError` —
+    so it adds no exception types and `except ParseError` still catches
+    everything. It adds rejections rather than reclassifying: a message that
+    parses cleanly parses identically either way, and one that fails outright
+    fails with the same type. `parse_many(payloads, strict=True)` applies it per
+    slot.
+  - Free when there is nothing to report, which is the case that matters. The
+    collector is a `Vec` that does not allocate until pushed; every warning site
+    is a branch well-formed mail does not take; and each one's `format!` lives in
+    a `#[cold]`/`#[inline(never)]` helper, because a `format!` inlined into the
+    per-part loop is the exact shape that cost 30% in #135. Strict mode is a
+    check *after* the parse rather than a flag threaded through it, so the core
+    never learns about it.
+  - Not reported yet, and deliberately: a broken quoted-printable body is
+    repaired silently by mailparse's decoder rather than reported by it, so
+    observing it would mean decoding twice. Nor is #150's lost body part — the
+    repair for that message is what can say a repair happened, so its kind
+    belongs with the fix rather than being guessed at here.
+
 - A second fuzz target, `parse_agreement`, checks metadata mode and the tree API
   against the flat parse on arbitrary input rather than only for absence of
   panics: the envelope and the attachment inventory must agree between modes, and
