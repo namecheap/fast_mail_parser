@@ -88,21 +88,30 @@ fn total_output_bytes(mail: &mail_parser::Mail) -> usize {
     bodies + attachments + headers + mail.subject.len() + mail.date.len()
 }
 
-/// Input that makes this target panic on purpose.
+/// Panic on purpose when `FMP_FUZZ_CANARY` is set in the environment.
 ///
-/// The scheduled deep run is supposed to turn a crasher into an artifact and a
-/// filed issue, and #102 asks for that path to be verified rather than trusted.
-/// Verifying it needs a crash on demand, and the whole point of the harness is
-/// that no known input produces one -- so this provides it.
+/// The scheduled deep run turns a crasher into an artifact and a filed issue, and
+/// #102 asks for that path to be verified rather than trusted. Verifying it needs
+/// a crash on demand, and the point of the harness is that no known input
+/// produces one -- so the drill has to stage one.
 ///
-/// Dispatching the deep-fuzz workflow with `inject_canary` writes these bytes
-/// into the corpus, and libFuzzer runs corpus inputs first. Nothing else reaches
-/// it: a 32-byte magic string is far outside what random mutation finds, and
-/// nothing in the seed corpus resembles it.
-const CANARY: &[u8] = b"FMP_FUZZ_CANARY_DO_NOT_REPORT_42";
+/// It is staged through the **environment**, not through input bytes, and the
+/// first version got this wrong twice over. A magic 32-byte input looked
+/// unreachable by chance, and libFuzzer found it within seconds: it intercepts
+/// `memcmp` and learns the operands it is compared against, so a literal
+/// comparison against input is an instruction to the fuzzer, not a secret from
+/// it. (`PersAutoDict` in its own log is that machinery at work.) The bytes also
+/// had to be planted in the corpus, and the corpus is cached, so each drill left
+/// its staged crash behind for later runs to trip over.
+///
+/// An environment variable has neither problem. No input can synthesise it, and
+/// nothing is written where it can persist.
+fn canary_armed() -> bool {
+    std::env::var_os("FMP_FUZZ_CANARY").is_some()
+}
 
 fuzz_target!(|data: &[u8]| {
-    if data == CANARY {
+    if canary_armed() {
         panic!("fuzz canary: this crash is a deliberate test of the reporting path");
     }
 

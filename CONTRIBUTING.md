@@ -219,9 +219,17 @@ Anything found should be minimised and committed as a regression fixture under
 `tests/`, so the finding stays found.
 
 To rehearse that reporting path without waiting for a real crash, dispatch the
-workflow with `inject_canary`. It plants an input the target panics on by design
-(`CANARY` in `fuzz/fuzz_targets/parse_email.rs`) and the resulting issue says so
-— close it afterwards.
+workflow with `inject_canary`. That sets `FMP_FUZZ_CANARY` in the environment,
+which arms a deliberate panic in the target, and the resulting issue says so —
+close it afterwards.
+
+The canary is armed through the environment rather than by a magic input, and the
+first attempt got that wrong in two ways worth knowing before changing it.
+libFuzzer intercepts `memcmp` and **learns** the operands input is compared
+against, so a literal comparison is an instruction to the fuzzer rather than a
+secret from it — it found a 32-byte magic string within seconds. And the bytes had
+to be planted in the corpus, which is cached, so every drill left its staged crash
+behind for later runs to trip over. Both produced false crasher issues.
 
 A drill **passes green**: with `inject_canary` set, the job succeeds when the
 canary crashed and was reported, and fails when it did not, because a canary that
