@@ -217,6 +217,11 @@ workflow with `inject_canary`. It plants an input the target panics on by design
 (`CANARY` in `fuzz/fuzz_targets/parse_email.rs`) and the resulting issue says so
 — close it afterwards.
 
+A drill **passes green**: with `inject_canary` set, the job succeeds when the
+canary crashed and was reported, and fails when it did not, because a canary that
+goes undetected means the alarm is broken. A normal run fails on any crash, as
+you would expect.
+
 ## Linting
 
 The following checks are run in CI. Run them locally before opening a PR:
