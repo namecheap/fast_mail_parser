@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`fast-mail-parser-ng` 0.7.1** was published as that distribution's final
+  release, ahead of archiving it on PyPI. It is 0.7.0's code with a deprecation
+  notice for a description — PyPI's guidance is to leave a retired name pointing
+  somewhere rather than going quiet, and an archived project's page is the last
+  thing a reader of a stale pin will see. Building it from `v0.7.0` rather than
+  from master was deliberate: shipping 0.8.x features under the retired name would
+  have created a second source of truth and removed the reason to migrate. The
+  four versions under that name remain installable.
+
 ### Added
 
 - **`mode=` on `parse_many` and `parse_email_tree`** (#202), honouring the same

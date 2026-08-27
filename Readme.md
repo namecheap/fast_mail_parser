@@ -75,12 +75,14 @@ transfer request sat unattended for months. Rather than hold releases behind tha
 queue, 0.6.0 through 0.7.0 shipped as `fast-mail-parser-ng`, with the import path
 deliberately unchanged so the switch cost one line in a requirements file.
 
-Ownership has since been transferred directly, so releases go back to the
-original name from 0.8.0 on, and `fast-mail-parser-ng` is **archived** on PyPI:
-read-only, taking no further releases. The three versions published under it stay
-installable, so nothing pinning them breaks — archiving marks the project as
-finished rather than removing anything. If you are on it, change the name in your
-requirements file; there is nothing else to do.
+Ownership has since been transferred directly, so releases go back to the original
+name from 0.8.0 on, and `fast-mail-parser-ng` is being **archived** on PyPI:
+read-only, taking no further releases. Its last release, **0.7.1**, is 0.7.0's code
+with a deprecation notice for a description and nothing else — a signpost, not an
+upgrade. The four versions published under that name stay installable, so nothing
+pinning them breaks; archiving marks a project finished rather than removing
+anything. If you are on it, change the name in your requirements file; there is
+nothing else to do.
 
 Full history in the [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md).
 
