@@ -1,8 +1,15 @@
 # fast_mail_parser
 
-![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
-[![PyPI version](https://badge.fury.io/py/fast-mail-parser.svg)](https://badge.fury.io/py/fast-mail-parser)
-[![Downloads](https://pepy.tech/badge/fast-mail-parser)](https://pepy.tech/project/fast-mail-parser)
+[![PyPI](https://img.shields.io/pypi/v/fast-mail-parser?logo=pypi&logoColor=white&label=PyPI)](https://pypi.org/project/fast-mail-parser/)
+[![Python](https://img.shields.io/pypi/pyversions/fast-mail-parser?logo=python&logoColor=white)](https://pypi.org/project/fast-mail-parser/)
+[![Wheels](https://img.shields.io/badge/wheels-abi3%20%C2%B7%2013%20platforms-blue?logo=rust&logoColor=white)](https://pypi.org/project/fast-mail-parser/#files)
+[![Downloads](https://img.shields.io/pypi/dm/fast-mail-parser?color=blue)](https://pepy.tech/project/fast-mail-parser)
+[![License](https://img.shields.io/github/license/namecheap/fast_mail_parser)](https://github.com/namecheap/fast_mail_parser/blob/master/LICENSE)
+
+[![Test](https://img.shields.io/github/actions/workflow/status/namecheap/fast_mail_parser/test.yml?branch=master&label=test&logo=github)](https://github.com/namecheap/fast_mail_parser/actions/workflows/test.yml)
+[![Deep fuzz](https://img.shields.io/github/actions/workflow/status/namecheap/fast_mail_parser/deep-fuzz.yml?branch=master&label=deep%20fuzz&logo=github)](https://github.com/namecheap/fast_mail_parser/actions/workflows/deep-fuzz.yml)
+[![Publishing](https://img.shields.io/badge/PyPI-Trusted%20Publishing%20%2B%20PEP%20740%20attestations-3775A9?logo=pypi&logoColor=white)](https://github.com/namecheap/fast_mail_parser/blob/master/.github/workflows/publish.yml)
+[![Changelog](https://img.shields.io/badge/changelog-keep%20a%20changelog-e05735)](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md)
 
 > ## 📦 Back on `fast-mail-parser`
 >
@@ -105,36 +112,86 @@ release is published via PyPI Trusted Publishing with PEP 740 attestations.
 
 ## Benchmark
 
-All three libraries asked for the **same result** — subject, both body lists, and
-attachments with their payloads decoded — on the same message:
+Every number here is from one CI run — the benchmark gate on
+[#214](https://github.com/namecheap/fast_mail_parser/pull/214): CPython 3.12 on
+Linux x86_64, a 4-vCPU GitHub Actions runner (an AMD EPYC 7763 that time), median
+of three interleaved rounds unless a table says otherwise. The message is
+`tests/data/large_message.eml`: multipart/mixed, 6 MIME parts, 767 KiB, 99%
+of it two base64 attachments.
+
+### Against other libraries
+
+All three libraries were asked for the **same result** — subject, both body lists,
+and attachments with their payloads decoded:
 
 | Library | Work performed | Min time | Relative |
 | --- | --- | --- | --- |
 | **fast_mail_parser** | parse + decode bodies + decode attachments | 0.59 ms | 1.00x |
-| mail-parser | `from_string` + `.parse()` + read attributes | 14.81 ms | 25.08x |
+| mail-parser 4.6.4 | `from_string` + `.parse()` + read attributes | 14.81 ms | 25.08x |
 | stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 20.23 ms | 34.27x |
 
-Corpus: `tests/data/large_message.eml` (multipart/mixed, 6 MIME parts, 2 base64
-attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`, an
-AMD EPYC 7763 on this run), mail-parser 4.6.4, minimum of 34+ rounds.
+This table is minimum-of-N (34+ rounds), which is what `make bench-table` prints
+and what most library comparisons quote. Everything below is a median.
 
-**These ratios move with the hardware, so treat them as a magnitude rather than a
-constant.** Before mailparse's two byte-at-a-time loops moved to `memchr`, this
-same table read 6.44x and 8.59x on one runner and 8.50x and 10.01x on a faster one;
-an Apple M4 now gives 20.8x and 28.3x against this run's 25.1x and 34.3x. The
-interpreted parsers and the Rust extension do not scale together across CPUs. Regenerate the table for your own machine with
-`make bench-table`, which prints its own methodology line; CI also renders it
+### By mode
+
+The default parse decodes everything. The other modes exist for callers who
+will not read everything, and are priced accordingly:
+
+| Call | Median | vs default | What it skips |
+| --- | --- | --- | --- |
+| `parse_email(payload)` | 0.575 ms | 1.0x | nothing — the default |
+| `parse_email(payload, mode="lazy")`, nothing read | 0.080 ms | **7.2x** | attachment decoding, until asked |
+| `parse_email(payload, mode="lazy")`, every attachment read | 0.594 ms | 0.97x | nothing; same work, deferred |
+| `parse_email(payload, mode="metadata")` | 0.051 ms | **11.3x** | every body and attachment |
+| `parse_email_tree(payload)` | 0.556 ms | 1.03x | nothing — the full MIME tree |
+| `parse_email_tree(payload, mode="lazy")`, nothing read | 0.077 ms | 7.5x | leaf decoding, until asked |
+| `parse_email_tree(payload, mode="metadata")` | 0.054 ms | 10.6x | every leaf's content |
+
+Reading every attachment through lazy mode costs about 3% over the default, so
+**if you will read everything, use the default**; lazy mode is for when you will
+not.
+
+### Batches
+
+| Batch | `parse_many` | Alternative | |
+| --- | --- | --- | --- |
+| 8 × 767 KiB, `threads=1` | 4.48 ms | — | 0.56 ms per message |
+| 8 × 767 KiB, `threads=1`, `mode="metadata"` | 0.41 ms | — | **10.9x** the full batch |
+| 16 × 767 KiB, all cores | 4.62 ms | 4.77 ms, `ThreadPoolExecutor` + `parse_email` | level (1.03x) |
+| 2000 × 0.8 KB, all cores | 4.67 ms | 62.28 ms, `ThreadPoolExecutor` + `parse_email` | **13.3x** |
+| 2000 × 0.8 KB, `mode="metadata"` | 4.20 ms | 4.67 ms, `mode="full"` | 1.11x |
+
+The batch API removes per-call overhead — a fixed cost per message that
+dominates small messages and vanishes into large ones; the GIL was already
+released per call. Metadata mode removes decoding, which is proportional to
+message size and so barely registers on small ones. They compose.
+
+### Reading these numbers
+
+**Ratios move with the hardware; treat them as a magnitude, not a constant.**
+Before mailparse's two byte-at-a-time loops moved to `memchr` (see the
+[changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md)),
+the cross-library table read 6.44x and 8.59x on one runner and 8.50x and 10.01x on
+a faster one. An Apple M4 now gives 20.8x and 28.3x against this run's 25.1x and
+34.3x. The interpreted parsers and the Rust extension do not scale together
+across CPUs, and the runner fleet is not homogeneous — the same two binaries have
+measured identically on one runner and 96% apart on another. Regenerate the
+cross-library table on your own machine with `make bench-table`; CI renders it
 into the job summary of every benchmark run.
 
-Two things this table deliberately does *not* do:
+**How CI measures.** The gate builds the revision *and* its base, alternates
+measurement rounds between them and compares medians, with the pure-Python
+libraries riding along as a noise floor: they cannot be affected by how the
+extension was built, so a difference is believed only once it clears them.
+Absolute cross-implementation ratios were observed to swing ~26% between
+runners while within-run noise was ~0.3%, which is why the gate is relative and
+this section quotes one run rather than averaging several.
 
-- It does not quote the CI gate's numbers. That gate compares a revision against
-  its base rather than against another library, precisely because absolute
-  cross-implementation ratios are unstable between machines — they were observed
-  to swing ~26% between CI runners while within-run noise was ~0.3%.
-- It does not reuse the gate's mail-parser baseline, which measures
-  `MailParser.from_string` alone. That call never invokes `.parse()`, so it is a
-  stable number for regression detection but not a fair cross-library figure.
+**One thing the cross-library table does not do:** reuse the gate's own
+mail-parser baseline, which measures `MailParser.from_string` alone. That call
+never invokes `.parse()`, so it is a stable number for regression detection but
+not a fair cross-library figure.
 
 ## Usage
 
