@@ -20,8 +20,9 @@
 //! 4. **The attachment inventory agrees** -- count, and per attachment the
 //!    mimetype, filename, content id and disposition. Only the content and the
 //!    size differ by design.
-//! 5. **`encoded_size` is never smaller than the decoded size.** No transfer
-//!    encoding shrinks its input.
+//! 5. **Decoding does not amplify a part beyond doubling it.** Not "decoded is
+//!    never larger than encoded", which is false: quoted-printable emits a line
+//!    break as CRLF, so a body of bare LFs grows by a byte per line.
 //! 6. **The tree is bounded and deterministic**, every attachment the flat parse
 //!    reports appears as some leaf's content, and the tree root's headers are the
 //!    flat parse's headers -- the root is the same message, so they cannot differ
@@ -102,13 +103,25 @@ fuzz_target!(|data: &[u8]| {
                 "disposition disagrees"
             );
 
-            // No transfer encoding shrinks its input: base64 inflates,
-            // quoted-printable inflates, 7bit and 8bit are the identity.
+            // Decoding cannot amplify a part beyond doubling it.
+            //
+            // The obvious invariant -- decoded is never larger than encoded --
+            // is false, and this target found it in fifteen minutes with 45
+            // crashers, every one quoted-printable. The `quoted_printable`
+            // crate emits a line break as `\r\n` (`decoded.push(b'\r');
+            // decoded.push(b'\n')`), so in robust mode a body of bare LFs comes
+            // back one byte longer per line: the minimised case was a body of a
+            // single `\n` decoding to two bytes.
+            //
+            // Doubling is the true bound. Every `\r\n` pair costs at least one
+            // input byte, `=XX` shrinks three to one, a literal byte is one to
+            // one, and base64 shrinks by a quarter. Past 2x, something is
+            // amplifying.
             assert!(
-                described.encoded_size >= decoded.content.len(),
-                "encoded size {} is below the decoded size {}",
-                described.encoded_size,
-                decoded.content.len()
+                decoded.content.len() <= described.encoded_size * 2,
+                "decoded size {} is more than double the encoded size {}",
+                decoded.content.len(),
+                described.encoded_size
             );
         }
     }

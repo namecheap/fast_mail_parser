@@ -83,14 +83,47 @@ def test__the_attachment_inventory_is_identical_to_full_mode(path: str):
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=IDS)
-def test__encoded_size_is_at_least_the_decoded_size(path: str):
-    # A transfer encoding never shrinks its input: base64 inflates by a third,
-    # quoted-printable by however many bytes needed escaping, 7bit/8bit not at
-    # all. So this holds for every encoding without knowing which was used.
+def test__decoding_does_not_amplify_a_part(path: str):
+    # NOT "encoded is at least decoded", which this asserted until a fuzz run
+    # produced 45 counterexamples: quoted-printable emits a line break as CRLF,
+    # so a body of bare LFs decodes larger than it was encoded. Doubling is the
+    # true bound -- see test__quoted_printable_can_decode_larger_than_its_encoded_size.
     full, meta = _both(path)
 
     for described, decoded in zip(meta.attachments, full.attachments, strict=True):
-        assert described.encoded_size >= len(decoded.content), described.filename
+        assert len(decoded.content) <= described.encoded_size * 2, described.filename
+
+
+def test__quoted_printable_can_decode_larger_than_its_encoded_size():
+    # `encoded_size` is the bytes on the wire, and it is NOT an upper bound on the
+    # decoded size. The `quoted_printable` crate emits a line break as CRLF, so a
+    # body of bare LFs gains a byte per line.
+    #
+    # Found by the `parse_agreement` fuzz target, which produced 45 crashers in
+    # fifteen minutes -- every one quoted-printable -- against an invariant that
+    # said this could not happen. Pinned here so the surprise is documented where
+    # someone reading the attribute will meet it.
+    message = (
+        b"Subject: qp\r\n"
+        b'Content-Type: application/octet-stream; name="x"\r\n'
+        b"Content-Disposition: attachment\r\n"
+        b"Content-Transfer-Encoding: quoted-printable\r\n"
+        b"\r\n"
+        b"a\nb\nc\n"
+    )
+
+    full = parse_email(message)
+    meta = parse_email(message, mode="metadata")
+
+    described = meta.attachments[0]
+    decoded = full.attachments[0].content
+
+    assert described.encoded_size < len(decoded), (
+        f"expected quoted-printable to grow: encoded {described.encoded_size}, "
+        f"decoded {len(decoded)}"
+    )
+    # Doubling is the real bound, and what the fuzz target now asserts.
+    assert len(decoded) <= described.encoded_size * 2
 
 
 def test__encoded_size_is_larger_for_base64(attachment_message: str):
