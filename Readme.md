@@ -247,29 +247,47 @@ decoded at once. Feed it in chunks of a few hundred rather than a whole mailbox.
 #### When it helps
 
 `parse_email` already releases the GIL, so a Python thread pool over it is
-already parallel. What `parse_many` removes on top of that is per-call FFI and
-scheduling overhead — which is proportional to the **number** of messages, while
-its one cost, copying each payload before parsing starts, is proportional to
-**total bytes**. Measured against `ThreadPoolExecutor(max_workers=4)` +
-`parse_email` on a 4-vCPU runner, best of 5:
+already parallel. **`parse_many` is not parallel-versus-serial** — both use every
+core. What it removes is per-call overhead: one crossing into Rust for the whole
+batch instead of one per message, and no Python future per message.
 
-| Messages | Size each | Total | vs thread pool |
-| --- | --- | --- | --- |
-| 2000 | 1 KB | 2.1 MB | **12x faster** |
-| 400 | 50 KB | 20 MB | 1.2x slower |
-| 200 | 786 KB | 157 MB | 1.5x slower |
+That overhead is a fixed cost *per message*, so what decides the comparison is
+message size. Measured against `ThreadPoolExecutor(max_workers=4)` +
+`parse_email` on a 4-vCPU runner, median of 3 rounds:
 
-So **use `parse_many` for many small messages** — the mail-pipeline case, where
-messages are usually single-digit KB. For a few very large messages a thread pool
-is currently faster, because the serial copy dominates. Removing that copy is
-tracked in [#96](https://github.com/namecheap/fast_mail_parser/issues/96).
+| Messages | Size each | `parse_many` | Thread pool | vs thread pool |
+| --- | --- | --- | --- | --- |
+| 2000 | 0.8 KB | 4.5 ms | 52.5 ms | **11.7x faster** |
+| 16 | 768 KB | 14.1 ms | 14.2 ms | level (1.01x) |
 
-The size at which it flips is not portable, and neither is how much the bad case
-costs: the copy competes with memory bandwidth and the parse scales with cores.
-The 200 × 786 KB case above measures **1.5x slower** on that 4-vCPU runner but
-only **1.05x slower** on a 10-core laptop — near enough a wash. So treat the
-table as the shape of the trade-off, and measure your own mix before ruling
-`parse_many` out for large messages.
+Per message that is **2.3 µs** against **26.2 µs** for the small case: the ~24 µs
+gap is the Python-side cost, and it does not grow with the message. At 768 KB the
+parse itself costs ~880 µs and swamps it.
+
+Dividing those out — ~24 µs of overhead per message against a parse that costs
+roughly 1.1 µs per KB — the two break even near **20 KB**, and below it
+`parse_many` pulls away:
+
+| Message size | Expected advantage |
+| --- | --- |
+| 2 KB | ~6x |
+| 10 KB | ~2.8x |
+| 20 KB | ~2x |
+| 100 KB | ~1.2x |
+
+So **`parse_many` is the right default for a mail pipeline**, where messages are
+usually a few KB, and it costs nothing at any size — the last row is a wash, not
+a penalty.
+
+That was not true before 0.8.0. `parse_many` used to copy every payload before
+parsing began, which made it **1.5x slower** for large messages and put a real
+trade-off here; the copy is gone
+([#96](https://github.com/namecheap/fast_mail_parser/issues/96)), and with it the
+reason to avoid `parse_many` for large mail.
+
+The break-even point is not portable — the parse scales with cores while the
+per-call overhead does not — so treat the second table as the shape of the
+trade-off and measure your own mix if it matters.
 
 ### Error handling
 
