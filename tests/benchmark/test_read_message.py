@@ -225,3 +225,26 @@ def test__fast_mail_parser___parse_tree(large_message: str, benchmark: Callable)
     payload = large_message.encode()
 
     benchmark(lambda: parse_email_tree(payload))
+
+
+def test__fast_mail_parser___parse_metadata(large_message: str, benchmark: Callable):
+    # #97 asks for metadata mode to be at least 5x faster than a full parse on an
+    # attachment-heavy message. Compare with
+    # `test__fast_mail_parser___parse_message` in the same run.
+    #
+    # Guarded, and this is the guard the gate's own documentation asks for: the
+    # gate measures THIS revision's benchmarks against the BASE revision's build
+    # (#168), so a base predating `mode=` raises TypeError here instead of
+    # skipping, and takes the whole gate down with it. Which is what happened.
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    payload = large_message.encode()
+
+    try:
+        parse_email(payload, mode="metadata")
+    except TypeError:
+        pytest.skip("this build predates parse_email(mode=...)")
+
+    benchmark(lambda: parse_email(payload, mode="metadata"))

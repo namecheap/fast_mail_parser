@@ -289,6 +289,48 @@ The break-even point is not portable — the parse scales with cores while the
 per-call overhead does not — so treat the second table as the shape of the
 trade-off and measure your own mix if it matters.
 
+### Metadata-only parsing
+
+Scanning a mailbox to classify by sender, subject and attachment inventory does
+not need the attachments decoded — and on a message that is mostly attachment,
+decoding is nearly all of the work.
+
+```python
+from fast_mail_parser import parse_email
+
+mail = parse_email(payload, mode="metadata")
+
+mail.subject, mail.date_parsed, mail.headers      # identical to full mode
+for part in mail.attachments:
+    print(part.filename, part.mimetype, part.encoded_size)
+```
+
+`encoded_size` is the bytes the part occupies **in the message**, before
+transfer-decoding — named for what it is, because metadata mode cannot know the
+decoded size without doing the decode it exists to skip (base64 inflates by about
+a third). In full mode the decoded size is `len(content)`.
+
+Two things metadata mode deliberately does not give you:
+
+**No bodies.** There is no `text_plain`/`text_html` — not empty lists, absent. An
+empty list cannot be told apart from "this message has no text part", so a sweep
+counting bodyless messages would count every message. A missing attribute fails
+loudly instead.
+
+**No decode errors.** It never decodes, so a part with a broken
+`Content-Transfer-Encoding` passes silently here and raises `DecodeError` in full
+mode. Header errors are reported in both.
+
+The type follows the mode, so nothing changes for callers of the default:
+
+```python
+parse_email(payload)                    # PyMail
+parse_email(payload, mode="metadata")   # PyMailMetadata
+```
+
+If you want structure rather than an inventory, `parse_email_tree` is the API
+that keeps it.
+
 ### The MIME tree
 
 `parse_email` hands back a flat projection: bodies in one list, attachments in
