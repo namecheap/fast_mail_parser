@@ -106,8 +106,13 @@ fn total_output_bytes(mail: &mail_parser::Mail) -> usize {
 ///
 /// An environment variable has neither problem. No input can synthesise it, and
 /// nothing is written where it can persist.
+///
+/// The value must be non-empty, not merely present. A workflow `env:` entry whose
+/// expression evaluates to `''` still *defines* the variable, so `is_some()` was
+/// true on every run and armed the canary unconditionally -- a third false
+/// crasher, from the fix for the second.
 fn canary_armed() -> bool {
-    std::env::var_os("FMP_FUZZ_CANARY").is_some()
+    std::env::var_os("FMP_FUZZ_CANARY").is_some_and(|value| !value.is_empty())
 }
 
 fuzz_target!(|data: &[u8]| {
