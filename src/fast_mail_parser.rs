@@ -110,6 +110,13 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 ///
 /// This is a backstop, not a licence: a panic reaching here is a bug in this
 /// crate, and the error says so.
+///
+/// `inline(always)` is load-bearing, not decoration. This is generic, so every
+/// entry point instantiates it, and once there were three the instantiation
+/// wrapping `parse_email` stopped being inlined -- which turns the parse body
+/// into an opaque call behind unwind edges and cost 24% on large messages while
+/// the code responsible was never executed (#99).
+#[inline(always)]
 fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
     // `AssertUnwindSafe`: the closure touches Python state, which is not
     // `UnwindSafe`, but nothing observes that state after a panic -- the only
@@ -121,6 +128,100 @@ fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
              please report it with the input that triggered it)",
             panic_message(payload.as_ref())
         ))),
+    }
+}
+
+/// One node of a message's MIME tree, with the structure intact (#99).
+///
+/// `PyMail` is a flattened projection of this -- bodies in one list, attachments
+/// in another, containers dropped. Every flattening loses something: which
+/// `text/html` part corresponds to which `text/plain` sibling, whether a node was
+/// `multipart/alternative` or `multipart/mixed`, where a bounce's inner message
+/// begins. Use `parse_email` when the convenience projection is what you want and
+/// this when the shape matters.
+#[pyclass(skip_from_py_object)]
+pub struct PyMimePart {
+    /// The part's media type: `"multipart/alternative"`, `"text/plain"`, ...
+    #[pyo3(get)]
+    pub content_type: String,
+    /// Stored as ordered pairs, exposed through the getter below (#157).
+    pub headers: Vec<(String, Vec<String>)>,
+    #[pyo3(get)]
+    pub filename: String,
+    /// The part's `Content-ID` with angle brackets stripped, or `None`.
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    /// The part's raw `Content-Disposition` token, or `None` when it declares no
+    /// such header. `None` and `"inline"` are distinct statements.
+    #[pyo3(get)]
+    pub disposition: Option<String>,
+    /// True for `message/rfc822`. The embedded message's own root is this part's
+    /// single child, so a bounce's headers are reachable rather than opaque.
+    #[pyo3(get)]
+    pub is_message: bool,
+    pub content: Option<Vec<u8>>,
+    pub children: Vec<Py<PyMimePart>>,
+}
+
+#[pymethods]
+impl PyMimePart {
+    /// This part's headers, every value kept, keys in wire order.
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
+    /// Transfer-decoded bytes of a leaf, or `None` for a `multipart/*` container.
+    ///
+    /// A container's body is its children with boundaries between them, so
+    /// returning it would hand back the same bytes twice.
+    #[getter]
+    fn content<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyBytes>> {
+        self.content
+            .as_ref()
+            .map(|bytes| PyBytes::new(py, bytes.as_slice()))
+    }
+
+    /// The parts nested directly inside this one, in message order.
+    #[getter]
+    fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyMimePart {} children={}>",
+            self.content_type,
+            self.children.len()
+        )
+    }
+}
+
+impl PyMimePart {
+    /// Cold by construction, and marked so: it recurses, it returns a large
+    /// struct, and `parse_email` never reaches it.
+    #[inline(never)]
+    fn from_part(py: Python<'_>, part: mail_parser::MimePart) -> PyResult<Self> {
+        let children = part
+            .children
+            .into_iter()
+            .map(|child| Py::new(py, Self::from_part(py, child)?))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(PyMimePart {
+            content_type: part.content_type,
+            headers: part.headers,
+            filename: part.filename,
+            content_id: part.content_id,
+            disposition: part.disposition,
+            is_message: part.is_message,
+            content: part.content,
+            children,
+        })
     }
 }
 
@@ -459,6 +560,28 @@ fn parse_many_inner(
     Ok(items.unbind())
 }
 
+/// Parse a message into its MIME tree, structure intact.
+///
+/// Additive: `parse_email` is untouched. Accepts the same `str`/`bytes` payloads
+/// and raises the same `ParseError` subtypes, including the recursion and size
+/// caps -- an embedded `message/rfc822` counts against the same depth limit as a
+/// multipart nest, so an onion of forwards cannot go deeper than a multipart tree.
+#[pyfunction]
+pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
+    catch_panics(|| parse_email_tree_inner(py, payload))
+}
+
+#[inline(never)]
+fn parse_email_tree_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
+    let message = payload_to_bytes(&payload, py)?;
+
+    let tree = py
+        .detach(|| mail_parser::parse_email_tree(message.as_ref()))
+        .map_err(to_py_err)?;
+
+    PyMimePart::from_part(py, tree)
+}
+
 /// Panic on purpose, so the backstop above can be tested.
 ///
 /// Not part of the API: underscore-prefixed, absent from `__all__` and from the
@@ -479,8 +602,10 @@ fn panic_now() -> PyResult<()> {
 fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email, m)?)?;
     m.add_function(wrap_pyfunction!(parse_many, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_email_tree, m)?)?;
     m.add_function(wrap_pyfunction!(_panic_for_tests, m)?)?;
     m.add_class::<PyMail>()?;
+    m.add_class::<PyMimePart>()?;
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyAddress>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;

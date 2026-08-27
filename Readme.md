@@ -289,6 +289,55 @@ The break-even point is not portable — the parse scales with cores while the
 per-call overhead does not — so treat the second table as the shape of the
 trade-off and measure your own mix if it matters.
 
+### The MIME tree
+
+`parse_email` hands back a flat projection: bodies in one list, attachments in
+another, `multipart/*` containers dropped. That is what most code wants, and it
+throws away the shape of the message. `parse_email_tree` keeps it.
+
+```python
+from fast_mail_parser import parse_email_tree, walk
+
+root = parse_email_tree(payload)
+
+for part in walk(root):                    # depth first, stdlib `walk()` order
+    print(part.content_type, len(part.content or b""))
+```
+
+Each node carries `content_type`, `headers` (same semantics as `PyMail.headers`),
+`filename`, `content_id`, `disposition`, `children`, and `content` — the
+transfer-decoded bytes of a leaf, or `None` for a container, whose body is only
+its children with boundaries between them.
+
+Two things the flat projection cannot express:
+
+**Which body goes with which.** A `multipart/alternative` node's children are the
+plain and HTML renderings *of the same thing*. Through `parse_email` they are one
+entry in `text_plain` and one in `text_html`, with nothing to relate them.
+
+**What is inside a bounce.** A `message/rfc822` part is an embedded message —
+ubiquitous in bounce and abuse handling. `parse_email` reports it as one
+attachment blob to re-parse by hand; here it is parsed, `is_message` is `True`,
+and the embedded message's own root is the part's single child:
+
+```python
+bounced = next(p for p in walk(root) if p.is_message)
+print(bounced.children[0].headers["Subject"])   # the original message's subject
+```
+
+Embedded nesting counts against the same recursion cap as multipart nesting, so
+an onion of forwards cannot recurse further than a multipart tree can.
+
+#### Which API when
+
+| | |
+| --- | --- |
+| `parse_email` | You want the subject, the body text, the attachments. Most code. |
+| `parse_email_tree` | The shape matters: forensics, bounce processing, deciding which alternative to render, anything that would otherwise reach for the stdlib's `walk()`. |
+
+Both accept the same payloads and raise the same errors. `parse_email` is
+unchanged by the tree API existing — it is a pure addition.
+
 ### Error handling
 
 `parse_email` raises a subtype of `ParseError`, chosen by what actually went
