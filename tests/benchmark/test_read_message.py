@@ -172,3 +172,43 @@ def test__threaded___threadpool_parse_email(large_message: str, benchmark: Calla
     # reason.
     with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
         benchmark(lambda: list(pool.map(parse_email, batch)))
+
+
+# Message size decides this comparison, so measure both ends of it. Above, one
+# batch of 16 x 0.75 MiB: parsing dominates and per-call overhead is invisible.
+# Here, 2000 x ~0.8 KiB, where the opposite holds and the per-message cost of
+# crossing into Rust and back -- plus a Python future per message -- is the whole
+# difference.
+SMALL_BATCH = 2000
+
+
+def _small_message() -> bytes:
+    body = "x" * 700
+    return (
+        "From: sender@example.com\r\n"
+        "To: recipient@example.com\r\n"
+        "Subject: small\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        f"{body}\r\n"
+    ).encode()
+
+
+def test__threaded___parse_many_small(benchmark: Callable):
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    benchmark(lambda: parse_many(batch))
+
+
+def test__threaded___threadpool_parse_email_small(benchmark: Callable):
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fast_mail_parser import parse_email
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        benchmark(lambda: list(pool.map(parse_email, batch)))
