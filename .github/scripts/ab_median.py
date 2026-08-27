@@ -44,6 +44,22 @@ CONTROL_PREFIXES = (
 )
 
 
+def read_machine(path):
+    """The hardware a report was produced on.
+
+    Reported because the same two binaries can measure identically on one runner
+    and 96% apart on another: code layout interacts with the microarchitecture,
+    and GitHub's fleet is not homogeneous (#204). Without the CPU printed, two
+    runs of the same commit cannot be compared at all.
+    """
+    with open(path) as fh:
+        info = json.load(fh).get("machine_info", {})
+    cpu = info.get("cpu", {})
+    brand = cpu.get("brand_raw") or info.get("processor") or "unknown CPU"
+    count = cpu.get("count")
+    return f"{brand}" + (f", {count} vCPU" if count else "")
+
+
 def read_mins(path):
     """Return {benchmark name: minimum seconds} from a pytest-benchmark report."""
     with open(path) as fh:
@@ -115,6 +131,7 @@ def main():
 
     lines = [
         f"### A/B: {args.a_label} vs {args.b_label}\n",
+        f"Measured on `{read_machine(args.a[0])}`.\n",
         f"Median of {a_count} interleaved rounds per side; each value is a "
         "benchmark's minimum. Positive delta = "
         f"`{args.a_label}` is slower.\n",
@@ -168,6 +185,18 @@ def main():
             f"**Verdict: significant.** `{args.a_label}` is {worst:+.1f}% slower "
             f"than `{args.b_label}`, past the {threshold:.0f}% threshold and "
             "clear of the noise floor.\n"
+        )
+        # Not hedging a real result -- naming a failure mode this gate cannot
+        # otherwise detect. The controls are pure Python and do not care how the
+        # extension was laid out, so they stay flat while a layout-versus-CPU
+        # difference moves every treatment benchmark tightly and repeatably.
+        lines.append(
+            "**Re-run before acting on this.** Two builds differing only in a "
+            "version string measured within 0.4% of each other on one runner and "
+            "**96% apart** on another, with per-round spread under 0.3% both "
+            "times and identical binaries (#204). A real regression reproduces on "
+            "different hardware; a code-layout artifact does not. Compare the CPU "
+            "line above between the two runs.\n"
         )
     elif worst > threshold:
         lines.append(
