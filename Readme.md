@@ -367,17 +367,17 @@ choice possible: picking an attachment must not require decoding all of them.
 `is_decoded` says whether reading `content` is free or is about to cost a decode.
 
 **On the attachment-heavy fixture** (767 KiB, 99% attachment by decoded content),
-median of three interleaved rounds:
+median of three interleaved rounds on the CI runner:
 
 | | | |
 | --- | --- | --- |
-| `mode="metadata"` | 0.37 ms | decodes nothing |
-| `mode="lazy"`, nothing read | 0.38 ms | bodies decoded, attachments deferred |
-| `mode="full"` | 1.08 ms | the default |
-| `mode="lazy"`, every attachment read | 1.09 ms | the same work, in a worse order |
+| `mode="metadata"` | 0.58 ms | decodes nothing |
+| `mode="lazy"`, nothing read | 0.62 ms | bodies decoded, attachments deferred |
+| `mode="full"` | 1.77 ms | the default |
+| `mode="lazy"`, every attachment read | 1.79 ms | the same work, in a worse order |
 
 So deferring saves about 65% when you were not going to decode everything, and
-costs about 1% when you were. **If you are going to read every attachment, use the
+costs about 2% when you were. **If you are going to read every attachment, use the
 default mode** — this one is for when you are not.
 
 Two things to know before choosing it:

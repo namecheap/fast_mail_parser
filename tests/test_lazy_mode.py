@@ -28,6 +28,7 @@ import pytest
 
 from fast_mail_parser import (
     DecodeError,
+    MimeStructureError,
     PyLazyAttachment,
     PyLazyMail,
     PyMail,
@@ -383,6 +384,39 @@ def test__lazy_mode_records_warnings_without_strict():
     mail = parse_email(BAD_DATE, mode="lazy")
 
     assert [w.kind for w in mail.warnings] == ["date-unparseable"]
+
+
+# --- the DoS caps -------------------------------------------------------------
+#
+# #97 asks for the caps from #21 to hold in every mode. They are the same two
+# constants checked in the same place -- lazy mode measures the payload before
+# repairing it and counts MIME depth through the same traversal -- so these are
+# short, and `tests/test_dos_limits.py` is where the flat path's versions live.
+
+
+def _nested_multipart(levels: int) -> bytes:
+    body = b"Content-Type: text/plain\r\n\r\ndeeply nested body\r\n"
+    for level in range(levels):
+        boundary = f"b{level}".encode("ascii")
+        body = (
+            b'Content-Type: multipart/mixed; boundary="' + boundary + b'"\r\n\r\n'
+            b"--" + boundary + b"\r\n" + body + b"\r\n--" + boundary + b"--\r\n"
+        )
+    return b"Subject: nested\r\n" + body
+
+
+def test__the_mime_depth_cap_holds_in_lazy_mode():
+    assert parse_email(_nested_multipart(10), mode="lazy").subject == "nested"
+
+    with pytest.raises(MimeStructureError):
+        parse_email(_nested_multipart(300), mode="lazy")
+
+
+def test__the_input_size_cap_holds_in_lazy_mode():
+    oversized = b"Subject: big\r\n\r\n" + b"x" * (100 * 1024 * 1024 + 1)
+
+    with pytest.raises(MimeStructureError):
+        parse_email(oversized, mode="lazy")
 
 
 # --- the surface --------------------------------------------------------------

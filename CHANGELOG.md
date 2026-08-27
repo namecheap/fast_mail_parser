@@ -145,11 +145,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The trade, stated plainly: memory for decoding.** The encoded bytes of every
     attachment are retained, and base64 is ~1.33x the size of what it encodes, so
     a retained part costs more than the decoded bytes it avoids producing. On the
-    attachment-heavy fixture, median of three interleaved rounds: metadata
-    0.37 ms, lazy with nothing read 0.38 ms, full 1.08 ms, lazy with every
-    attachment read 1.09 ms. Deferring saves ~65% when you were not going to
-    decode everything and costs ~1% when you were. **Use the default mode if you
-    are going to read every attachment.**
+    attachment-heavy fixture, median of three interleaved rounds on the CI
+    runner: metadata 0.58 ms, lazy with nothing read 0.62 ms, full 1.77 ms, lazy
+    with every attachment read 1.79 ms. Deferring saves ~65% when you were not
+    going to decode everything and costs ~2% when you were. **Use the default
+    mode if you are going to read every attachment.**
   - A new type rather than a lazier `PyAttachment.content`. Widening or
     re-timing an existing attribute is a breaking change, and #104 batches those
     into one API-v2 window; the default path is untouched, and `PyMail` and
