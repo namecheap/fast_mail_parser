@@ -597,13 +597,39 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
 #[pyfunction]
 #[pyo3(signature = (payload, *, mode = "full"))]
 pub fn parse_email(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
-    catch_panics(|| match mode {
-        "full" => Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()),
-        "metadata" => parse_email_metadata_mode(py, payload),
-        other => Err(exceptions::PyValueError::new_err(format!(
-            "mode must be \"full\" or \"metadata\", not {other:?}"
-        ))),
-    })
+    // The default path is kept as close to what it was before the mode existed
+    // as possible: one comparison, then the same closure. Everything else lives
+    // behind an `inline(never)` boundary below.
+    //
+    // Not a stylistic preference. Putting the three-arm match -- with a `format!`
+    // in one arm, which drags in the formatting machinery -- inside the closure
+    // that `catch_panics` inlines cost the hot path 30%, for the second time in
+    // one day (the first was #180). Code that never runs is not free here.
+    if mode == "full" {
+        return catch_panics(|| Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()));
+    }
+
+    parse_email_other_mode(py, payload, mode)
+}
+
+#[inline(never)]
+fn parse_email_other_mode(
+    py: Python<'_>,
+    payload: Py<PyAny>,
+    mode: &str,
+) -> PyResult<Py<PyAny>> {
+    match mode {
+        "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
+        other => Err(unknown_mode(other)),
+    }
+}
+
+#[cold]
+#[inline(never)]
+fn unknown_mode(mode: &str) -> PyErr {
+    exceptions::PyValueError::new_err(format!(
+        "mode must be \"full\" or \"metadata\", not {mode:?}"
+    ))
 }
 
 /// Cold, and marked so. `parse_email`'s default path must not pay for this
