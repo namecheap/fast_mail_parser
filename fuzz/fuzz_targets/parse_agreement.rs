@@ -22,8 +22,10 @@
 //!    size differ by design.
 //! 5. **`encoded_size` is never smaller than the decoded size.** No transfer
 //!    encoding shrinks its input.
-//! 6. **The tree is bounded and deterministic**, and every attachment the flat
-//!    parse reports appears as some leaf's content in the tree.
+//! 6. **The tree is bounded and deterministic**, every attachment the flat parse
+//!    reports appears as some leaf's content, and the tree root's headers are the
+//!    flat parse's headers -- the root is the same message, so they cannot differ
+//!    without one derivation having drifted from the other.
 
 #![no_main]
 
@@ -125,6 +127,17 @@ fuzz_target!(|data: &[u8]| {
             // Whatever the flat parse calls an attachment must be somewhere in
             // the tree: the tree keeps parts the projection drops, never fewer.
             if let Ok(full) = &full {
+                // The root of the tree is the same message the flat parse read,
+                // so its headers are the flat parse's headers. This is the gap
+                // that let metadata mode drift: a repair reached one derivation
+                // and not another, and nothing compared them. Cheap to assert,
+                // and it fails the moment the two paths stop agreeing about what
+                // a message's headers are.
+                assert_eq!(
+                    full.headers, a.headers,
+                    "the tree root's headers disagree with the flat parse"
+                );
+
                 let mut leaves = Vec::new();
                 leaf_contents(a, &mut leaves);
                 for attachment in &full.attachments {
