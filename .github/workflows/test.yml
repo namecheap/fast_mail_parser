@@ -481,3 +481,71 @@ jobs:
             head-[0-9].json
             base-[0-9].json
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # The sdist is built and published on every release and has never been
+  # installed by anything. That is the gap #15 was: a release nobody could
+  # install. It is also the documented fallback for x86_64 macOS and for every
+  # platform outside the wheel matrix, so a source build that does not work is a
+  # release that silently excludes those users.
+  #
+  # This builds the sdist through the same PEP 517 backend a user gets, installs
+  # it into a clean venv -- which compiles the extension from source, the thing
+  # no other job does -- and then exercises the API.
+  # ---------------------------------------------------------------------------
+  sdist:
+    name: sdist installs from source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Build the sdist
+        run: |
+          python -m pip install -q --upgrade pip build
+          python -m build --sdist --outdir dist
+          ls -l dist
+
+      - name: Check it carries what a source build needs
+        run: |
+          sdist=$(ls dist/*.tar.gz)
+          echo "contents:"
+          tar -tzf "$sdist" | sed 's|^[^/]*/||' | sort | head -30
+
+          # Asserted rather than assumed: `pyproject.toml` decides what goes in
+          # via `sdist-include`, and a build that happens to work from a warm
+          # cache would hide a missing file until someone else's cold build.
+          for needed in Cargo.toml pyproject.toml src/mail_parser.rs \
+                        src/fast_mail_parser.rs; do
+            if ! tar -tzf "$sdist" | grep -q "/${needed}$"; then
+              echo "::error::the sdist is missing ${needed}"
+              exit 1
+            fi
+          done
+
+          # And the fuzz crate must stay out: it is excluded on purpose, and
+          # shipping it would put a second Cargo manifest in the tarball.
+          if tar -tzf "$sdist" | grep -q '/fuzz/'; then
+            echo "::error::the sdist contains the fuzz crate, which is excluded"
+            exit 1
+          fi
+          echo "sdist contents check passed"
+
+      - name: Install it from source
+        run: |
+          python -m venv "$RUNNER_TEMP/venv-sdist"
+          "$RUNNER_TEMP/venv-sdist/bin/pip" install -q --upgrade pip
+          # No wheel exists for this version yet, so this compiles -- which is
+          # the whole point of the job.
+          "$RUNNER_TEMP/venv-sdist/bin/pip" install -q "$(ls dist/*.tar.gz)"
+
+      - name: Exercise the API it installed
+        run: |
+          "$RUNNER_TEMP/venv-sdist/bin/python" .github/scripts/sdist_smoke.py
