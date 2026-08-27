@@ -157,6 +157,45 @@ make bench-table      # render the comparison table published in Readme.md
 machine, library versions). Paste both together — the ratios move with the CPU,
 so a number without its machine is not a measurement.
 
+## Fuzzing
+
+The parser exists to read attacker-controlled bytes, so there is a fuzz harness
+in `fuzz/`. It requires nightly:
+
+```bash
+cargo install cargo-fuzz --locked
+mkdir -p fuzz/corpus/parse_email
+cp tests/data/*.eml tests/data/rfc/*.eml fuzz/corpus/parse_email/
+RUSTUP_TOOLCHAIN=nightly cargo fuzz run parse_email
+```
+
+`RUSTUP_TOOLCHAIN` is needed because `rust-toolchain.toml` pins a stable version;
+the env var is the only thing that overrides a toolchain file.
+
+Three invariants are asserted on arbitrary input: **no panic** (the one that
+matters most, since a panic crossing the FFI boundary takes down the host
+process), **determinism** (the same bytes parse the same twice, compared over the
+whole `Debug` output rather than a chosen subset), and **bounded output** (decoded
+size stays within a generous multiple of the input, so nothing can amplify its
+way through memory).
+
+Two things about the harness are deliberate and worth knowing before changing it:
+
+- It is a **standalone crate, not a workspace member.** The root crate is
+  `crate-type = ["cdylib"]` and its lib root is the PyO3 binding layer, so it can
+  neither be linked as a Rust dependency nor built without Python symbols.
+- It therefore **includes `src/mail_parser.rs` by path**, which works only because
+  that module has no PyO3 dependency. If the core ever gains one, this harness
+  stops building — which is the right alarm, since the split is what the module
+  docs promise.
+
+`fuzz/Cargo.toml` duplicates the `charset` and `mailparse` versions from the root
+manifest. They must stay in step, or the harness stops testing what ships.
+
+CI runs a 60-second deterministic pass on every PR; a crasher is uploaded as an
+artifact. Anything found should be minimised and committed as a regression
+fixture under `tests/`.
+
 ## Linting
 
 The following checks are run in CI. Run them locally before opening a PR:

@@ -1,0 +1,35 @@
+# Fuzzing harness for the parsing core. Deliberately a standalone crate, not a
+# workspace member, so it cannot affect the published package: the root crate is
+# `crate-type = ["cdylib"]` and its lib root is the PyO3 binding layer, so it can
+# neither be linked as a Rust dependency nor built without Python symbols.
+#
+# Instead the target includes `src/mail_parser.rs` by path. That works because
+# the core genuinely has no PyO3 dependency -- it uses only `charset`,
+# `mailparse` and `std` -- which is the property its module docs claim and this
+# harness now relies on.
+#
+# The two dependency versions below must match the root Cargo.toml, or the
+# harness stops testing what ships.
+[package]
+name = "fast-mail-parser-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+charset = "0.1.3"
+mailparse = "0.16.1"
+
+[[bin]]
+name = "parse_email"
+path = "fuzz_targets/parse_email.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = true

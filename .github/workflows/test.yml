@@ -161,6 +161,76 @@ jobs:
         run: cargo deny check
 
   # ---------------------------------------------------------------------------
+  # Fuzzing. A short, deterministic pass on every PR: enough to catch a gross
+  # regression without turning CI into a fuzzing farm. Long runs belong on a
+  # schedule (#102).
+  #
+  # cargo-fuzz requires nightly, so this sets RUSTUP_TOOLCHAIN to override the
+  # 1.97.1 pin in rust-toolchain.toml -- the same override the cargo audit and
+  # cargo deny jobs use, for the same reason: the tool's needs are not the
+  # library's build.
+  #
+  # The harness lives in a standalone crate that includes src/mail_parser.rs by
+  # path, because the root crate is cdylib-only and its lib root is the PyO3
+  # layer. See fuzz/Cargo.toml.
+  # ---------------------------------------------------------------------------
+  fuzz:
+    name: fuzz (short pass)
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      # Bump to upgrade cargo-fuzz; also invalidates the binary cache. Keep this
+      # current: 0.13.1's lockfile pins rustix 0.36.5, which uses internal
+      # `rustc_*` attributes that today's nightly rejects, so an old cargo-fuzz
+      # fails to build regardless of this repository.
+      CARGO_FUZZ_VERSION: "0.13.2"
+      # Long enough to exercise the seeds and some mutation, short enough that it
+      # never dominates a PR run.
+      FUZZ_SECONDS: "60"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: fuzz
+
+      - name: Cache cargo-fuzz binary
+        id: cache-cargo-fuzz
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-${{ env.CARGO_FUZZ_VERSION }}
+      - name: Install cargo-fuzz
+        if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --version ${{ env.CARGO_FUZZ_VERSION }} --locked
+
+      - name: Seed the corpus from the test fixtures
+        run: |
+          # Seeded at run time rather than committed: the fixtures already live
+          # in tests/, and duplicating ~200 KB of them under fuzz/ would mean two
+          # copies to keep in step.
+          mkdir -p fuzz/corpus/parse_email
+          cp tests/data/*.eml tests/data/rfc/*.eml fuzz/corpus/parse_email/
+          echo "seeded $(ls fuzz/corpus/parse_email | wc -l) inputs"
+
+      - name: Fuzz parse_email
+        run: |
+          cargo fuzz run parse_email -- \
+            -max_total_time="$FUZZ_SECONDS" \
+            -seed=1 \
+            -print_final_stats=1
+
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
   # Build once, test everywhere — the real merge gate. A single cp311-abi3
   # wheel is built (stable ABI, see pyo3/abi3-py311 in Cargo.toml), then that
   # SAME wheel is installed and tested on every supported CPython (3.11–3.14).

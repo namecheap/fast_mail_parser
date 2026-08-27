@@ -40,3 +40,6 @@ build-backend = "maturin"
 [tool.maturin]
 module-name = "fast_mail_parser.fast_mail_parser"
 sdist-include = ["src/*"]
+# The fuzzing harness is a development tool; it has no place in a wheel or an
+# sdist, and it carries its own lockfile and nightly toolchain requirement.
+exclude = ["fuzz/**"]
