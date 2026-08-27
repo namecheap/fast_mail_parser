@@ -31,13 +31,30 @@ def malformed() -> bytes:
         return handle.read()
 
 
-# --- #150: unterminated header block swallows the body -----------------------
+# --- #150: unterminated header block swallows the first part ------------------
 #
-# The fixture's header block is never terminated: a folded continuation line
-# (` hello`) is followed directly by the FIRST MIME boundary with no blank line.
-# That boundary is consumed as a header field, so the part it opened -- the
-# text/plain body -- is lost. The second boundary is intact, so the text/html
-# part survives. No error is raised, so the loss is silent and partial.
+# `invalid_message.eml` is a real Mailchimp-delivered message, bare-LF
+# throughout, whose header block is never terminated by a blank line. A folded
+# continuation line (` hello`, which makes MIME-Version read `1.0 hello`) is
+# followed directly by the FIRST MIME boundary. The stdlib has a name for this
+# defect: MissingHeaderBodySeparatorDefect.
+#
+# So a parser scanning for the separator keeps consuming header lines -- 73 of
+# them, up to the first genuinely blank line. Reconstructing that block by hand
+# gives 30 distinct colon-bearing keys plus one colonless line (the boundary,
+# kept as a key with no value) = the 31 keys we report, which is what confirms
+# the mechanism rather than merely fitting it.
+#
+# Two consequences, both pinned below. The boundary that opened the text/plain
+# part was eaten as a header, so that part's content ends up BEFORE the next
+# boundary -- making it multipart preamble, which is discarded by definition.
+# The second boundary is intact, so the text/html part survives: the loss is
+# partial, which is what makes it easy to miss. And the lines absorbed after the
+# boundary are the first part's OWN headers, so the top-level header map ends up
+# carrying two Content-Type values.
+#
+# Note for anyone reading this looking for a detection signal: "multipart with
+# zero parts" does NOT fire here, because the html part parses fine.
 
 
 def test__150_malformed_message_still_parses(malformed: bytes):
@@ -63,6 +80,21 @@ def test__150_boundary_is_reported_as_a_header_key(malformed: bytes):
 
     # WRONG, pinned: a boundary delimiter is not a header field.
     assert f"--{BOUNDARY}" in mail.headers
+
+
+def test__150_part_headers_leak_into_the_top_level_map(malformed: bytes):
+    mail = parse_email(malformed)
+
+    # WRONG, pinned: the two lines absorbed after the swallowed boundary are the
+    # first part's own headers, so the message appears to declare Content-Type
+    # twice -- the real multipart/alternative one and the part's text/plain.
+    # A well-formed message has exactly one, which makes this a second cheap
+    # detection signal. It only became visible when headers started keeping
+    # every value (#123); before that the part's value silently overwrote the
+    # multipart one.
+    assert len(mail.headers["Content-Type"]) == 2
+    assert any("multipart/alternative" in v for v in mail.headers["Content-Type"])
+    assert any("text/plain" in v for v in mail.headers["Content-Type"])
 
 
 def test__150_the_stdlib_recovers_what_we_lose(malformed: bytes):
