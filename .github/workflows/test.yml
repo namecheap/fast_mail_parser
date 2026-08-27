@@ -349,45 +349,98 @@ jobs:
           fi
           echo "comparison base: $base"
 
-      - name: Benchmark this revision
+      # Both revisions are BUILT first and measured afterwards, alternating
+      # between them. Pairing each build with its own measurement is what this
+      # gate used to do, and it is not good enough: two build-and-measure cycles
+      # read ~16% apart on a no-op, so the gate could report a few percent on a
+      # real regression. That is not hypothetical -- on 2026-08-27 the toolchain
+      # comparison, built the same way, reported -0.2% on what an interleaved
+      # measurement showed to be +15.7% (#120). Within-job noise is only ~0.3%
+      # once the builds are out of the way.
+      - name: Build this revision
         run: |
           python -m venv "$RUNNER_TEMP/venv-head"
           "$RUNNER_TEMP/venv-head/bin/pip" install -q --upgrade pip
           "$RUNNER_TEMP/venv-head/bin/pip" install -q ".[test]"
-          "$RUNNER_TEMP/venv-head/bin/pytest" -q tests/benchmark \
-            --benchmark-min-rounds=25 --benchmark-json=head.json
 
-      - name: Benchmark the comparison base
+      - name: Build the comparison base
         if: steps.base.outputs.compare == 'true'
         env:
           BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          # Each revision is built and measured in its own tree and venv, so the
-          # base build cannot be shadowed by this revision's sources.
+          # A separate tree and venv, so the base build cannot be shadowed by
+          # this revision's sources.
           git worktree add "$RUNNER_TEMP/base" "$BASE_SHA"
           python -m venv "$RUNNER_TEMP/venv-base"
           "$RUNNER_TEMP/venv-base/bin/pip" install -q --upgrade pip
-          "$RUNNER_TEMP/venv-base/bin/pip" install -q "$RUNNER_TEMP/base[test]"
-          cd "$RUNNER_TEMP/base"
-          "$RUNNER_TEMP/venv-base/bin/pytest" -q tests/benchmark \
-            --benchmark-min-rounds=25 \
-            --benchmark-json="$GITHUB_WORKSPACE/base.json"
+          CARGO_TARGET_DIR="$RUNNER_TEMP/target-base" \
+            "$RUNNER_TEMP/venv-base/bin/pip" install -q "$RUNNER_TEMP/base[test]"
+
+      - name: Decide whether there is anything to compare
+        id: differ
+        if: steps.base.outputs.compare == 'true'
+        run: |
+          # A docs- or test-only change compiles to a byte-identical extension,
+          # and comparing it with itself can only produce noise -- which a 7%
+          # threshold will eventually read as a regression. Skip instead.
+          head_so=$(find "$RUNNER_TEMP/venv-head" -name '*.so' -path '*fast_mail_parser*' | head -1)
+          base_so=$(find "$RUNNER_TEMP/venv-base" -name '*.so' -path '*fast_mail_parser*' | head -1)
+          head_hash=$(sha256sum "$head_so" | cut -d' ' -f1)
+          base_hash=$(sha256sum "$base_so" | cut -d' ' -f1)
+          echo "this revision: $head_hash"
+          echo "base:          $base_hash"
+          if [ "$head_hash" = "$base_hash" ]; then
+            echo "identical=true" >> "$GITHUB_OUTPUT"
+            echo "The extension is byte-identical to the base, so there is nothing to compare." \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "identical=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Measure, interleaved
+        run: |
+          # This revision's benchmark code measures BOTH builds. Running each
+          # revision's own copy would change the instrument and the subject at
+          # once, so a PR that touched tests/benchmark compared nothing
+          # meaningful. A benchmark added here that needs an API the base lacks
+          # must therefore guard itself with a skip.
+          compare='${{ steps.base.outputs.compare }}'
+          identical='${{ steps.differ.outputs.identical }}'
+          sides="head"
+          if [ "$compare" = "true" ] && [ "$identical" != "true" ]; then
+            sides="head base"
+          fi
+          for round in 1 2 3; do
+            for side in $sides; do
+              echo "::group::round $round — $side"
+              "$RUNNER_TEMP/venv-$side/bin/pytest" -q tests/benchmark \
+                --benchmark-min-rounds=25 \
+                --benchmark-json="$side-$round.json"
+              echo "::endgroup::"
+            done
+          done
+          # The absolute floor reads one report; any round will do.
+          cp head-1.json head.json
 
       - name: Enforce performance gate
         env:
-          # Primary gate: slowdown against the base, measured on this runner.
-          # Within-job noise is ~0.3%, so a few percent is a real signal.
-          BENCH_MAX_REGRESSION_PCT: "7"
+          # Primary gate: slowdown against the base. Interleaved and
+          # noise-floor-checked, so a few percent is a real signal.
+          AB_THRESHOLD_PCT: "7"
           # Secondary: catastrophic-drift net only. Deliberately far below the
           # observed 6.3-7.7x range so it cannot flake; the base comparison is
           # what actually catches regressions.
           BENCH_MIN_SPEEDUP: "5.0"
         run: |
-          if [ "${{ steps.base.outputs.compare }}" = "true" ]; then
-            python .github/scripts/check_benchmark.py head.json base.json
-          else
-            python .github/scripts/check_benchmark.py head.json
+          if [ "${{ steps.base.outputs.compare }}" = "true" ] \
+             && [ "${{ steps.differ.outputs.identical }}" != "true" ]; then
+            python .github/scripts/ab_median.py \
+              --a-label "this revision" --b-label "base" \
+              --a head-*.json --b base-*.json
           fi
+          # Absolute floor, always: it needs no base and catches drift that a
+          # base comparison cannot see, because the base drifted too.
+          python .github/scripts/check_benchmark.py head.json
 
       - name: Render the cross-library comparison table
         if: always()
@@ -410,5 +463,6 @@ jobs:
           name: benchmark-json
           path: |
             head.json
-            base.json
+            head-[0-9].json
+            base-[0-9].json
           if-no-files-found: warn
