@@ -613,11 +613,7 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<P
 }
 
 #[inline(never)]
-fn parse_email_other_mode(
-    py: Python<'_>,
-    payload: Py<PyAny>,
-    mode: &str,
-) -> PyResult<Py<PyAny>> {
+fn parse_email_other_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
     match mode {
         "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
         other => Err(unknown_mode(other)),
