@@ -40,5 +40,10 @@ def valid_message(read_mail: Callable) -> str:
 
 
 @pytest.fixture(scope='module')
+def attachment_message(read_mail: Callable) -> str:
+    return read_mail('tests/data/attachment_message.eml')
+
+
+@pytest.fixture(scope='module')
 def large_message(read_mail: Callable) -> str:
     return read_mail('tests/data/large_message.eml')

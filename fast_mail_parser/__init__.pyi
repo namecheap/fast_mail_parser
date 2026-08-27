@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from datetime import datetime
+from typing import Literal, overload
 
 __all__ = [
     "parse_email",
@@ -7,8 +8,10 @@ __all__ = [
     "parse_many",
     "walk",
     "PyMail",
+    "PyMailMetadata",
     "PyMimePart",
     "PyAttachment",
+    "PyAttachmentMetadata",
     "PyAddress",
     "ParseError",
     "HeaderParseError",
@@ -58,6 +61,75 @@ class PyMimePart:
         self.is_message = is_message
         self.content = content
         self.children = children
+
+
+class PyAttachmentMetadata:
+    """A non-body part described but not decoded, from ``mode="metadata"``.
+
+    The same fields as ``PyAttachment`` minus ``content``, plus
+    ``encoded_size`` -- the bytes this part occupies in the message *before*
+    transfer-decoding. Named for what it is: metadata mode cannot know the
+    decoded size without doing the decode it exists to skip, and base64 inflates
+    by about a third. In full mode the decoded size is ``len(content)``.
+
+    A separate type rather than a ``PyAttachment`` whose ``content`` is ``None``,
+    so that ``PyAttachment.content`` stays ``bytes`` for every caller who never
+    asked for this mode.
+    """
+
+    def __init__(
+        self,
+        mimetype: str,
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+        encoded_size: int,
+    ) -> None:
+        self.mimetype = mimetype
+        self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
+        self.encoded_size = encoded_size
+
+
+class PyMailMetadata:
+    """What a message says about itself, without decoding what it carries.
+
+    Returned by ``parse_email(payload, mode="metadata")``. ``subject``, ``date``,
+    ``date_parsed``, the address fields and ``headers`` are identical to full
+    mode; ``attachments`` are described but not decoded.
+
+    There is deliberately no ``text_plain``/``text_html``. An empty list cannot be
+    told apart from "this message has no text part", so a triage sweep counting
+    bodyless messages would count all of them; a missing attribute fails loudly
+    instead. For structure without decoding, ``parse_email_tree`` keeps it.
+    """
+
+    def __init__(
+        self,
+        subject: str,
+        date: str,
+        from_: PyAddress | None,
+        to: list[PyAddress],
+        cc: list[PyAddress],
+        bcc: list[PyAddress],
+        reply_to: list[PyAddress],
+        attachments: list[PyAttachmentMetadata],
+        headers: dict[str, list[str]],
+    ) -> None:
+        self.subject = subject
+        self.date = date
+        self.from_ = from_
+        self.to = to
+        self.cc = cc
+        self.bcc = bcc
+        self.reply_to = reply_to
+        self.attachments = attachments
+        self.headers = headers
+
+    @property
+    def date_parsed(self) -> datetime | None:
+        """The ``Date`` header as an aware ``datetime``, or ``None``."""
 
 
 class PyAddress:
@@ -195,11 +267,36 @@ class DecodeError(ParseError):
     """
 
 
-def parse_email(payload: str | bytes) -> PyMail:
+@overload
+def parse_email(payload: str | bytes) -> PyMail: ...
+
+
+@overload
+def parse_email(payload: str | bytes, *, mode: Literal["full"]) -> PyMail: ...
+
+
+@overload
+def parse_email(
+    payload: str | bytes, *, mode: Literal["metadata"]
+) -> PyMailMetadata: ...
+
+
+def parse_email(
+    payload: str | bytes, *, mode: str = "full"
+) -> PyMail | PyMailMetadata:
     """Parse raw content of email and return structured datatype.
 
     A missing ``Subject`` or ``Date`` header yields the empty string ``""``
     (not ``None``) on the returned ``PyMail``.
+
+    ``mode="metadata"`` reads the headers and the attachment inventory without
+    transfer-decoding anything, and returns a ``PyMailMetadata``. On an
+    attachment-heavy message that is most of the work skipped. The overloads
+    above mean the mode picks the return type statically, so callers of the
+    default path see no change at all.
+
+    ``mode`` must be ``"full"`` or ``"metadata"``; anything else raises
+    ``ValueError``.
 
     Raises a ``ParseError`` subtype: ``HeaderParseError``,
     ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle

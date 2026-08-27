@@ -225,3 +225,14 @@ def test__fast_mail_parser___parse_tree(large_message: str, benchmark: Callable)
     payload = large_message.encode()
 
     benchmark(lambda: parse_email_tree(payload))
+
+
+def test__fast_mail_parser___parse_metadata(large_message: str, benchmark: Callable):
+    # #97 asks for metadata mode to be at least 5x faster than a full parse on an
+    # attachment-heavy message. Compare with
+    # `test__fast_mail_parser___parse_message` in the same run.
+    from fast_mail_parser import parse_email
+
+    payload = large_message.encode()
+
+    benchmark(lambda: parse_email(payload, mode="metadata"))

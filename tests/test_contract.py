@@ -27,8 +27,10 @@ EXPECTED_EXPORTS = {
     "MimeStructureError",
     "DecodeError",
     "PyMail",
+    "PyMailMetadata",
     "PyMimePart",
     "PyAttachment",
+    "PyAttachmentMetadata",
     "PyAddress",
 }
 EXPECTED_MAIL_ATTRS = {

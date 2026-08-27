@@ -227,6 +227,134 @@ fn collect_headers(part: &ParsedMail<'_>) -> Vec<(String, Vec<String>)> {
     headers
 }
 
+/// Size of a part's body as it sits on the wire, before transfer-decoding.
+///
+/// Cheap: `get_body_encoded` hands back a view of the existing bytes rather than
+/// decoding them, which is the whole point in metadata mode.
+///
+/// `get_raw` lives on the variant payloads and not on `Body` itself, so this has
+/// to match. The or-patterns are grouped by payload type: `Base64` and
+/// `QuotedPrintable` both carry an `EncodedBody`, `SevenBit` and `EightBit` a
+/// `TextBody`.
+fn encoded_size(part: &ParsedMail<'_>) -> usize {
+    match part.get_body_encoded() {
+        Body::Base64(body) | Body::QuotedPrintable(body) => body.get_raw().len(),
+        Body::SevenBit(body) | Body::EightBit(body) => body.get_raw().len(),
+        Body::Binary(body) => body.get_raw().len(),
+    }
+}
+
+/// A non-body part, described but not decoded (#97).
+#[derive(Debug)]
+pub(crate) struct AttachmentMetadata {
+    pub(crate) mimetype: String,
+    pub(crate) filename: String,
+    pub(crate) content_id: Option<String>,
+    pub(crate) disposition: Option<String>,
+    pub(crate) encoded_size: usize,
+}
+
+/// What a message says about itself, without decoding what it carries (#97).
+///
+/// Deliberately has no `text_plain`/`text_html`. The issue proposed empty lists,
+/// and an empty list is indistinguishable from "this message has no text part" --
+/// a triage sweep counting bodyless messages would count every message. Absent
+/// attributes fail loudly instead. For structure without decoding, use the tree
+/// API (#99).
+#[derive(Debug)]
+pub(crate) struct MailMetadata {
+    pub(crate) subject: String,
+    pub(crate) date: String,
+    pub(crate) from_: Option<Address>,
+    pub(crate) to: Vec<Address>,
+    pub(crate) cc: Vec<Address>,
+    pub(crate) bcc: Vec<Address>,
+    pub(crate) reply_to: Vec<Address>,
+    pub(crate) attachments: Vec<AttachmentMetadata>,
+    pub(crate) headers: Vec<(String, Vec<String>)>,
+}
+
+/// Parse headers and the attachment inventory, decoding nothing.
+///
+/// The MIME tree is still walked -- a part inventory is cheap -- but no
+/// transfer-decoding happens and no content is copied, which on an
+/// attachment-heavy message is nearly all of the work.
+///
+/// The envelope extraction below repeats `Mail::new`'s, deliberately: both are
+/// only calls into the shared helpers (`collect_headers`, `parse_addresses`), so
+/// what is duplicated is the list of headers to read, not any logic. Threading a
+/// mode through `Mail::new` instead would have put a branch in the hot path for
+/// the benefit of the cold one.
+pub(crate) fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailParseError> {
+    if payload.len() > MAX_INPUT_BYTES {
+        return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
+    }
+
+    let mail = parse_mail(payload)?;
+    let headers = collect_headers(&mail);
+
+    let subject = mail
+        .get_headers()
+        .get_first_value("Subject")
+        .unwrap_or_default();
+    let date = mail
+        .get_headers()
+        .get_first_value("Date")
+        .unwrap_or_default();
+    let from_ = parse_addresses(mail.get_headers().get_first_header("From"))
+        .into_iter()
+        .next();
+    let to = parse_addresses(mail.get_headers().get_first_header("To"));
+    let cc = parse_addresses(mail.get_headers().get_first_header("Cc"));
+    let bcc = parse_addresses(mail.get_headers().get_first_header("Bcc"));
+    let reply_to = parse_addresses(mail.get_headers().get_first_header("Reply-To"));
+
+    let mut attachments = vec![];
+
+    for part in Mail::extract_mail_parts(mail, 0)? {
+        let mime = part.ctype.mimetype.as_str();
+
+        // Structure, not content -- same reasoning as the full parse (#22).
+        if mime.starts_with("multipart/") {
+            continue;
+        }
+
+        let disposition = part.get_content_disposition();
+
+        // The same RFC 2183 rule the full parse applies (#25), so the two modes
+        // agree on what an attachment is. A body part is skipped entirely here:
+        // reporting it with no content and no size would say less than nothing.
+        let is_body = disposition.disposition != DispositionType::Attachment
+            && matches!(mime, "text/plain" | "text/html");
+        if is_body {
+            continue;
+        }
+
+        attachments.push(AttachmentMetadata {
+            mimetype: mime.to_string(),
+            filename: part_filename(&disposition, &part.ctype),
+            content_id: part
+                .get_headers()
+                .get_first_value("Content-ID")
+                .map(|raw| normalize_content_id(&raw)),
+            disposition: disposition_token(&part, &disposition.disposition),
+            encoded_size: encoded_size(&part),
+        });
+    }
+
+    Ok(MailMetadata {
+        subject,
+        date,
+        from_,
+        to,
+        cc,
+        bcc,
+        reply_to,
+        attachments,
+        headers,
+    })
+}
+
 /// One node of the MIME tree, as the message actually nests it (#99).
 ///
 /// `Mail` is a flattened projection of this: bodies in one list, attachments in

@@ -131,6 +131,141 @@ fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
     }
 }
 
+/// A non-body part described but not decoded, from `mode="metadata"` (#97).
+///
+/// The same fields as `PyAttachment` minus `content`, plus `encoded_size`. It is
+/// a separate type rather than a `PyAttachment` with `content = None`, so that
+/// `PyAttachment.content` stays `bytes` for every caller who never asked for this
+/// mode -- widening it to `bytes | None` would have broken every `mypy --strict`
+/// consumer of the default path.
+#[pyclass(skip_from_py_object)]
+#[derive(Clone)]
+pub struct PyAttachmentMetadata {
+    #[pyo3(get)]
+    pub mimetype: String,
+    #[pyo3(get)]
+    pub filename: String,
+    #[pyo3(get)]
+    pub content_id: Option<String>,
+    #[pyo3(get)]
+    pub disposition: Option<String>,
+    /// Bytes this part occupies in the message, **before** transfer-decoding.
+    ///
+    /// Named for what it is. A bare `size` would be read as the decoded size,
+    /// which metadata mode cannot know without doing the decode it exists to
+    /// skip: base64 inflates by about a third. In full mode the decoded size is
+    /// `len(content)`.
+    #[pyo3(get)]
+    pub encoded_size: usize,
+}
+
+impl PyAttachmentMetadata {
+    fn from_metadata(attachment: mail_parser::AttachmentMetadata) -> Self {
+        PyAttachmentMetadata {
+            mimetype: attachment.mimetype,
+            filename: attachment.filename,
+            content_id: attachment.content_id,
+            disposition: attachment.disposition,
+            encoded_size: attachment.encoded_size,
+        }
+    }
+}
+
+/// What a message says about itself, without decoding what it carries (#97).
+///
+/// Returned by `parse_email(payload, mode="metadata")`. Headers, subject, date
+/// and addresses are identical to full mode; attachments are described but not
+/// decoded.
+///
+/// It has no `text_plain`/`text_html` on purpose. #97 proposed empty lists, and
+/// an empty list cannot be told apart from "this message has no text part" -- a
+/// triage sweep counting bodyless messages would count all of them, which is the
+/// same class of silent-wrong-answer as #150. A missing attribute fails loudly.
+/// For structure without decoding, `parse_email_tree` is the API that keeps it.
+#[pyclass(skip_from_py_object)]
+pub struct PyMailMetadata {
+    #[pyo3(get)]
+    pub subject: String,
+    #[pyo3(get)]
+    pub date: String,
+    #[pyo3(get)]
+    pub from_: Option<PyAddress>,
+    #[pyo3(get)]
+    pub to: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub cc: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub bcc: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub reply_to: Vec<PyAddress>,
+    #[pyo3(get)]
+    pub attachments: Vec<PyAttachmentMetadata>,
+    pub headers: Vec<(String, Vec<String>)>,
+}
+
+#[pymethods]
+impl PyMailMetadata {
+    /// Headers, every value kept, keys in wire order -- as in `PyMail` (#157).
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
+    /// The `Date` header as an aware `datetime`, or `None` if unparseable.
+    ///
+    /// Present here because sorting or bucketing a sweep by date is most of what
+    /// metadata mode is for.
+    #[getter]
+    fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
+        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
+            return Ok(None);
+        };
+        let utc = PyTzInfo::utc(py)?;
+        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "<PyMailMetadata {:?} attachments={}>",
+            self.subject,
+            self.attachments.len()
+        )
+    }
+}
+
+impl PyMailMetadata {
+    #[inline(never)]
+    fn from_metadata(metadata: mail_parser::MailMetadata) -> Self {
+        PyMailMetadata {
+            subject: metadata.subject,
+            date: metadata.date,
+            from_: metadata.from_.map(PyAddress::from_address),
+            to: metadata.to.into_iter().map(PyAddress::from_address).collect(),
+            cc: metadata.cc.into_iter().map(PyAddress::from_address).collect(),
+            bcc: metadata
+                .bcc
+                .into_iter()
+                .map(PyAddress::from_address)
+                .collect(),
+            reply_to: metadata
+                .reply_to
+                .into_iter()
+                .map(PyAddress::from_address)
+                .collect(),
+            attachments: metadata
+                .attachments
+                .into_iter()
+                .map(PyAttachmentMetadata::from_metadata)
+                .collect(),
+            headers: metadata.headers,
+        }
+    }
+}
+
 /// One node of a message's MIME tree, with the structure intact (#99).
 ///
 /// `PyMail` is a flattened projection of this -- bodies in one list, attachments
@@ -460,8 +595,29 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
 /// Raises `ParseError`, or more precisely one of its subtypes:
 /// `HeaderParseError`, `MimeStructureError` or `DecodeError`.
 #[pyfunction]
-pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
-    catch_panics(|| parse_email_inner(py, payload))
+#[pyo3(signature = (payload, *, mode = "full"))]
+pub fn parse_email(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+    catch_panics(|| match mode {
+        "full" => Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()),
+        "metadata" => parse_email_metadata_mode(py, payload),
+        other => Err(exceptions::PyValueError::new_err(format!(
+            "mode must be \"full\" or \"metadata\", not {other:?}"
+        ))),
+    })
+}
+
+/// Cold, and marked so. `parse_email`'s default path must not pay for this
+/// existing: adding cold binding code to this module has already cost the hot
+/// path 24% once, through nothing but lost inlining (#99).
+#[inline(never)]
+fn parse_email_metadata_mode(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let message = payload_to_bytes(&payload, py)?;
+
+    let metadata = py
+        .detach(|| mail_parser::parse_email_metadata(message.as_ref()))
+        .map_err(to_py_err)?;
+
+    Ok(Py::new(py, PyMailMetadata::from_metadata(metadata))?.into_any())
 }
 
 fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
@@ -605,8 +761,10 @@ fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email_tree, m)?)?;
     m.add_function(wrap_pyfunction!(_panic_for_tests, m)?)?;
     m.add_class::<PyMail>()?;
+    m.add_class::<PyMailMetadata>()?;
     m.add_class::<PyMimePart>()?;
     m.add_class::<PyAttachment>()?;
+    m.add_class::<PyAttachmentMetadata>()?;
     m.add_class::<PyAddress>()?;
     m.add("ParseError", py.get_type::<ParseError>())?;
     m.add("HeaderParseError", py.get_type::<HeaderParseError>())?;

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`parse_email(payload, mode="metadata")`** reads the headers and the attachment
+  inventory without transfer-decoding anything, returning a `PyMailMetadata`
+  (#97). On an attachment-heavy message that is most of the work skipped.
+  - The mode picks the return type statically through overloads, so callers of the
+    default path see no change: `PyAttachment.content` stays `bytes` rather than
+    widening to `bytes | None`.
+  - Attachments come back as `PyAttachmentMetadata` with `encoded_size` -- the
+    bytes the part occupies in the message, before decoding. Named for what it is:
+    the decoded size cannot be known without the decode this mode exists to skip.
+  - No `text_plain`/`text_html`, and absent rather than empty: an empty list
+    cannot be told apart from "no text part", so a sweep counting bodyless
+    messages would count all of them.
+  - It cannot report `DecodeError`, because it never decodes. Header errors are
+    reported in both modes.
 - **`parse_email_tree(payload)`** returns the message's MIME tree with the
   structure intact, and **`walk(part)`** iterates it depth-first in the same order
   as the stdlib's `email.message.Message.walk` (#99). A pure addition:
