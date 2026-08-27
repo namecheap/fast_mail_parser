@@ -75,7 +75,7 @@ def main() -> int:
         f"CPython {machine.get('python_version', platform.python_version())} "
         f"on {machine.get('system', platform.system())} "
         f"{machine.get('machine', platform.machine())}. "
-        f"fast-mail-parser-ng {_version('fast-mail-parser-ng')}, "
+        f"fast-mail-parser {_version('fast-mail-parser')}, "
         f"mail-parser {_version('mail-parser')}. "
         f"Minimum of {report['benchmarks'][0]['stats']['rounds']}+ rounds."
     )

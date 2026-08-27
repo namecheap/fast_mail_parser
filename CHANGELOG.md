@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-27
+
+### Changed
+
+- **The distribution is published as `fast-mail-parser` again.** `pip install
+  fast-mail-parser`. Releases 0.6.0–0.7.0 went out as `fast-mail-parser-ng`
+  because the original name belonged to an account this project no longer
+  controlled and was frozen at 0.2.5 from June 2022; ownership has since been
+  transferred directly, so the PEP 541 request was withdrawn.
+  - **The import path is unchanged**, as it has been throughout:
+    `from fast_mail_parser import parse_email`.
+  - On `fast-mail-parser-ng`? Change the name in your requirements file and
+    nothing else. That project stays on PyPI so nothing pinning it breaks, but it
+    receives no further releases.
+
 ### Added
 
 - **`PyMail.warnings`** reports the lossy repairs a parse performed, and

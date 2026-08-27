@@ -196,15 +196,21 @@ jobs:
       # silently IGNORED if an explicit username/password is set, so do NOT add
       # `user`/`password` here.
       #
-      # The distribution is `fast-mail-parser-ng` (the import path stays
+      # The distribution is `fast-mail-parser` (the import path is the same,
       # `fast_mail_parser`; see [tool.maturin] module-name in pyproject.toml).
+      #
+      # It was `fast-mail-parser-ng` for 0.6.0-0.7.0, while the original name was
+      # owned elsewhere. Ownership has since been transferred, so releases go back
+      # to the original name -- which means PyPI needs a Trusted Publisher for
+      # THAT project before the first upload under it, or this step 403s.
       # Requires a one-time PyPI setup — add a Trusted Publisher for
       # namecheap/fast_mail_parser, workflow "publish.yml", environment blank:
       #
-      #   before the project exists (pending publisher, creates it on first
-      #   upload):  https://pypi.org/manage/account/publishing/
-      #   afterwards:
-      #     https://pypi.org/manage/project/fast-mail-parser-ng/settings/publishing/
+      #     https://pypi.org/manage/project/fast-mail-parser/settings/publishing/
+      #
+      # A pending publisher (https://pypi.org/manage/account/publishing/) is only
+      # for a project that does not exist yet; `fast-mail-parser` does, so the
+      # per-project page above is the one to use.
       #
       # The `environment:` field there must match this job exactly — this job
       # declares none, so leave it blank.

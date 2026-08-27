@@ -1,5 +1,5 @@
 [project]
-name = "fast-mail-parser-ng"
+name = "fast-mail-parser"
 dynamic = ["version"]
 description = "Very fast Python library for .eml files parsing."
 authors = [{ name = "Andrii Sokyrko", email = "wartwvister@gmail.com" }]

@@ -1,34 +1,34 @@
 # fast_mail_parser
 
 ![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
-[![PyPI version](https://badge.fury.io/py/fast-mail-parser-ng.svg)](https://badge.fury.io/py/fast-mail-parser-ng)
-[![Downloads](https://pepy.tech/badge/fast-mail-parser-ng)](https://pepy.tech/project/fast-mail-parser-ng)
+[![PyPI version](https://badge.fury.io/py/fast-mail-parser.svg)](https://badge.fury.io/py/fast-mail-parser)
+[![Downloads](https://pepy.tech/badge/fast-mail-parser)](https://pepy.tech/project/fast-mail-parser)
 
-> ## 📦 Now published as `fast-mail-parser-ng`
->
-> **Install it under the new name:**
+> ## 📦 Back on `fast-mail-parser`
 >
 > ```bash
-> pip install fast-mail-parser-ng
+> pip install fast-mail-parser
 > ```
 >
-> **Your code does not change.** The import path is still `fast_mail_parser`:
+> **On `fast-mail-parser-ng`?** That name carried releases 0.6.0–0.7.0 while the
+> original was owned elsewhere. Ownership has since been transferred, so releases
+> are published under the original name again. Change the name in your
+> requirements file and nothing else — no code edits, same API:
+>
+> ```diff
+> - fast-mail-parser-ng
+> + fast-mail-parser
+> ```
+>
+> **Your code does not change either way.** The import path has always been
+> `fast_mail_parser`:
 >
 > ```python
 > from fast_mail_parser import parse_email
 > ```
 >
-> Migrating from `fast-mail-parser`? Change the name in your requirements file
-> and nothing else — no code edits, same API.
->
-> ```diff
-> - fast-mail-parser
-> + fast-mail-parser-ng
-> ```
->
-> Looking for the old `fast-mail-parser` package? It is a different,
-> unmaintained upload frozen at 0.2.5 (June 2022) that this project cannot
-> publish to. See [Why the name changed](#why-the-name-changed).
+> `fast-mail-parser-ng` stays on PyPI so nothing installing it breaks, but new
+> releases go to `fast-mail-parser`. See [The name](#the-name).
 
 A very fast Python library for parsing `.eml` files. It is built on the Rust
 [mailparse](https://github.com/staktrace/mailparse) crate via
@@ -39,7 +39,7 @@ pure-Python implementations, depending on the CPU — see
 ## Quickstart
 
 ```bash
-pip install fast-mail-parser-ng
+pip install fast-mail-parser
 ```
 
 ```python
@@ -61,20 +61,24 @@ executed in CI, so they cannot go stale — and
 [compatibility.md](https://github.com/namecheap/fast_mail_parser/blob/master/docs/compatibility.md) for every known
 difference from the stdlib, each one enforced by a test.
 
-## Why the name changed
+## The name
 
-The `fast-mail-parser` name on PyPI belongs to a PyPI account this project no
-longer controls, and it is frozen at an unmaintained **0.2.5 from June 2022**.
-Only a project owner can publish to a name, so fixes could not reach it — the
-PEP 541 transfer request
-([pypi/support#11044](https://github.com/pypi/support/issues/11044)) has been
-open and unattended since June 2026.
+Releases are published as **`fast-mail-parser`**, and the import path is
+`fast_mail_parser`.
 
-Rather than hold releases behind that queue indefinitely, this project publishes
-under a name it owns. The import path was deliberately left as
-`fast_mail_parser` so the change costs you one line in a requirements file and
-no code. If the transfer is ever granted, `fast-mail-parser` will resume as an
-alias.
+There was an interruption worth explaining, because two names exist on PyPI. The
+`fast-mail-parser` project belonged to an account this project no longer
+controlled and was frozen at an unmaintained **0.2.5 from June 2022**; only a
+project owner can publish to a name, so fixes could not reach it. A PEP 541
+transfer request sat unattended for months. Rather than hold releases behind that
+queue, 0.6.0 through 0.7.0 shipped as `fast-mail-parser-ng`, with the import path
+deliberately unchanged so the switch cost one line in a requirements file.
+
+Ownership has since been transferred directly, so releases go back to the
+original name from 0.8.0 on. `fast-mail-parser-ng` is left in place — the
+releases published under it keep working, and nothing pinning it breaks — but it
+receives no new versions. If you are on it, change the name in your requirements
+file; there is nothing else to do.
 
 Full history in the [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md).
 
