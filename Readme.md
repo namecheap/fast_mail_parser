@@ -110,19 +110,19 @@ attachments with their payloads decoded — on the same message:
 
 | Library | Work performed | Min time | Relative |
 | --- | --- | --- | --- |
-| **fast_mail_parser** | parse + decode bodies + decode attachments | 2.09 ms | 1.00x |
-| mail-parser | `from_string` + `.parse()` + read attributes | 13.45 ms | 6.44x |
-| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 17.93 ms | 8.59x |
+| **fast_mail_parser** | parse + decode bodies + decode attachments | 0.61 ms | 1.00x |
+| mail-parser | `from_string` + `.parse()` + read attributes | 7.22 ms | 11.82x |
+| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 10.59 ms | 17.33x |
 
 Corpus: `tests/data/large_message.eml` (multipart/mixed, 6 MIME parts, 2 base64
-attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`),
-mail-parser 4.6.4, minimum of 31+ rounds.
+attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`, an
+AMD EPYC 9V45 on this run), mail-parser 4.6.4, minimum of 91+ rounds.
 
 **These ratios move with the hardware, so treat them as a magnitude rather than a
-constant.** An earlier run of this same comparison on a faster CI runner recorded
-8.50x and 10.01x rather than 6.44x and 8.59x, and an Apple Silicon laptop gives
-5.25x and 6.42x: the interpreted parsers and the Rust extension do not scale
-together across CPUs. Regenerate the table for your own machine with
+constant.** Before the MIME boundary search moved to `memchr::memmem`, this same
+table read 6.44x and 8.59x on one runner and 8.50x and 10.01x on a faster one; an
+Apple M4 now gives 7.6x and 10.6x against this run's 11.8x and 17.3x. The
+interpreted parsers and the Rust extension do not scale together across CPUs. Regenerate the table for your own machine with
 `make bench-table`, which prints its own methodology line; CI also renders it
 into the job summary of every benchmark run.
 
@@ -318,10 +318,10 @@ The mode is uniform across the batch, which is what lets it pick the slot type;
 and input order behave exactly as in the default mode.
 
 On the attachment-heavy fixture, a batch of 8 × 767 KiB with `threads=1`, median
-of three interleaved rounds on the CI runner: `mode="full"` 16.16 ms,
-`mode="metadata"` 4.68 ms — **3.5x**, the same ratio the single-message mode gets,
-now available to the batch. On 2000 × 0.8 KB it is 4.11 ms against 4.67 ms — a
-1.14x edge, because small messages are mostly headers and there is little
+of three interleaved rounds on the CI runner: `mode="full"` 4.82 ms,
+`mode="metadata"` 0.25 ms — **19.6x**, the same ratio the single-message mode gets,
+now available to the batch. On 2000 × 0.8 KB it is 2.25 ms against 2.55 ms — a
+1.13x edge, because small messages are mostly headers and there is little
 decoding to skip.
 
 `strict=True` with `mode="metadata"` raises `ValueError`, as it does on
@@ -411,13 +411,14 @@ median of three interleaved rounds on the CI runner:
 
 | | | |
 | --- | --- | --- |
-| `mode="metadata"` | 0.52 ms | decodes nothing |
-| `mode="lazy"`, nothing read | 0.56 ms | bodies decoded, attachments deferred |
-| `mode="full"` | 2.00 ms | the default |
-| `mode="lazy"`, every attachment read | 2.04 ms | the same work, in a worse order |
+| `mode="metadata"` | 0.030 ms | decodes nothing |
+| `mode="lazy"`, nothing read | 0.048 ms | bodies decoded, attachments deferred |
+| `mode="full"` | 0.604 ms | the default |
+| `mode="lazy"`, every attachment read | 0.583 ms | the same work, in a worse order |
 
-So deferring saves about 70% when you were not going to decode everything, and
-costs about 2% when you were. **If you are going to read every attachment, use the
+So deferring saves about 92% when you were not going to decode everything, and
+costs nothing measurable when you were: 0.58 against 0.60 ms is inside the run's
+noise. **If you are going to read every attachment, use the
 default mode** — this one is for when you are not. Absolute times move with the
 runner; the ratios are what to read.
 
@@ -507,8 +508,8 @@ That is the difference between the two — lazy mode keeps a copy of every leaf 
 it can decode one later, metadata mode keeps none and is the cheaper sweep.
 
 On the attachment-heavy fixture (767 KiB), median of three interleaved rounds on
-the CI runner: full tree 2.02 ms, `mode="lazy"` with nothing read 0.61 ms,
-`mode="metadata"` 0.58 ms — **3.3x** and **3.5x**.
+the CI runner: full tree 0.595 ms, `mode="lazy"` with nothing read 0.044 ms,
+`mode="metadata"` 0.033 ms — **13.5x** and **18x**.
 
 Two things to know:
 

@@ -39,7 +39,14 @@ build-backend = "maturin"
 
 [tool.maturin]
 module-name = "fast_mail_parser.fast_mail_parser"
-sdist-include = ["src/*"]
+# `src/*` is the Rust source. `vendor/mailparse` is the patched dependency, which must
+# travel with the sdist or a build from source silently uses the unpatched crates.io
+# copy: maturin follows `[dependencies]` path entries into the sdist on its own, but
+# not `[patch.crates-io]` ones.
+include = [
+    { path = "src/*", format = "sdist" },
+    { path = "vendor/mailparse/**/*", format = "sdist" },
+]
 # The fuzzing harness is a development tool; it has no place in a wheel or an
 # sdist, and it carries its own lockfile and nightly toolchain requirement.
 exclude = ["fuzz/**"]

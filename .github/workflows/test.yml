@@ -54,6 +54,15 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
         continue-on-error: true
 
+      # `vendor/mailparse` is upstream 0.16.1 with its boundary search changed (see
+      # vendor/mailparse/PATCH.md). Its own test suite is the check that a hand-merged
+      # upstream release, or an edit to the patch, still parses what upstream parses.
+      # Separate target dir: a `target/` inside the vendored crate would be swept into
+      # the sdist by the include glob.
+      - name: vendored mailparse tests
+        if: always()
+        run: cargo test --manifest-path vendor/mailparse/Cargo.toml --target-dir "$RUNNER_TEMP/vendor-target"
+
       # Blocking: `mypy --strict fast_mail_parser/` type-checks clean today.
       - name: mypy --strict
         if: always()

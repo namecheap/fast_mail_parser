@@ -47,3 +47,9 @@ pyo3 = "0.29"
 # `requires-python` in pyproject.toml): one wheel per platform covers every
 # CPython >= 3.11, including versions released after this build.
 default = ["pyo3/extension-module", "pyo3/abi3-py311"]
+
+# `vendor/mailparse` is upstream 0.16.1 with one function changed: the MIME
+# boundary search calls `memchr::memmem` instead of scanning byte by byte. See
+# vendor/mailparse/PATCH.md for why, the numbers, and when this section goes.
+[patch.crates-io]
+mailparse = { path = "vendor/mailparse" }

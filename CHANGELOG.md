@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The MIME boundary search is now `memchr::memmem`** instead of a byte-by-byte scan,
+  through a patched copy of `mailparse` 0.16.1 in `vendor/mailparse` (upstream as
+  [staktrace/mailparse#142](https://github.com/staktrace/mailparse/pull/142); see
+  `vendor/mailparse/PATCH.md` for the removal steps once it ships). That one loop was
+  **96.5%** of a metadata-mode parse, and it was the codegen cliff #120 and #204 were
+  circling: the same 88 instructions ran at half speed on x86-64 depending on where the
+  linker placed them, so a rustc minor version or a version-string bump could move the
+  metadata path by up to 96% with no change to the code being run. Gate on the PR,
+  median of three interleaved rounds on the CI runner (AMD EPYC 9V45), against master:
+  full parse **1.053 -> 0.604 ms**, `mode="metadata"` **0.362 -> 0.030 ms**,
+  `mode="lazy"` untouched 0.382 -> 0.048 ms, `parse_email_tree` 1.048 -> 0.595 ms,
+  `parse_many` (8 x 767 KiB) 8.53 -> 4.82 ms, `parse_many(mode="metadata")`
+  2.96 -> 0.25 ms; the cross-library table went from 6.4x to 11.8x over mail-parser.
+  An Apple M4 measured -32% / -92% for the same pair -- smaller, because it never
+  had the slow layout to lose. Every mode faster, no output changes (803 tests,
+  both fuzz targets' corpora). `memchr` 2.8.3 is the only
+  new crate in the lockfile.
 - **`fast-mail-parser-ng` 0.7.1** was published as that distribution's final
   release, ahead of archiving it on PyPI. It is 0.7.0's code with a deprecation
   notice for a description — PyPI's guidance is to leave a retired name pointing
