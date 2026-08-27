@@ -142,7 +142,9 @@ def test__an_embedded_message_is_parsed_not_opaque():
     # `parse_email` this is one attachment blob to re-parse by hand.
     assert inner_root.headers["Subject"] == ["the original message"]
     assert inner_root.headers["From"] == ["alice@example.com"]
-    assert inner_root.content == b"hello"
+    # Trailing CRLF included: it is part of the body, not of the boundary
+    # delimiter, since the embedded message ends before the outer boundary line.
+    assert inner_root.content == b"hello\r\n"
 
 
 def test__a_doubly_nested_message_keeps_both_levels():

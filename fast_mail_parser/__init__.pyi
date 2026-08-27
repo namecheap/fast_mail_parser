@@ -39,14 +39,25 @@ class PyMimePart:
     first appeared -- the same semantics as ``PyMail.headers``.
     """
 
-    content_type: str
-    headers: dict[str, list[str]]
-    filename: str
-    content_id: str | None
-    disposition: str | None
-    is_message: bool
-    content: bytes | None
-    children: list[PyMimePart]
+    def __init__(
+        self,
+        content_type: str,
+        headers: dict[str, list[str]],
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+        is_message: bool,
+        content: bytes | None,
+        children: list[PyMimePart],
+    ) -> None:
+        self.content_type = content_type
+        self.headers = headers
+        self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
+        self.is_message = is_message
+        self.content = content
+        self.children = children
 
 
 class PyAddress:
