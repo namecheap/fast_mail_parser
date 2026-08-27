@@ -805,16 +805,20 @@ impl Mail {
             return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
         }
 
-        // The repair is what saves the body; the warning is what makes the
-        // repair observable, which is the half #150 left to #100. A message that
-        // has its separator -- every well-formed one -- takes the first branch
-        // and is untouched by any of this.
-        let Some(repaired) = repair_missing_separator(payload) else {
-            return Mail::from_payload(payload);
-        };
-
-        let mut mail = Mail::from_payload(&repaired)?;
-        warn_separator(&mut mail.warnings);
+        // The repair is what saves the body; the warning is what makes the repair
+        // observable, which is the half #150 left to #100.
+        //
+        // One call site, deliberately. Branching on `repaired` around two calls
+        // to `from_payload` would read better and is exactly what #187 measured
+        // the cost of: `from_payload` carries no `inline(never)`, so a second
+        // call site is a second chance to inline the whole parse body, and
+        // duplicating it there cost the flat path 28%. The `is_some` below reads
+        // a local after the borrow of it has ended.
+        let repaired = repair_missing_separator(payload);
+        let mut mail = Mail::from_payload(repaired.as_deref().unwrap_or(payload))?;
+        if repaired.is_some() {
+            warn_separator(&mut mail.warnings);
+        }
         Ok(mail)
     }
 }
