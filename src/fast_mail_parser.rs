@@ -78,6 +78,51 @@ fn to_py_err(error: MailParseError) -> PyErr {
     }
 }
 
+/// Extract a readable message from a panic payload.
+///
+/// `panic!` with a literal yields a `&str`; with a format string, a `String`.
+/// Anything else is a `panic_any` of some other type, which this crate never
+/// does but a dependency could.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else {
+        "unknown panic payload"
+    }
+}
+
+/// Run a parse and convert a panic into a `ParseError` (#102).
+///
+/// PyO3 already catches panics at the boundary, so one does not abort the
+/// process the way #102 assumed -- it raises `pyo3_runtime.PanicException`. The
+/// operational risk is real anyway, for a different reason: `PanicException`
+/// derives from `BaseException`, so the `except Exception` in a mail pipeline
+/// does not catch it, and a single crafted message takes the worker down.
+///
+/// A parser fed attacker-controlled bytes should fail like a parser. Raising
+/// `ParseError` puts a panic in the same `except` clause as every other
+/// unparseable message, and keeping the payload in the message means the bug
+/// stays diagnosable rather than swallowed -- the default panic hook has also
+/// already written the panic and its location to stderr by this point.
+///
+/// This is a backstop, not a licence: a panic reaching here is a bug in this
+/// crate, and the error says so.
+fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
+    // `AssertUnwindSafe`: the closure touches Python state, which is not
+    // `UnwindSafe`, but nothing observes that state after a panic -- the only
+    // thing built here is an error value.
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)) {
+        Ok(result) => result,
+        Err(payload) => Err(ParseError::new_err(format!(
+            "internal parser panic: {} (this is a bug in fast_mail_parser; \
+             please report it with the input that triggered it)",
+            panic_message(payload.as_ref())
+        ))),
+    }
+}
+
 /// One mailbox from an address header, exposed to Python.
 #[pyclass(skip_from_py_object)]
 #[derive(Clone)]
@@ -283,6 +328,10 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Vec<u8>> {
 /// `HeaderParseError`, `MimeStructureError` or `DecodeError`.
 #[pyfunction]
 pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
+    catch_panics(|| parse_email_inner(py, payload))
+}
+
+fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let message = payload_to_bytes(&payload, py)?;
 
     // The actual parse is pure Rust and never touches the Python interpreter, so
@@ -316,6 +365,19 @@ pub fn parse_email(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
 #[pyfunction]
 #[pyo3(signature = (payloads, *, threads = None, raise_on_error = false))]
 pub fn parse_many(
+    py: Python<'_>,
+    payloads: Vec<Py<PyAny>>,
+    threads: Option<usize>,
+    raise_on_error: bool,
+) -> PyResult<Py<PyList>> {
+    // A panic fails the whole batch rather than one slot, unlike a parse error.
+    // Per-item isolation would need the panic to ride in the core's error type,
+    // and `MailParseError::Generic` holds a `&'static str`, so a payload cannot
+    // travel that way -- worth revisiting only if a panic is ever actually seen.
+    catch_panics(|| parse_many_inner(py, payloads, threads, raise_on_error))
+}
+
+fn parse_many_inner(
     py: Python<'_>,
     payloads: Vec<Py<PyAny>>,
     threads: Option<usize>,
@@ -363,10 +425,27 @@ pub fn parse_many(
     Ok(items.unbind())
 }
 
+/// Panic on purpose, so the backstop above can be tested.
+///
+/// Not part of the API: underscore-prefixed, absent from `__all__` and from the
+/// type stub, and not re-exported by the package. It exists because an untested
+/// backstop is indistinguishable from a missing one, and #102 asks for exactly
+/// this kind of trigger. There is no other way to obtain a panic on demand --
+/// the parser is not known to panic on any input, which is the whole point.
+#[pyfunction]
+fn _panic_for_tests() -> PyResult<()> {
+    catch_panics(panic_now)
+}
+
+fn panic_now() -> PyResult<()> {
+    panic!("deliberate panic from _panic_for_tests")
+}
+
 #[pymodule]
 fn fast_mail_parser(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_email, m)?)?;
     m.add_function(wrap_pyfunction!(parse_many, m)?)?;
+    m.add_function(wrap_pyfunction!(_panic_for_tests, m)?)?;
     m.add_class::<PyMail>()?;
     m.add_class::<PyAttachment>()?;
     m.add_class::<PyAddress>()?;
