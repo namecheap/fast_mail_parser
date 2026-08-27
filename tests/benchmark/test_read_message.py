@@ -133,3 +133,82 @@ def test__fast_mail_parser___parse_many(large_message: str, benchmark: Callable)
     batch = [large_message.encode()] * 8
 
     benchmark(lambda: parse_many(batch, threads=1))
+
+
+# --- parse_many against Python-side threading -------------------------------
+#
+# #96's acceptance criteria ask for this comparison. Both are `test__threaded___`
+# and both are informational: the gate reports them and does not judge them,
+# because thread scheduling moves them more than a code change would, so gating
+# on them would buy flakes rather than protection.
+#
+# Note what is NOT being compared. `parse_email` has released the GIL since #91,
+# so the thread pool below gets real parallelism too -- this is not
+# parallel-versus-serial. What is left is per-call overhead: one FFI crossing for
+# the batch against one per message, plus Python's own thread and future
+# machinery.
+
+BATCH = 16
+
+
+def test__threaded___parse_many(large_message: str, benchmark: Callable):
+    from fast_mail_parser import parse_many
+
+    batch = [large_message.encode()] * BATCH
+
+    benchmark(lambda: parse_many(batch))
+
+
+def test__threaded___threadpool_parse_email(large_message: str, benchmark: Callable):
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fast_mail_parser import parse_email
+
+    batch = [large_message.encode()] * BATCH
+
+    # The pool is built outside the timed call. A pipeline reuses one; charging
+    # thread creation to every batch would flatter parse_many for the wrong
+    # reason.
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        benchmark(lambda: list(pool.map(parse_email, batch)))
+
+
+# Message size decides this comparison, so measure both ends of it. Above, one
+# batch of 16 x 0.75 MiB: parsing dominates and per-call overhead is invisible.
+# Here, 2000 x ~0.8 KiB, where the opposite holds and the per-message cost of
+# crossing into Rust and back -- plus a Python future per message -- is the whole
+# difference.
+SMALL_BATCH = 2000
+
+
+def _small_message() -> bytes:
+    body = "x" * 700
+    return (
+        "From: sender@example.com\r\n"
+        "To: recipient@example.com\r\n"
+        "Subject: small\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n"
+        "\r\n"
+        f"{body}\r\n"
+    ).encode()
+
+
+def test__threaded___parse_many_small(benchmark: Callable):
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    benchmark(lambda: parse_many(batch))
+
+
+def test__threaded___threadpool_parse_email_small(benchmark: Callable):
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+
+    from fast_mail_parser import parse_email
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as pool:
+        benchmark(lambda: list(pool.map(parse_email, batch)))

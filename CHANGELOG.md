@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the error message, so the bug stays diagnosable. A panic still means a bug in
   this crate, and the message says so.
 
+### Performance
+
+- `bytes` payloads are no longer copied before parsing (#96). Every payload used
+  to be duplicated into Rust-owned memory first, so `parse_many` cost the whole
+  batch's size again in copies while the caller still held the originals. Batch
+  parsing of 16 x 0.75 MiB messages is **27% faster** as a result, and its time is
+  now within measurement error of parsing each message individually -- the
+  per-payload overhead is gone rather than reduced.
+  - This also removes the reason to avoid `parse_many` for large messages. It used
+    to be ~1.5x *slower* than a Python thread pool there, because of this copy;
+    the two are now level, while `parse_many` stays ~12x faster for the many-small
+    -messages case a mail pipeline actually has. See the README.
+  - `str` payloads are still copied and cannot not be: under the limited API,
+    obtaining UTF-8 from a `str` means asking CPython to encode it. Pass `bytes`
+    for the fast path.
+
 ### Fixed
 
 - `headers` keys are now in the order the header names first appeared in the

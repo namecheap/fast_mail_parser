@@ -436,6 +436,7 @@ jobs:
              && [ "${{ steps.differ.outputs.identical }}" != "true" ]; then
             python .github/scripts/ab_median.py \
               --a-label "this revision" --b-label "base" \
+              --informational test__threaded___ \
               --a head-*.json --b base-*.json
           fi
           # Absolute floor, always: it needs no base and catches drift that a

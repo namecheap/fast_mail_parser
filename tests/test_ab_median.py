@@ -41,6 +41,21 @@ def _report(path: Path, treatment: float, control: float) -> str:
     return str(path)
 
 
+def _report_named(path: Path, values: dict) -> str:
+    """Write a report with arbitrary benchmark names. Times are in seconds."""
+    path.write_text(
+        json.dumps(
+            {
+                "benchmarks": [
+                    {"name": name, "stats": {"min": seconds}}
+                    for name, seconds in values.items()
+                ]
+            }
+        )
+    )
+    return str(path)
+
+
 def _run(tmp_path: Path, a_rounds, b_rounds, threshold="5"):
     a = [
         _report(tmp_path / f"a{i}.json", t, c) for i, (t, c) in enumerate(a_rounds)
@@ -119,3 +134,63 @@ def test__a_faster_side_is_not_reported_as_a_regression(tmp_path: Path):
 
     assert result.returncode == 0
     assert "no significant difference" in result.stdout
+
+
+# --- informational benchmarks -------------------------------------------------
+
+
+def _run_named(tmp_path: Path, a_values, b_values, extra_args=()):
+    a = _report_named(tmp_path / "an.json", a_values)
+    b = _report_named(tmp_path / "bn.json", b_values)
+    env = os.environ.copy()
+    env["AB_THRESHOLD_PCT"] = "5"
+    env.pop("GITHUB_STEP_SUMMARY", None)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--a-label", "a", "--b-label", "b",
+         *extra_args, "--a", a, "--b", b],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
+def test__an_informational_benchmark_does_not_decide_the_verdict(tmp_path: Path):
+    # The threaded benchmark swings 40%; the gated one does not move. Without the
+    # exclusion this fails the build on scheduling noise.
+    a = {
+        "test__fast_mail_parser___parse_message": 1.000,
+        "test__threaded___parse_many": 1.400,
+        "test__mail_parser___parse_message": 10.0,
+    }
+    b = {
+        "test__fast_mail_parser___parse_message": 1.000,
+        "test__threaded___parse_many": 1.000,
+        "test__mail_parser___parse_message": 10.0,
+    }
+
+    result = _run_named(tmp_path, a, b, ("--informational", "test__threaded___"))
+
+    assert result.returncode == 0, result.stdout
+    assert "no significant difference" in result.stdout
+    # Reported, not hidden: it is still in the table, labelled.
+    assert "test__threaded___parse_many" in result.stdout
+    assert "informational" in result.stdout
+
+
+def test__without_the_exclusion_the_same_data_fails(tmp_path: Path):
+    # Guards the exclusion against being a no-op.
+    a = {
+        "test__fast_mail_parser___parse_message": 1.000,
+        "test__threaded___parse_many": 1.400,
+        "test__mail_parser___parse_message": 10.0,
+    }
+    b = {
+        "test__fast_mail_parser___parse_message": 1.000,
+        "test__threaded___parse_many": 1.000,
+        "test__mail_parser___parse_message": 10.0,
+    }
+
+    result = _run_named(tmp_path, a, b)
+
+    assert result.returncode == 1
+    assert "Verdict: significant" in result.stdout

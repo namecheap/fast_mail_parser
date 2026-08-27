@@ -63,6 +63,15 @@ def is_control(name):
     return name.startswith(CONTROL_PREFIXES)
 
 
+def classify(name, informational):
+    """One of "control", "informational", or "treatment"."""
+    if is_control(name):
+        return "control"
+    if informational and name.startswith(informational):
+        return "informational"
+    return "treatment"
+
+
 def collect(paths):
     """Return ({name: [per-round seconds]}, round_count)."""
     rounds = [read_mins(path) for path in paths]
@@ -81,7 +90,20 @@ def main():
     parser.add_argument("--b-label", required=True)
     parser.add_argument("--a", nargs="+", required=True, metavar="JSON")
     parser.add_argument("--b", nargs="+", required=True, metavar="JSON")
+    # Some benchmarks are worth running on every PR and worth nobody's build
+    # failing over. A benchmark that spawns threads is the case in hand: thread
+    # scheduling moves it far more than a code change would, so gating on it buys
+    # flakes rather than protection. Reported, not enforced -- and running, which
+    # is what keeps it from rotting.
+    parser.add_argument(
+        "--informational",
+        nargs="+",
+        default=(),
+        metavar="PREFIX",
+        help="benchmark name prefixes to report but exclude from the verdict",
+    )
     args = parser.parse_args()
+    informational = tuple(args.informational)
 
     threshold = float(os.environ.get("AB_THRESHOLD_PCT", "5"))
 
@@ -101,20 +123,26 @@ def main():
     ]
 
     deltas = {}
+    kinds = {}
     for name in shared:
         a_median = statistics.median(a_rounds[name])
         b_median = statistics.median(b_rounds[name])
         delta = (a_median / b_median - 1.0) * 100
         deltas[name] = delta
+        kinds[name] = classify(name, informational)
+        tag = "" if kinds[name] == "treatment" else kinds[name]
         lines.append(
             f"| `{name}` | {b_median * 1e3:.3f} ms | {a_median * 1e3:.3f} ms "
-            f"| {delta:+.1f}% | {'control' if is_control(name) else ''} |"
+            f"| {delta:+.1f}% | {tag} |"
         )
 
-    controls = {n: d for n, d in deltas.items() if is_control(n)}
-    treatments = {n: d for n, d in deltas.items() if not is_control(n)}
+    controls = {n: d for n, d in deltas.items() if kinds[n] == "control"}
+    treatments = {n: d for n, d in deltas.items() if kinds[n] == "treatment"}
     if not treatments:
-        sys.exit("::error::no treatment benchmarks found (all matched a control)")
+        sys.exit(
+            "::error::no benchmark is left to judge -- every one matched a "
+            "control or an informational prefix"
+        )
 
     noise_floor = max((abs(d) for d in controls.values()), default=None)
     worst_name, worst = max(treatments.items(), key=lambda kv: kv[1])
