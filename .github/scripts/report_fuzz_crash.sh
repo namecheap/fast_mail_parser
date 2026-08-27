@@ -21,9 +21,20 @@ count=$(find fuzz/artifacts -type f | wc -l | tr -d ' ')
 files=$(find fuzz/artifacts -type f | sort | sed 's|^|- `|; s|$|`|')
 [ -n "$files" ] || files="- (none on disk; see the log)"
 
-# The tail carries libFuzzer's own diagnosis: the panic message, the dedup
-# token, and where it wrote the reproducer.
+# The tail carries libFuzzer's dedup token and where it wrote the reproducer.
 excerpt=$(tail -n 40 fuzz-output.log 2>/dev/null || echo "(no log captured)")
+
+# ...but not reliably the panic message. A Rust panic prints the location and
+# then the message on the following line, and 40 lines of stack frames can push
+# both out of the tail -- which is exactly what happened on the first drill. So
+# pull it out explicitly: it is the single most useful line in the log.
+panic=$(grep -m1 -A2 "panicked at" fuzz-output.log 2>/dev/null || true)
+if [ -z "$panic" ]; then
+  # No Rust panic: a timeout, an OOM, or a signal. libFuzzer's own summary says
+  # which.
+  panic=$(grep -m1 -E "^(SUMMARY|==[0-9]+==ERROR)" fuzz-output.log 2>/dev/null || true)
+fi
+[ -n "$panic" ] || panic="(the log records no panic or summary line)"
 
 # The smallest crasher inline, if small enough to be useful. Saves whoever picks
 # this up from downloading an artifact to see what the input was.
@@ -41,6 +52,10 @@ The scheduled deep fuzz run found **${count}** crasher(s).
 
 Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
 Artifact: \`deep-fuzz-${GITHUB_RUN_ID}\` (crashers plus the full log)
+
+\`\`\`
+${panic}
+\`\`\`
 
 Files:
 

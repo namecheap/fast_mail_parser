@@ -99,10 +99,18 @@ jobs:
         id: fuzz
         run: |
           # No -seed: each run should explore somewhere new.
+          #
+          # The crash is recorded as an output instead of failing the step here,
+          # so the verdict can be decided further down. A canary drill and a real
+          # finding both crash, and they mean opposite things.
           set -o pipefail
-          cargo fuzz run parse_email -- \
-            -max_total_time="$FUZZ_SECONDS" \
-            -print_final_stats=1 2>&1 | tee fuzz-output.log
+          if cargo fuzz run parse_email -- \
+               -max_total_time="$FUZZ_SECONDS" \
+               -print_final_stats=1 2>&1 | tee fuzz-output.log; then
+            echo "crashed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "crashed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Save the accumulated corpus
         # Also on failure: the inputs found before the crash are worth keeping.
@@ -113,7 +121,7 @@ jobs:
           key: fuzz-corpus-parse_email-${{ github.run_id }}
 
       - name: Minimize the crasher
-        if: failure() && steps.fuzz.conclusion == 'failure'
+        if: steps.fuzz.outputs.crashed == 'true'
         run: |
           # A raw crasher is whatever the mutator happened to be holding; the
           # minimized one is what a regression fixture should be made from.
@@ -136,7 +144,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Report a crasher
-        if: failure() && steps.fuzz.conclusion == 'failure'
+        if: steps.fuzz.outputs.crashed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: .github/scripts/report_fuzz_crash.sh
@@ -151,3 +159,24 @@ jobs:
             echo "- corpus: ${corpus_inherited} inherited, $(find fuzz/corpus/parse_email -type f | wc -l) now"
             echo "- crashers: $(find fuzz/artifacts -type f 2>/dev/null | wc -l)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verdict
+        # The drill and a real finding both crash, so "did it crash" is not the
+        # verdict on its own. Before this, a working drill went red and a drill
+        # whose canary went UNDETECTED went green -- the signal was inverted, and
+        # a broken alarm was the quiet outcome.
+        run: |
+          crashed='${{ steps.fuzz.outputs.crashed }}'
+          if [ '${{ inputs.inject_canary }}' = 'true' ]; then
+            if [ "$crashed" = 'true' ]; then
+              echo "drill passed: the canary crashed and was reported"
+            else
+              echo "::error::drill failed: the canary did not crash, so the alarm is not working"
+              exit 1
+            fi
+          elif [ "$crashed" = 'true' ]; then
+            echo "::error::fuzzing found a crasher -- see the reported issue"
+            exit 1
+          else
+            echo "no crashers"
+          fi
