@@ -280,9 +280,10 @@ that way reported -0.2% on what an interleaved measurement then showed to be
 
 Two things to know before changing anything in `src/`:
 
-**This crate is unusually sensitive to codegen.** A rustc minor version alone has
-moved the parse path 15-30%, which is why `rust-toolchain.toml` pins one. Do not
-assume a change is free because it looks free.
+**This crate is unusually sensitive to codegen.** A rustc minor version alone
+moved the parse path 15-96% (#120), which is why `rust-toolchain.toml` pins one.
+That case has since been traced to a single loop and fixed -- see below -- but
+the lesson stands: do not assume a change is free because it looks free.
 
 **Cold code can slow the hot path.** `catch_panics` is generic, so every entry
 point instantiates it, and adding a third instantiation stopped the one wrapping
@@ -297,23 +298,32 @@ Both `lto = "fat"` and `codegen-units = 1` are already set, so a codegen-unit
 boundary is never the explanation -- worth knowing, since it is the natural first
 guess.
 
-**A version bump alone can move the decode path, and by how much depends on the
-CPU.** Nothing in the crate reads `CARGO_PKG_VERSION`, but the version reaches the
-compiler as crate metadata, which feeds symbol naming and therefore code layout.
-Measured (#204): one version pair differed by 3-4%, and another pair measured
-within 0.4% on one runner and **96% apart** on another -- identical binaries,
-per-round spread under 0.3% both times.
+**The cliff had one dominant cause, and it is fixed.** Sampling a metadata-mode
+parse of the 767 KiB fixture put **96.5%** of the time in one function: mailparse's
+`find_from_u8`, the byte-by-byte scan `parse_mail` runs for every MIME boundary.
+Its x86-64 instruction stream was byte-identical under rustc 1.97.1 and 1.98.0 --
+88 instructions, only label hashes differed -- yet the runners measured +96% on
+the metadata path. The compiler had not made the loop slower; it had *moved* it.
+The crate hash changes with the rustc version, and with the package version
+(#204), which changes symbol names, link order, and so the loop's address; on the
+runners' Zen CPUs a scalar loop straddling the wrong 64-byte boundary falls out
+of the micro-op cache and runs at half speed. An Apple M4 measured the same two
+builds at +/-0.2%.
 
-So the gate has a false-positive mode that its own noise floor cannot see. The
-controls are pure Python and do not care how the extension was laid out, so they
-stay flat while every treatment benchmark moves together, tightly and repeatably.
-It looks exactly like a real regression.
+The fix replaces that scan with `memchr::memmem` -- vectorised, and laid out
+independently of this crate -- via the patched copy in `vendor/mailparse`
+(upstream as staktrace/mailparse#142; `vendor/mailparse/PATCH.md` has the removal
+steps). Metadata mode went 0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
 
-**Re-run a large failure before acting on it.** A real regression reproduces on
-different hardware; a layout-versus-CPU artifact does not. The gate prints the CPU
-it measured on for exactly this comparison. And note what it means for the 7%
-threshold: on unlucky hardware, a change that costs nothing can be reported well
-past it.
+**What remains true.** The gate has a false-positive mode its noise floor cannot
+see: the controls are pure Python and do not care how the extension was laid out,
+so they stay flat while every treatment benchmark moves together, tightly and
+repeatably. The dominant instance is gone, but base64 decoding and charset
+conversion are also loops whose placement the linker decides, and nobody has
+measured how sensitive they are. So: **re-run a large failure before acting on
+it.** A real regression reproduces on different hardware; a layout-versus-CPU
+artifact does not. The gate prints the CPU it measured on for exactly this
+comparison.
 
 ## Linting
 

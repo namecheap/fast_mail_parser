@@ -9,3 +9,8 @@ build
 dist
 __pycache__
 .python-version
+
+# Running cargo inside the vendored crate (its own tests) leaves these behind; neither
+# belongs in the tree, and the sdist include glob would sweep them in.
+/vendor/mailparse/target
+/vendor/mailparse/Cargo.lock

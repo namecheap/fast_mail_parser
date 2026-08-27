@@ -40,3 +40,7 @@ bench = false
 
 [profile.release]
 debug = true
+
+# Same patched copy the extension is built against; see vendor/mailparse/PATCH.md.
+[patch.crates-io]
+mailparse = { path = "../vendor/mailparse" }
