@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PyMail.warnings`** reports the lossy repairs a parse performed, and
+  **`parse_email(payload, strict=True)`** raises them instead (#100). Additive:
+  the default path is unchanged, and no existing attribute changed name or type.
+  - The parser has always been best-effort in the middle ground between "valid"
+    and "invalid" — an unresolvable charset label is decoded as us-ascii, an
+    unparseable address header yields no mailboxes, an unreadable `Date` leaves
+    `date_parsed` at `None`, an unterminated header block is resynced. Every one
+    of those returned a result and said nothing. The new `list[ParseWarning]`
+    says which, where, and what was lost.
+  - **The empty list is the contract.** `warnings == []` means nothing was
+    patched up, so a pipeline can route everything else to quarantine instead of
+    classifying a message on content that was silently mended. Asserted over the
+    whole fixture and RFC corpus, so good mail cannot start warning by accident.
+  - Kinds emitted today: `charset-fallback`, `address-unparseable`,
+    `date-unparseable`, and `unterminated-header-block` — the last of which is
+    #150's repair becoming observable. That message's header block is never
+    closed, so the payload is resynced before `mailparse` reads it; the repair is
+    what saved the body, and this is what says the repair happened.
+    `ParseWarning.part_path` locates the affected value in the result
+    (`"text_plain[0]"`), or is `""` for a message-level warning.
+  - `part_path` is a locator into the returned `PyMail` rather than MIME tree
+    coordinates, which the issue proposed. The flat parse discards the structure
+    a coordinate would name, and every way of reconstructing it charges *every*
+    message for bookkeeping almost none needs — in the same traversal where #135
+    measured a 30% regression from widening what it carries. Tree coordinates
+    belong on `parse_email_tree`, whose walk already has them.
+  - `strict=True` maps each kind onto the existing hierarchy —
+    `address-unparseable` to `HeaderParseError`, `unterminated-header-block` to
+    `MimeStructureError`, the other two to `DecodeError` — so it adds no
+    exception types and `except ParseError` still catches everything. It adds
+    rejections rather than reclassifying: a message that
+    parses cleanly parses identically either way, and one that fails outright
+    fails with the same type. `parse_many(payloads, strict=True)` applies it per
+    slot.
+  - `strict=True` requires `mode="full"` and raises `ValueError` with
+    `mode="metadata"`, which also has no `warnings` attribute. Metadata mode
+    never reads a body, so the strongest thing it could say is "nothing in the
+    *headers* was repaired" — and the same attribute name with a weaker
+    guarantee would break the one property the channel exists to provide. Same
+    reasoning that leaves `text_plain` absent from that mode rather than empty.
+  - Free when there is nothing to report, which is the case that matters. The
+    collector is a `Vec` that does not allocate until pushed; every warning site
+    is a branch well-formed mail does not take; and each one's `format!` lives in
+    a `#[cold]`/`#[inline(never)]` helper, because a `format!` inlined into the
+    per-part loop is the exact shape that cost 30% in #135. Strict mode is a
+    check *after* the parse rather than a flag threaded through it, so the core
+    never learns about it.
+  - Not reported, and deliberately: a broken quoted-printable body is repaired
+    silently by mailparse's decoder rather than reported by it — it decodes
+    quoted-printable in robust mode — so observing it would mean decoding
+    twice. Recorded here rather than left as an omission a reader would mistake
+    for completeness.
+
 - A second fuzz target, `parse_agreement`, checks metadata mode and the tree API
   against the flat parse on arbitrary input rather than only for absence of
   panics: the envelope and the attachment inventory must agree between modes, and
@@ -95,6 +148,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     views cannot disagree about such a message.
   - A message that has its separator -- every other fixture in the corpus, and
     every well-formed message -- is parsed from the original bytes, unchanged.
+  - The repair is now also reported: it records an `unterminated-header-block`
+    entry on `PyMail.warnings` (#100), so a consumer can tell that this message
+    needed patching rather than only that it parsed.
   - `tests/data/invalid_message.eml` is consequently no longer excluded from the
     stdlib-parity, MIME-tree and `parse_many` corpora. The two parsers now agree
     on its topology, its header set (29 keys, not 31) and both of its bodies; what

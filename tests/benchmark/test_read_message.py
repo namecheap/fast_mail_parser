@@ -51,6 +51,36 @@ def test__fast_mail_parser___parse_message(large_message: str, benchmark: Callab
     benchmark(parse_email, large_message)
 
 
+def test__fast_mail_parser___parse_message_strict(large_message: str, benchmark: Callable):
+    """`strict=True` on a clean message, next to the gate pair that omits it.
+
+    #100 asks for the warning channel's overhead on the clean corpus. Strict mode
+    is where it would show if it existed anywhere: the collection is the same
+    work either way, and strict adds one emptiness check on a `Vec` that never
+    allocated. Reading this against the benchmark above -- same round, same
+    runner -- is what turns "should be free" into a number.
+
+    It is not the gate (which selects two benchmarks by exact name) and it cannot
+    be, because the base revision has no `strict` argument. The interleaved
+    comparison drops a benchmark that only one side reports, so this rides along
+    on the treatment side and the skip below keeps the base side green.
+    """
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    try:
+        mail = parse_email(large_message, strict=True)
+    except TypeError:
+        pytest.skip("strict= is new in this revision; the base build has no such argument")
+
+    # Also the assertion that matters most for the criterion: the clean corpus
+    # must pass strict mode, or the benchmark would be measuring an exception.
+    assert mail.warnings == [], "the benchmark message must warn about nothing"
+
+    benchmark(parse_email, large_message, strict=True)
+
+
 # --- comparison table: equivalent work across libraries ---------------------
 
 

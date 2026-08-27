@@ -146,6 +146,7 @@ Two things this table deliberately does *not* do:
 | `text_html` | `list[str]` | All `text/html` bodies. |
 | `headers` | `dict[str, list[str]]` | Every header's values, in order; keys in wire order. |
 | `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
+| `warnings` | `list[ParseWarning]` | Lossy repairs this parse made; empty means none (see below). |
 
 Each `PyAttachment` has:
 
@@ -386,6 +387,11 @@ unchanged by the tree API existing — it is a pure addition.
 
 ### Error handling
 
+Failure comes in two shapes here, and they are reported differently. A parse that
+cannot proceed raises; a parse that proceeds by repairing something records a
+warning and returns. The exceptions are below, the warnings channel is the
+section after it.
+
 `parse_email` raises a subtype of `ParseError`, chosen by what actually went
 wrong:
 
@@ -417,6 +423,118 @@ except ParseError:
 The distinction is worth acting on: a `DecodeError` says one part of an otherwise
 plausible message is corrupt, while a `HeaderParseError` usually says the bytes
 were never an email.
+
+### Parse warnings: the lossy-success channel
+
+An exception is not the only way a parse can go wrong. Real mail is messier than
+"valid" or "invalid", and this parser has always been best-effort in the middle:
+a charset label it cannot resolve is decoded as us-ascii, an address header it
+cannot parse yields no mailboxes, a `Date` it cannot read leaves `date_parsed`
+at `None`, and a header block that was never closed is resynced before parsing.
+Every one of those returns a result. None of them used to say so.
+
+`warnings` says so:
+
+```python
+from fast_mail_parser import parse_email
+
+mail = parse_email(raw)
+
+if mail.warnings:
+    for warning in mail.warnings:
+        print(warning.kind, warning.part_path, warning.detail)
+    quarantine(raw)          # something in here was patched up
+else:
+    classify(mail)           # pristine
+```
+
+**The empty list is the contract.** `warnings == []` means the parser repaired
+nothing, which is what makes it worth checking: a spam classifier or a forensic
+tool can route everything else to review instead of deciding on content that was
+silently mended. Best-effort parsing is not new — being able to tell that it
+happened is.
+
+Each `ParseWarning` carries three strings:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | A stable token to match on. The set grows, so treat an unfamiliar kind as "something was repaired" rather than as impossible. |
+| `part_path` | Where the affected part landed in the result — `"text_plain[0]"`, `"text_html[1]"` — or `""` when the warning is about the message as a whole. |
+| `detail` | Prose for a log. Not a matching key: the wording is free to improve, `kind` is not. |
+
+The kinds emitted today:
+
+| `kind` | What was repaired | What you still get |
+| --- | --- | --- |
+| `charset-fallback` | The part declared a charset label that is not recognised, so its bytes were decoded as us-ascii — which turns every non-ASCII byte into `U+FFFD`. | The decoded text, lossy exactly where the replacement characters are. |
+| `address-unparseable` | An address header did not parse (mailparse rejects an address with no `@`), so no mailboxes were reported for it. | `to`/`cc`/… empty, or `from_` as `None`, with the raw value still in `headers`. |
+| `date-unparseable` | The `Date` header is not a date any parser here recognises. | `date` as the raw header string; `date_parsed` is `None`. |
+| `unterminated-header-block` | The header block was not closed by an empty line (RFC 5322 2.1), so the separator was restored before parsing — the stdlib calls this `MissingHeaderBodySeparatorDefect`. | The whole message, parts included. Left unrepaired this used to lose a body part silently ([#150](https://github.com/namecheap/fast_mail_parser/issues/150)). |
+
+`part_path` is a locator into the returned `PyMail`, not MIME tree coordinates.
+That is deliberate: `parse_email` hands back a flat projection, so a coordinate
+naming structure it has already discarded would be a locator you could not
+resolve. Index into the list it names and you have the affected value. When the
+structure is what matters, `parse_email_tree` is the API that keeps it.
+
+`parse_many` carries warnings the same way — one list per message, on each
+`PyMail`:
+
+```python
+for payload, outcome in zip(payloads, parse_many(payloads)):
+    if isinstance(outcome, ParseError):
+        reject(payload)
+    elif outcome.warnings:
+        review(payload)
+    else:
+        accept(outcome)
+```
+
+### Strict mode
+
+A validation pipeline usually wants the opposite trade: fail rather than accept a
+repair. `strict=True` raises each of the conditions above instead of recording
+it, using the same exception hierarchy:
+
+```python
+from fast_mail_parser import DecodeError, HeaderParseError, parse_email
+
+try:
+    mail = parse_email(raw, strict=True)      # nothing was repaired
+except HeaderParseError:
+    ...                                       # includes an unparseable address header
+except DecodeError:
+    ...                                       # includes a charset fallback or an unreadable Date
+```
+
+| `kind` | Raised as |
+| --- | --- |
+| `charset-fallback` | `DecodeError` |
+| `date-unparseable` | `DecodeError` |
+| `address-unparseable` | `HeaderParseError` |
+| `unterminated-header-block` | `MimeStructureError` |
+
+Strict mode adds rejections; it never reclassifies. A message that parses
+cleanly parses identically in both modes, and a message that fails outright
+fails with the same type either way. The exception names the first repair and
+counts them all — parse without `strict=True` to read the rest.
+
+`parse_many(payloads, strict=True)` applies it per slot, so one repaired message
+becomes that slot's exception rather than costing you the batch; add
+`raise_on_error=True` to fail the whole batch on the first repair.
+
+`strict=True` requires `mode="full"`. Combining it with `mode="metadata"` raises
+`ValueError` rather than being ignored: that mode never reads the bodies, so the
+strongest thing it could say is "nothing in the headers was repaired", and a flag
+that means something weaker than it says is worse than one that is unavailable.
+Metadata mode has no `warnings` attribute for the same reason — the same
+reasoning that leaves `text_plain` absent from it rather than empty.
+
+**What is not reported.** A broken quoted-printable body is repaired silently by
+the decoder rather than reported by it — mailparse decodes quoted-printable in
+its robust mode — so there is nothing this crate can observe without decoding
+twice. That is why there is no `transfer-decode-lossy` kind, and why the honest
+place to say so is here rather than in a list a reader would take as complete.
 
 ### Bodies vs. attachments
 
