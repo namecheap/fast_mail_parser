@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- An internal panic now raises `ParseError` instead of PyO3's `PanicException`
+  (#102). This is not about memory safety -- PyO3 already catches panics at the
+  boundary, so one never aborted the process -- it is about which `except` clause
+  a panic lands in. `PanicException` derives from `BaseException`, so the
+  `except Exception` wrapped around a pipeline's parse call did not catch it and a
+  single crafted message could take a worker down. The panic payload is kept in
+  the error message, so the bug stays diagnosable. A panic still means a bug in
+  this crate, and the message says so.
+
 ### Fixed
 
 - `headers` keys are now in the order the header names first appeared in the

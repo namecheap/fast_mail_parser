@@ -282,6 +282,12 @@ wrong:
 | `MimeStructureError` | Malformed MIME structure, or a resource cap tripped: over 100 MiB of input, or nesting deeper than 256 levels. |
 | `DecodeError` | A part's `Content-Transfer-Encoding` did not decode (bad base64, bad quoted-printable). |
 
+A bug in the parser itself — an internal panic — raises the base `ParseError`
+rather than PyO3's `PanicException`. That matters because `PanicException`
+derives from `BaseException`, so it would slip past the `except Exception` around
+a worker's parse call and take the process down; the message carries the panic
+text so the bug can still be reported. No input is known to cause one.
+
 All three inherit from `ParseError`, so existing code keeps working:
 
 ```python
