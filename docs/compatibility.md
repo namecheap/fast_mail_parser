@@ -24,6 +24,12 @@ library reported every MIME node as an attachment and collapsed repeated headers
 to their last value, so the structural dimensions diverged on nearly every
 multipart message.
 
+It also includes `invalid_message`, a real message whose header block is never
+terminated by a blank line. It was excluded from the comparison until this
+library learned the stdlib's recovery for that defect (#150); the two now agree
+on its structure, its header set and its bodies, and the differences left are the
+line-ending and unfolding ones below.
+
 ## Where they differ
 
 ### 1. Raw UTF-8 in headers — this library is more correct
@@ -45,14 +51,16 @@ If you are migrating *to* the stdlib, this one will cost you.
 
 | | |
 | --- | --- |
-| Fixture | `attachment_message` |
+| Fixtures | `attachment_message`, `invalid_message` |
 | Dimension | `headers` |
 | stdlib | `Date: Wed, 24 Apr 2019 10:05:02 +0200` |
 | this library | `Date: Wed, 24 Apr 2019 10:05:02 +0200 (CEST)` |
 
 `headers` gives values as they appeared, unfolded and RFC 2047-decoded, and
 nothing more. The stdlib additionally parses structured headers and re-emits a
-canonical form, dropping the RFC 5322 comment `(CEST)`.
+canonical form, dropping the RFC 5322 comment `(CEST)`. It re-spells them too:
+`invalid_message` sends `Date: Wed,  1 Jul 2020 05:33:42 +0000` and the stdlib
+returns the day zero-padded.
 
 Use `date_parsed` when you want an interpreted value; use `headers` when you want
 what the sender actually wrote.
@@ -78,14 +86,16 @@ and is a candidate to raise upstream.
 
 | | |
 | --- | --- |
-| Fixture | `valid_message` |
+| Fixtures | `valid_message`, `invalid_message` |
 | Dimensions | `text_plain`, `text_html` |
 | stdlib | `"…browser (…)\n\n\n** What's New?\n"` |
 | this library | `"…browser (…)\r\n\r\n\r\n** What's New?\r\n"` |
 
 The stdlib's text content manager normalises line endings to `LF`. This library
 returns the body as it arrived, so a message transmitted with `CRLF` keeps
-`CRLF`.
+`CRLF`. Note that "as it arrived" means after the transfer decoding:
+`invalid_message` is bare-LF on the wire, but its quoted-printable parts spell
+their line endings `=0D=0A`, so its decoded bodies carry `CRLF` all the same.
 
 This is the divergence most likely to surprise you in practice, because it
 affects every multi-line body from a real mail server. If you are comparing
@@ -99,7 +109,7 @@ body = mail.text_plain[0].replace("\r\n", "\n")
 
 | | |
 | --- | --- |
-| Fixture | `valid_message` |
+| Fixtures | `valid_message`, `invalid_message` |
 | Dimension | `headers` |
 | stdlib | `i=1; mx.google.com;       dkim=pass …` |
 | this library | `i=1; mx.google.com; dkim=pass …` |

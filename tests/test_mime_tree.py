@@ -28,13 +28,12 @@ from fast_mail_parser import (
 
 _DATA = os.path.join(os.path.dirname(__file__), "data")
 
-# Same corpus and same exclusion as test_stdlib_parity.py: invalid_message.eml is
-# a real message malformed such that the two parsers legitimately disagree about
-# its structure, which is documented in #150 rather than compared blindly.
+# The same corpus as test_stdlib_parity.py, and like it, nothing is excluded.
+# invalid_message.eml was, because the two parsers disagreed about its structure
+# while only the stdlib recovered from its unterminated header block; the tree
+# path applies the same repair as the flat one, so the topologies now agree (#150).
 FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
-    path
-    for path in glob.glob(os.path.join(_DATA, "*.eml"))
-    if os.path.basename(path) != "invalid_message.eml"
+    glob.glob(os.path.join(_DATA, "*.eml"))
 )
 
 

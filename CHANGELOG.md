@@ -50,6 +50,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A message whose header block is never terminated by a blank line no longer
+  loses its first MIME part (#150). RFC 5322 ends the header block with an empty
+  line; real mail sometimes omits it, and the stdlib names the defect
+  `MissingHeaderBodySeparatorDefect`. Without that line the underlying
+  `mailparse` keeps consuming the body as headers -- it stops only at a blank line
+  and accepts a colonless line as a field name -- so on the message this was found
+  on it swallowed the first MIME boundary, which left the first part's body before
+  the *next* boundary: multipart preamble, discarded by definition. The
+  `text/html` alternative was delimited normally and survived, so the message came
+  back looking populated with its plain-text body silently gone, its boundary
+  delimiter reported as a header key, and the first part's own headers merged into
+  the message's (two `Content-Type` values).
+  - The payload is now normalised before it reaches `mailparse`, by the stdlib's
+    rule: a non-continuation line in the header block that cannot be a header
+    field ends the header block, and the body starts there. `parse_email`,
+    `parse_many` and `parse_email_tree` all apply it, so the flat and structural
+    views cannot disagree about such a message.
+  - A message that has its separator -- every other fixture in the corpus, and
+    every well-formed message -- is parsed from the original bytes, unchanged.
+  - `tests/data/invalid_message.eml` is consequently no longer excluded from the
+    stdlib-parity, MIME-tree and `parse_many` corpora. The two parsers now agree
+    on its topology, its header set (29 keys, not 31) and both of its bodies; what
+    is left is the CRLF and unfolding divergence that every real message shows.
 - `headers` keys are now in the order the header names first appeared in the
   message, stably across parses. They came from a Rust `HashMap`, whose iteration
   order is randomised per instance, and that order became the Python dict's
