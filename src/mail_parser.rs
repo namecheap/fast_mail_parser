@@ -379,8 +379,19 @@ pub(crate) fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailP
     // still excluded the only fixture with the defect. The `parse_agreement` fuzz
     // target found it on its first run, which is the case it was written for --
     // two derivations of one message quietly disagreeing.
+    //
+    // Split the way `Mail::new` is split, and for the same two reasons: the
+    // borrow of the repaired local never leaves this frame, and the body stays in
+    // a function of its own. Inlining the repair into the body instead cost the
+    // *flat* path 28% and this one 95%, from a scan that reads 1.7 KB of a 767 KB
+    // message -- codegen, not work. See CONTRIBUTING.md's Performance section.
     let repaired = repair_missing_separator(payload);
-    let mail = parse_mail(repaired.as_deref().unwrap_or(payload))?;
+    metadata_from_payload(repaired.as_deref().unwrap_or(payload))
+}
+
+#[inline(never)]
+fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError> {
+    let mail = parse_mail(payload)?;
     let headers = collect_headers(&mail);
 
     let subject = mail
