@@ -703,6 +703,15 @@ pub struct PyLazyAttachment {
     /// access returns the *same* Python object rather than an equal copy of it.
     /// That is both what a cache should mean -- `a.content is a.content` -- and
     /// cheaper, since the second read allocates nothing at all.
+    ///
+    /// Published once, but *decoded* possibly twice: the decode deliberately
+    /// happens outside `get_or_init`, so two threads racing on a first access can
+    /// both do the work and one result is dropped. That is the right trade. The
+    /// alternative -- decoding inside the initialiser -- holds the cell's lock
+    /// across a `detach`, which is the shape that deadlocks: one thread waiting
+    /// on the lock while holding the GIL, the other waiting on the GIL while
+    /// holding the lock. Wasted CPU on a contended first read is cheaper than
+    /// that, and every reader still sees one object.
     content: OnceLock<Py<PyBytes>>,
 }
 
@@ -712,6 +721,9 @@ impl PyLazyAttachment {
     ///
     /// Every later read returns the same `bytes` object, so keeping a reference
     /// and re-reading the attribute cost the same thing.
+    ///
+    /// Two threads reading this for the first time at once may both decode; they
+    /// will still see one object. See the note on the field.
     ///
     /// Raises `DecodeError` when the part's `Content-Transfer-Encoding` cannot be
     /// decoded. Full mode raises that from `parse_email`; this mode raises it

@@ -235,6 +235,11 @@ class PyLazyAttachment:
     A separate type rather than a lazy ``PyAttachment.content``: changing what an
     existing attribute costs, and when it raises, is a change to a shipped
     contract, and those batch into one API-v2 window. Adding a type is not.
+    
+    Reading ``content`` from two threads for the first time simultaneously may
+    decode twice; both readers still get the same object back. The decode is
+    deliberately not held under the cache's lock, because doing so would risk a
+    deadlock against the GIL.
     """
 
     def __init__(
