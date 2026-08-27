@@ -614,11 +614,16 @@ is worse than one that is unavailable. Metadata mode has no `warnings` attribute
 for the same reason — the same reasoning that leaves `text_plain` absent from it
 rather than empty.
 
-**What is not reported.** A broken quoted-printable body is repaired silently by
-the decoder rather than reported by it — mailparse decodes quoted-printable in
-its robust mode — so there is nothing this crate can observe without decoding
-twice. That is why there is no `transfer-decode-lossy` kind, and why the honest
-place to say so is here rather than in a list a reader would take as complete.
+**What is not reported.** Robust quoted-printable decoding also canonicalises
+line endings, turning a bare LF into CRLF. A strict decoder rejects that too, but
+reporting it would warn on most mail written with bare LFs, and a channel whose
+empty list is its whole contract cannot cry wolf. `transfer-decode-lossy` covers
+the case where the sender's intent is lost — an escape that is neither `=` plus
+two hex digits nor a soft line break — not the case where bytes are merely
+normalised.
+
+Nothing else is knowingly unreported. If you find a lossy repair with no warning,
+that is a bug worth filing: the empty list is only useful if it is exact.
 
 ### Bodies vs. attachments
 
