@@ -298,9 +298,10 @@ Both `lto = "fat"` and `codegen-units = 1` are already set, so a codegen-unit
 boundary is never the explanation -- worth knowing, since it is the natural first
 guess.
 
-**The cliff had one dominant cause, and it is fixed.** Sampling a metadata-mode
-parse of the 767 KiB fixture put **96.5%** of the time in one function: mailparse's
-`find_from_u8`, the byte-by-byte scan `parse_mail` runs for every MIME boundary.
+**The cliff had two causes, both byte-at-a-time loops in mailparse, both fixed.**
+Sampling a metadata-mode parse of the 767 KiB fixture put **96.5%** of the time in
+one function: mailparse's `find_from_u8`, the scan `parse_mail` runs for every MIME
+boundary.
 Its x86-64 instruction stream was byte-identical under rustc 1.97.1 and 1.98.0 --
 88 instructions, only label hashes differed -- yet the runners measured +96% on
 the metadata path. The compiler had not made the loop slower; it had *moved* it.
@@ -315,12 +316,20 @@ independently of this crate -- via the patched copy in `vendor/mailparse`
 (upstream as staktrace/mailparse#142; `vendor/mailparse/PATCH.md` has the removal
 steps). Metadata mode went 0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
 
+With that gone, sampling the *full* parse put **77.7%** of what remained in
+`decode_base64`'s whitespace filter -- `iter().filter().cloned().collect()`, a
+test and a push per byte -- and the toolchain A/B confirmed it carried the rest of
+the placement sensitivity: decoding paths still moved +22% on one runner and +5%
+on another while the metadata paths had gone flat. Same fix, same place: the
+whitespace is found with `memchr` and the runs between are copied whole. The
+full parse went 0.83 -> 0.28 ms on top.
+
 **What remains true.** The gate has a false-positive mode its noise floor cannot
 see: the controls are pure Python and do not care how the extension was laid out,
 so they stay flat while every treatment benchmark moves together, tightly and
-repeatably. The dominant instance is gone, but base64 decoding and charset
-conversion are also loops whose placement the linker decides, and nobody has
-measured how sensitive they are. So: **re-run a large failure before acting on
+repeatably. The two dominant instances are gone, but the base64 decode proper
+(`data_encoding`) and charset conversion are also loops whose placement the
+linker decides, and nobody has measured how sensitive they are. So: **re-run a large failure before acting on
 it.** A real regression reproduces on different hardware; a layout-versus-CPU
 artifact does not. The gate prints the CPU it measured on for exactly this
 comparison.
