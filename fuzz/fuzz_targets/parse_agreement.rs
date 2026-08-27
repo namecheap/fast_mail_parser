@@ -35,6 +35,12 @@
 //!    parser's slicing. The envelope, the bodies and the whole warning list must
 //!    agree too -- the last of those is what lets `strict=True` mean the same
 //!    thing in both modes.
+//! 8. **A tree is the same tree in all three modes** (#202). `mode=` on
+//!    `parse_email_tree` adds two more derivations of one message, so it adds the
+//!    failure this target exists for. Every per-node field except the body must be
+//!    identical to full mode's, and a deferred leaf must decode to exactly the
+//!    bytes full mode decoded -- which extends the `raw_bytes` claim above to a
+//!    case flat lazy mode never reaches, a message whose *root* is the leaf.
 
 #![no_main]
 
@@ -83,6 +89,79 @@ fn rendered_warnings(warnings: &[mail_parser::Warning]) -> Vec<(&str, &str, &str
             )
         })
         .collect()
+}
+
+/// A deferred tree rendered like `canonical_tree`, minus the body, so the three
+/// modes can be compared on everything except what they deliberately differ on.
+fn canonical_node(node: &mail_parser::TreeNode) -> String {
+    let mut out = String::new();
+    render_node(node, 0, &mut out);
+    out
+}
+
+fn render_node(node: &mail_parser::TreeNode, depth: usize, out: &mut String) {
+    out.push_str(&format!(
+        "{depth}|{}|{}|{:?}|{:?}|{}\n",
+        node.content_type, node.filename, node.content_id, node.disposition, node.is_message,
+    ));
+    for (name, values) in &node.headers {
+        out.push_str(&format!("{depth}h|{name}|{values:?}\n"));
+    }
+    for child in &node.children {
+        render_node(child, depth + 1, out);
+    }
+}
+
+/// The same rendering for a full-mode tree, so the two can be compared directly.
+fn canonical_full(part: &mail_parser::MimePart) -> String {
+    let mut out = String::new();
+    render_full(part, 0, &mut out);
+    out
+}
+
+fn render_full(part: &mail_parser::MimePart, depth: usize, out: &mut String) {
+    out.push_str(&format!(
+        "{depth}|{}|{}|{:?}|{:?}|{}\n",
+        part.content_type, part.filename, part.content_id, part.disposition, part.is_message,
+    ));
+    for (name, values) in &part.headers {
+        out.push_str(&format!("{depth}h|{name}|{values:?}\n"));
+    }
+    for child in &part.children {
+        render_full(child, depth + 1, out);
+    }
+}
+
+/// Every node's body as the full parse produced it, in walk order.
+fn full_bodies(part: &mail_parser::MimePart, out: &mut Vec<Option<Vec<u8>>>) {
+    out.push(part.content.clone());
+    for child in &part.children {
+        full_bodies(child, out);
+    }
+}
+
+/// Every node's body as a deferred tree would produce it: decoded from what the
+/// node retained, or `None` for a container.
+///
+/// A leaf that cannot decode from its retained bytes returns an `Err`, which is a
+/// failure of the retention rather than of the message -- the full parse decoded
+/// the same part.
+fn deferred_bodies(
+    node: &mail_parser::TreeNode,
+    out: &mut Vec<Option<Vec<u8>>>,
+) -> Result<(), ()> {
+    match &node.body {
+        mail_parser::NodeBody::Container => out.push(None),
+        mail_parser::NodeBody::Decoded { content, .. } => out.push(Some(content.clone())),
+        mail_parser::NodeBody::Undecoded { raw, .. } => {
+            let raw = raw.as_ref().ok_or(())?;
+            out.push(Some(mail_parser::decode_part(raw).map_err(|_| ())?));
+        }
+    }
+    for child in &node.children {
+        deferred_bodies(child, out)?;
+    }
+    Ok(())
 }
 
 /// Every leaf's content, for the containment check against the flat parse.
@@ -260,4 +339,87 @@ fuzz_target!(|data: &[u8]| {
         (Err(_), Err(_)) => {}
         _ => panic!("parsing the same input into a tree twice disagreed on success"),
     }
+
+    // The deferred tree modes (#202): two more derivations of the same message,
+    // so two more chances for one to drift from the others.
+    let described = mail_parser::parse_tree_deferred(data, false);
+    let deferred = mail_parser::parse_tree_deferred(data, true);
+
+    if let Ok(full) = &first {
+        let described = described.expect(
+            "metadata mode failed to build a tree the full mode built, though it \
+             decodes strictly less: only a message/rfc822 body, which full mode \
+             decodes too",
+        );
+        let deferred = deferred.expect(
+            "lazy mode failed to build a tree the full mode built, though it \
+             decodes strictly less",
+        );
+
+        let shape = canonical_full(full);
+        assert_eq!(
+            shape,
+            canonical_node(&described),
+            "the metadata tree's shape disagrees with full mode"
+        );
+        assert_eq!(
+            shape,
+            canonical_node(&deferred),
+            "the lazy tree's shape disagrees with full mode"
+        );
+
+        // Which nodes have a body of their own, and how big it is on the wire,
+        // must be one answer across the two deferred modes -- `encoded_size is
+        // None` is the same question as `content is None`.
+        let mut sizes = Vec::new();
+        node_sizes(&described, &mut sizes);
+        let mut deferred_sizes = Vec::new();
+        node_sizes(&deferred, &mut deferred_sizes);
+        assert_eq!(
+            sizes, deferred_sizes,
+            "the two deferred modes disagree about encoded sizes"
+        );
+
+        let mut expected = Vec::new();
+        full_bodies(full, &mut expected);
+        assert_eq!(
+            sizes.len(),
+            expected.len(),
+            "the deferred tree has a different number of nodes"
+        );
+        for (size, body) in sizes.iter().zip(&expected) {
+            assert_eq!(
+                size.is_none(),
+                body.is_none(),
+                "a node reports a body in one mode and not the other"
+            );
+            if let (Some(size), Some(body)) = (size, body) {
+                // The same bound the flat modes assert: decoding cannot amplify
+                // a part beyond doubling it.
+                assert!(
+                    body.len() <= size * 2,
+                    "decoded size {} is more than double the encoded size {size}",
+                    body.len()
+                );
+            }
+        }
+
+        // The claim the lazy tree rests on, and the one flat lazy mode cannot
+        // reach: a retained *root* re-parses to the part it was taken from.
+        let mut produced = Vec::new();
+        deferred_bodies(&deferred, &mut produced)
+            .expect("a node the full parse decoded failed to decode from its retained bytes");
+        assert_eq!(
+            expected, produced,
+            "a deferred decode disagrees with the full parse"
+        );
+    }
 });
+
+/// Every node's `encoded_size`, in walk order.
+fn node_sizes(node: &mail_parser::TreeNode, out: &mut Vec<Option<usize>>) {
+    out.push(node.body.encoded_size());
+    for child in &node.children {
+        node_sizes(child, out);
+    }
+}

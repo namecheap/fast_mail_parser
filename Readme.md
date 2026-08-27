@@ -296,6 +296,35 @@ The break-even point is not portable — the parse scales with cores while the
 per-call overhead does not — so treat the second table as the shape of the
 trade-off and measure your own mix if it matters.
 
+#### Batching in a mode
+
+`parse_many` takes the same `mode=` as `parse_email`, and it means the same thing
+per message. This is the mailbox sweep: the batch API removes the per-message
+overhead and the mode removes the decoding, and they compose.
+
+```python
+from fast_mail_parser import parse_many
+
+for mail in parse_many(payloads, mode="metadata"):     # list[PyMailMetadata | ParseError]
+    print(mail.subject, [a.filename for a in mail.attachments])
+
+results = parse_many(payloads, mode="lazy")            # list[PyLazyMail | ParseError]
+```
+
+The mode is uniform across the batch, which is what lets it pick the slot type;
+`ParseError` instances still occupy failed slots, and `raise_on_error`, `threads`
+and input order behave exactly as in the default mode.
+
+On the attachment-heavy fixture, a batch of 8 × 767 KiB with `threads=1`:
+`mode="full"` 8.96 ms, `mode="metadata"` 2.94 ms — **3.0x**, the same ratio the
+single-message mode gets, now available to the batch. On 2000 × 0.8 KB it is
+2.80 ms against 3.04 ms: small messages are mostly headers, so there is little
+decoding to skip, and the mode neither helps nor hurts much.
+
+`strict=True` with `mode="metadata"` raises `ValueError`, as it does on
+`parse_email` — a mode that never reads the bodies cannot promise nothing in them
+was repaired.
+
 ### Metadata-only parsing
 
 Scanning a mailbox to classify by sender, subject and attachment inventory does
@@ -332,12 +361,18 @@ loudly instead.
 `Content-Transfer-Encoding` passes silently here and raises `DecodeError` in full
 mode. Header errors are reported in both.
 
-The type follows the mode, so nothing changes for callers of the default:
+The type follows the mode, so nothing changes for callers of the default — and
+all three entry points take the same three modes:
 
 ```python
-parse_email(payload)                    # PyMail
-parse_email(payload, mode="lazy")       # PyLazyMail
-parse_email(payload, mode="metadata")   # PyMailMetadata
+parse_email(payload)                         # PyMail
+parse_email(payload, mode="lazy")            # PyLazyMail
+parse_email(payload, mode="metadata")        # PyMailMetadata
+
+parse_many(payloads, mode="metadata")        # list[PyMailMetadata | ParseError]
+
+parse_email_tree(payload, mode="metadata")   # PyMimePartMetadata
+parse_email_tree(payload, mode="lazy")       # PyLazyMimePart
 ```
 
 If you want structure rather than an inventory, `parse_email_tree` is the API
@@ -443,6 +478,49 @@ print(bounced.children[0].headers["Subject"])   # the original message's subject
 
 Embedded nesting counts against the same recursion cap as multipart nesting, so
 an onion of forwards cannot recurse further than a multipart tree can.
+
+#### Walking without decoding
+
+A full-mode tree decodes every leaf, which is the wrong bill for the thing the
+tree is best at: walking a large message to pull one part out of it. `mode=`
+takes the same three values here, and the shape of the tree is identical in all
+three — only what a leaf's bytes cost changes.
+
+```python
+from fast_mail_parser import parse_email_tree, walk
+
+root = parse_email_tree(payload, mode="lazy")
+
+for part in walk(root):
+    print(part.content_type, part.encoded_size, part.is_decoded)
+
+pdf = next(p for p in walk(root) if p.content_type == "application/pdf")
+data = pdf.content            # decoded here, and only this one
+```
+
+`mode="metadata"` decodes nothing *and retains nothing*: a node reports
+`encoded_size` in place of `content` and there is no way to ask for the bytes.
+That is the difference between the two — lazy mode keeps a copy of every leaf so
+it can decode one later, metadata mode keeps none and is the cheaper sweep.
+
+On the attachment-heavy fixture (767 KiB): full tree 1.10 ms, `mode="lazy"` with
+nothing read 0.38 ms, `mode="metadata"` 0.37 ms — **~2.9x**.
+
+Two things to know:
+
+**A metadata node has no `content` at all**, not `content = None`. On a
+`PyMimePart`, `content is None` means "this is a container" and only that; a mode
+where it also meant "not decoded" would make the two indistinguishable. A missing
+attribute fails loudly instead, exactly as `PyMailMetadata` omits `text_plain`.
+
+**A `message/rfc822` body is still decoded, in every mode.** That body *is* the
+embedded message, and parsing it is what gives the node children — so a tree that
+deferred it would be deferring the structure, which is the one thing every mode
+has to deliver eagerly. Its node therefore arrives with `is_decoded` already
+`True`, and unlike `parse_email(mode="metadata")` a deferred tree *can* raise
+`DecodeError` for such a part. Nothing else is decoded.
+
+`walk` accepts a node from any mode and yields nodes of the same type.
 
 #### Which API when
 

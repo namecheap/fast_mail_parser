@@ -326,3 +326,81 @@ def test__fast_mail_parser___parse_lazy_all_attachments(large_message: str, benc
         return [len(attachment.content) for attachment in mail.attachments]
 
     benchmark(read_everything)
+
+
+def test__fast_mail_parser___parse_tree_metadata(large_message: str, benchmark: Callable):
+    # #202's tree metadata mode against `test__fast_mail_parser___parse_tree` in
+    # the same run: the same walk, the same node per part, and no leaf decoded.
+    # On this fixture -- 99% attachment by decoded content -- that is nearly all
+    # of the tree's work.
+    #
+    # Guarded, as the gate's documentation requires: the gate measures THIS
+    # revision's benchmarks against the BASE revision's build (#168), so a base
+    # predating this argument raises TypeError here instead of skipping and takes
+    # the whole gate down with it.
+    import pytest
+
+    from fast_mail_parser import parse_email_tree
+
+    payload = large_message.encode()
+
+    try:
+        parse_email_tree(payload, mode="metadata")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_email_tree(mode="metadata")')
+
+    benchmark(lambda: parse_email_tree(payload, mode="metadata"))
+
+
+def test__fast_mail_parser___parse_tree_lazy_untouched(large_message: str, benchmark: Callable):
+    # The other deferred tree mode with nothing read. It retains a copy of every
+    # leaf where metadata mode retains nothing, so the gap between this and the
+    # benchmark above is the price of being able to decode one part later.
+    import pytest
+
+    from fast_mail_parser import parse_email_tree
+
+    payload = large_message.encode()
+
+    try:
+        parse_email_tree(payload, mode="lazy")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_email_tree(mode="lazy")')
+
+    benchmark(lambda: parse_email_tree(payload, mode="lazy"))
+
+
+def test__fast_mail_parser___parse_many_metadata(large_message: str, benchmark: Callable):
+    # #202's headline case: the batch API and metadata mode composed. Compare with
+    # `test__fast_mail_parser___parse_many` in the same run -- same batch, same
+    # single worker, so the difference is the mode and nothing else.
+    import pytest
+
+    from fast_mail_parser import parse_many
+
+    batch = [large_message.encode()] * 8
+
+    try:
+        parse_many(batch[:1], mode="metadata")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_many(mode="metadata")')
+
+    benchmark(lambda: parse_many(batch, threads=1, mode="metadata"))
+
+
+def test__threaded___parse_many_metadata_small(benchmark: Callable):
+    # The mailbox sweep the mode was built for, at the size where the batch API's
+    # own saving lives (#96: 2000 x ~0.8 KiB). Informational, like its siblings:
+    # thread scheduling moves these more than a code change would.
+    import pytest
+
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    try:
+        parse_many(batch[:1], mode="metadata")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_many(mode="metadata")')
+
+    benchmark(lambda: parse_many(batch, mode="metadata"))

@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from datetime import datetime
-from typing import Literal, overload
+from typing import Literal, TypeVar, overload
 
 __all__ = [
     "parse_email",
@@ -11,6 +11,8 @@ __all__ = [
     "PyLazyMail",
     "PyMailMetadata",
     "PyMimePart",
+    "PyLazyMimePart",
+    "PyMimePartMetadata",
     "PyAttachment",
     "PyLazyAttachment",
     "PyAttachmentMetadata",
@@ -64,6 +66,109 @@ class PyMimePart:
         self.is_message = is_message
         self.content = content
         self.children = children
+
+
+class PyMimePartMetadata:
+    """One node of a MIME tree, described but not decoded.
+
+    Returned by ``parse_email_tree(payload, mode="metadata")``. Everything
+    ``PyMimePart`` says about the *shape* of a message it says too -- and nothing
+    about what the leaves carry beyond ``encoded_size``, the bytes a part's body
+    occupies in the message *before* transfer-decoding.
+
+    ``encoded_size`` is ``None`` for a ``multipart/*`` container, in the same
+    place and with the same meaning as ``PyMimePart.content``'s ``None``: a
+    container's body is its children with boundaries between them, so it has none
+    of its own.
+
+    There is deliberately no ``content``, not even ``None``. A mode where ``None``
+    also meant "not decoded" would make a leaf indistinguishable from a container;
+    a missing attribute fails loudly instead, as ``PyMailMetadata`` omits
+    ``text_plain`` rather than returning an empty list.
+
+    The tree is the same tree in every mode. The one thing this mode still decodes
+    is a ``message/rfc822`` body, because that body *is* the embedded message and
+    parsing it is what gives the node children -- so unlike
+    ``parse_email(mode="metadata")``, this can raise ``DecodeError``.
+    """
+
+    def __init__(
+        self,
+        content_type: str,
+        headers: dict[str, list[str]],
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+        is_message: bool,
+        encoded_size: int | None,
+        children: list[PyMimePartMetadata],
+    ) -> None:
+        self.content_type = content_type
+        self.headers = headers
+        self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
+        self.is_message = is_message
+        self.encoded_size = encoded_size
+        self.children = children
+
+
+class PyLazyMimePart:
+    """One node of a MIME tree whose bytes are decoded on first access.
+
+    Returned by ``parse_email_tree(payload, mode="lazy")``: walk a large message's
+    structure and decode the one part you want. ``PyMimePart`` plus
+    ``encoded_size`` and ``is_decoded``, with ``content`` a property that decodes
+    rather than a value the parse already paid for.
+
+    ``content`` is ``None`` for a ``multipart/*`` container, exactly as on
+    ``PyMimePart`` -- it never means "not decoded", which is what ``is_decoded``
+    is for. Every read after the first returns **the same** ``bytes`` object, and
+    a part whose ``Content-Transfer-Encoding`` cannot be decoded raises
+    ``DecodeError`` from here rather than failing the whole tree.
+
+    ``is_decoded`` answers whether reading ``content`` is free. It is ``True``
+    from the start for a container and for a ``message/rfc822`` node: the first
+    has nothing to decode, and the second was decoded during the walk because its
+    body is the embedded message that gives it children.
+
+    Memory: a leaf retains a copy of itself as it sits in the message. For a
+    single-part message that is the whole payload, because the root is the leaf --
+    so this is for walking a large multipart message, not for small mail in bulk.
+
+    A separate type rather than a lazy ``PyMimePart.content``, for the reason
+    ``PyLazyAttachment`` is one: re-timing an existing attribute, and moving where
+    it raises, is a change to a shipped contract, and those batch into one API-v2
+    window. Adding a type is not.
+    """
+
+    def __init__(
+        self,
+        content_type: str,
+        headers: dict[str, list[str]],
+        filename: str,
+        content_id: str | None,
+        disposition: str | None,
+        is_message: bool,
+        encoded_size: int | None,
+        children: list[PyLazyMimePart],
+    ) -> None:
+        self.content_type = content_type
+        self.headers = headers
+        self.filename = filename
+        self.content_id = content_id
+        self.disposition = disposition
+        self.is_message = is_message
+        self.encoded_size = encoded_size
+        self.children = children
+
+    @property
+    def content(self) -> bytes | None:
+        """The transfer-decoded bytes of a leaf, decoded on first access."""
+
+    @property
+    def is_decoded(self) -> bool:
+        """Whether reading ``content`` is free."""
 
 
 class PyAttachmentMetadata:
@@ -471,6 +576,7 @@ def parse_email(
 ) -> PyMailMetadata: ...
 
 
+@overload
 def parse_email_tree(payload: str | bytes) -> PyMimePart:
     """Parse a message into its MIME tree, structure intact.
 
@@ -480,15 +586,56 @@ def parse_email_tree(payload: str | bytes) -> PyMimePart:
     Use this when the shape of the message matters -- forensics, bounce
     processing, deciding which body belongs to which alternative -- and
     ``parse_email`` when the flat projection is what you want.
+
+    ``mode`` takes the same three values ``parse_email`` takes, and picks the node
+    type through these overloads so no existing caller's types change:
+
+    * ``"full"`` (the default) returns a ``PyMimePart`` tree, every leaf decoded.
+    * ``"lazy"`` returns a ``PyLazyMimePart`` tree, each leaf decoded on first
+      access and cached -- walk a large message and decode the one part you want.
+    * ``"metadata"`` returns a ``PyMimePartMetadata`` tree, which decodes nothing
+      and retains nothing; a leaf reports ``encoded_size`` instead of ``content``.
+
+    The shape of the tree is identical in all three modes. The one exception to
+    "decodes nothing" is a ``message/rfc822`` body, which has to be decoded before
+    the message inside it can be parsed -- so the deferred modes can still raise
+    ``DecodeError`` for such a part, and its node arrives already decoded.
+
+    There is no ``strict``, in any mode: the tree has no warnings channel to be
+    strict about. See the note on ``PyMimePart``.
     """
 
 
-def walk(part: PyMimePart) -> Iterator[PyMimePart]:
+@overload
+def parse_email_tree(payload: str | bytes, *, mode: Literal["full"]) -> PyMimePart: ...
+
+
+@overload
+def parse_email_tree(
+    payload: str | bytes, *, mode: Literal["lazy"]
+) -> PyLazyMimePart: ...
+
+
+@overload
+def parse_email_tree(
+    payload: str | bytes, *, mode: Literal["metadata"]
+) -> PyMimePartMetadata: ...
+
+
+_Node = TypeVar("_Node", PyMimePart, PyLazyMimePart, PyMimePartMetadata)
+
+
+def walk(part: _Node) -> Iterator[_Node]:
     """Yield ``part`` and every part beneath it, depth first.
 
     The same order as the stdlib's ``email.message.Message.walk``. It is a
     generator, so stopping early costs nothing for the rest of the tree.
+
+    Accepts a node from any ``parse_email_tree`` mode and yields nodes of the same
+    type: the three node types differ in what a leaf's bytes cost, not in the
+    shape of the tree.
     """
+@overload
 def parse_many(
     payloads: list[str | bytes],
     *,
@@ -525,4 +672,53 @@ def parse_many(
     begins -- scales with total bytes. For a few very large messages a Python
     thread pool over ``parse_email`` is currently faster. See the README for
     measured figures.
+
+    ``mode`` takes the same three values ``parse_email`` takes and means the same
+    things, and picks the slot type through these overloads. It is uniform across
+    the batch, which is what makes that sound -- one call cannot mix node types.
+
+    * ``"full"`` (the default): each slot is a ``PyMail``.
+    * ``"metadata"``: each slot is a ``PyMailMetadata``. This is the mailbox sweep
+      the mode was built for -- headers for a whole mailbox without decoding any
+      of it. ``strict=True`` is rejected with ``ValueError``, as on
+      ``parse_email``, because the mode never reads the bodies.
+    * ``"lazy"``: each slot is a ``PyLazyMail``. Note that this retains the
+      encoded bytes of every attachment in the batch for as long as the result
+      lives, so it is for pulling a few parts out of a batch rather than for
+      holding a large one undecoded.
+
+    ``ParseError`` instances still occupy failed slots in every mode, and
+    ``raise_on_error`` still applies.
     """
+
+
+@overload
+def parse_many(
+    payloads: list[str | bytes],
+    *,
+    mode: Literal["full"],
+    threads: int | None = None,
+    raise_on_error: bool = False,
+    strict: bool = False,
+) -> list[PyMail | ParseError]: ...
+
+
+@overload
+def parse_many(
+    payloads: list[str | bytes],
+    *,
+    mode: Literal["lazy"],
+    threads: int | None = None,
+    raise_on_error: bool = False,
+    strict: bool = False,
+) -> list[PyLazyMail | ParseError]: ...
+
+
+@overload
+def parse_many(
+    payloads: list[str | bytes],
+    *,
+    mode: Literal["metadata"],
+    threads: int | None = None,
+    raise_on_error: bool = False,
+) -> list[PyMailMetadata | ParseError]: ...
