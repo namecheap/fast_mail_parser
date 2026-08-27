@@ -12,6 +12,8 @@ What is covered elsewhere (NOT re-tested here):
 Contract:
 - Every value is a ``list[str]``, including single-valued headers, which are
   one-element lists.
+- Keys appear in the order the header names first appeared in the message, and
+  that order is stable across parses.
 - Repeated keys keep every value in message order -- nothing is dropped, joined,
   or reordered.
 - A repeated key is still a single dict entry; the multiplicity lives in the list.
@@ -105,3 +107,40 @@ def test__subject_and_date_are_independent_of_the_headers_map():
     assert mail.date == "Mon, 01 Jan 2024 12:00:00 +0000"
     # The map still reports both occurrences.
     assert mail.headers["Subject"] == ["the real one", "a later duplicate"]
+
+
+# --- key ordering (#157) ------------------------------------------------------
+
+
+def test__key_order_is_stable_across_parses():
+    # Was not: the keys came from a Rust HashMap whose iteration order is
+    # randomised per instance, so identical bytes produced a different order on
+    # every parse -- forty distinct orders in forty parses.
+    raw = _build("Subject: s\r\nX-A: 1\r\nX-B: 2\r\nX-C: 3\r\nX-D: 4\r\nX-E: 5")
+
+    orders = {tuple(parse_email(raw).headers) for _ in range(30)}
+
+    assert len(orders) == 1, f"key order varies across parses: {len(orders)} distinct"
+
+
+def test__keys_are_in_the_order_the_names_first_appeared():
+    raw = _build(
+        "Received: hop-1\r\n"
+        "Subject: s\r\n"
+        "Received: hop-2\r\n"
+        "From: a@b.c\r\n"
+    )
+
+    mail = parse_email(raw)
+
+    # `Received` keeps its first position even though it appears again later.
+    assert list(mail.headers) == ["Received", "Subject", "From"]
+    assert mail.headers["Received"] == ["hop-1", "hop-2"]
+
+
+def test__ordering_survives_a_realistic_header_block(valid_mail: PyMail):
+    # The wire order of the first few headers of tests/data/valid_message.eml.
+    keys = list(valid_mail.headers)
+
+    assert keys[:3] == ["Delivered-To", "Received", "X-Google-Smtp-Source"], keys[:3]
+    assert len(keys) == 29

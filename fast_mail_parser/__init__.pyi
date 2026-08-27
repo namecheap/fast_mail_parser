@@ -76,7 +76,8 @@ class PyMail:
     ``headers`` maps each header name to **every** value it appeared with, in
     order, so repeated keys such as ``Received`` or ``DKIM-Signature`` are
     preserved. Single-valued headers are one-element lists:
-    ``headers["From"] == ["a@example.com"]``.
+    ``headers["From"] == ["a@example.com"]``. The keys are in the order the names
+    first appeared in the message, stably across parses.
 
     Body parts and attachments are disjoint. A part is body text -- reaching
     ``text_plain`` or ``text_html`` -- when it is ``text/plain`` or ``text/html``

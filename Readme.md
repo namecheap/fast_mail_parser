@@ -144,7 +144,7 @@ Two things this table deliberately does *not* do:
 | `to` / `cc` / `bcc` / `reply_to` | `list[PyAddress]` | Recipients, groups flattened. |
 | `text_plain` | `list[str]` | All `text/plain` bodies. |
 | `text_html` | `list[str]` | All `text/html` bodies. |
-| `headers` | `dict[str, list[str]]` | All values of every header, in order. |
+| `headers` | `dict[str, list[str]]` | Every header's values, in order; keys in wire order. |
 | `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
 
 Each `PyAttachment` has:
@@ -180,7 +180,9 @@ mail.from_.address        # 'jane@example.com'
 ### Headers
 
 `headers` maps each header name to a **list** of every value it appeared with,
-in message order, so repeated fields survive:
+in message order, so repeated fields survive. The keys are themselves in the
+order the names first appeared in the message, and that order is stable across
+parses:
 
 ```python
 mail.headers["Received"]   # ['from mx1...', 'from mx2...', 'from mx3...']
