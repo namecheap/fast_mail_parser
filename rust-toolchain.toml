@@ -1,24 +1,35 @@
-# Rust toolchain for this crate. Pinned deliberately — do not float to `stable`
-# without re-measuring the benchmark gate.
+# Rust toolchain for this crate. Pinned deliberately: bump it on purpose, with a
+# measurement, rather than letting `stable` float.
 #
-# rustc 1.98.0 makes this crate ~26% slower. Identical source, same
-# ubuntu-24.04 runner image, one week apart:
+# Why a pin at all. The benchmark gate builds a revision and its base with the
+# SAME toolchain, so a compiler change is the one kind of regression it cannot
+# see -- both sides move together. A floating `stable` would put an unmeasured
+# compiler into every published wheel. A pin makes the compiler a change like
+# any other: proposed, measured, reviewed.
 #
-#   1.97.1 (2026-08-19)  parse 1.894 ms  ->  7.50x vs mail-parser  gate PASS
-#   1.98.0 (2026-08-26)  parse 2.378 ms  ->  6.08x vs mail-parser  gate FAIL
+# How to bump. Run the A/B that exists for this (#120):
 #
-# The pure-Python baseline barely moved (14.205 -> 14.456 ms), so this is the
-# Rust extension's codegen, not runner noise. The pin keeps published wheels on
-# the fast compiler and keeps the 7.0x floor honest instead of lowering it.
+#   gh workflow run toolchain-ab.yml -f candidate=<version>
 #
-# Before unpinning, benchmark the candidate toolchain and confirm it clears the
-# floor.
+# It builds this source with both toolchains in one job and measures them
+# interleaved. If the candidate is within tolerance, change the version here and
+# in every workflow that names it (`grep -rn <old version> .github`), since the
+# jobs must install components for the toolchain cargo actually uses (below).
+#
+# History. 1.97.1 was pinned on 2026-08-26 when 1.98.0 measured 15-30% slower.
+# That turned out not to be codegen: two byte-at-a-time loops in mailparse ran at
+# half speed when the linker happened to place them across a 64-byte boundary on
+# the runners' CPUs, and a new rustc moved them (as did a version bump -- #204).
+# With those loops replaced (vendor/mailparse, PRs #213 and #214) the same A/B
+# reads 1.98.0 within +/-0.5% of 1.97.1 on the CPU that showed the worst of it,
+# so the pin moved to 1.98.0 on 2026-08-27. See CONTRIBUTING.md, Performance.
 #
 # Precedence, verified in CI: this file beats dtolnay/rust-toolchain's
 # `toolchain:` input, and an explicit RUSTUP_TOOLCHAIN env var beats this file.
-# So a job requesting a different toolchain here still gets 1.97.1 — and if it
-# needs components (rustfmt, clippy) it must request them for 1.97.1 or cargo
-# reports them "not installed". `cargo audit` intentionally opts out via
-# RUSTUP_TOOLCHAIN=stable, so it audits against current stable.
+# So a job requesting a different toolchain there still gets this one -- and if
+# it needs components (rustfmt, clippy) it must request them for this version or
+# cargo reports them "not installed". `cargo audit`, `cargo deny` and the fuzz
+# job intentionally opt out via RUSTUP_TOOLCHAIN, since a tool's needs are not
+# the library's build.
 [toolchain]
-channel = "1.97.1"
+channel = "1.98.0"

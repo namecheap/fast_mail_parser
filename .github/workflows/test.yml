@@ -41,7 +41,7 @@ jobs:
           # toolchain cargo then does not use ("'cargo-fmt' is not installed for
           # the toolchain"). Only an explicit RUSTUP_TOOLCHAIN env var overrides
           # the file — see the cargo audit job.
-          toolchain: 1.97.1
+          toolchain: 1.98.0
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
@@ -83,7 +83,7 @@ jobs:
   # against any dependency should fail the build and gate the PR rather than pass
   # silently. (It was previously advisory only because the stack was stale and a
   # fresh advisory against a pinned dep would have blocked unrelated PRs.)
-  # rust-toolchain.toml pins the build to 1.97.1 (see that file) and the MSRV
+  # rust-toolchain.toml pins the build toolchain (see that file) and the MSRV
   # (1.83) is declared via `rust-version` in Cargo.toml; this job sets
   # RUSTUP_TOOLCHAIN=stable explicitly so cargo-audit always audits against
   # current stable regardless of that pin.
@@ -133,7 +133,7 @@ jobs:
   # the tree it was meant to govern.
   #
   # Like the cargo audit job, this sets RUSTUP_TOOLCHAIN=stable to override the
-  # 1.97.1 pin in rust-toolchain.toml: a supply-chain check should run current
+  # pin in rust-toolchain.toml: a supply-chain check should run current
   # tooling regardless of which compiler the library is built with. It needs no
   # Rust build at all, only the lockfile and the manifests.
   #
@@ -175,7 +175,7 @@ jobs:
   # schedule (#102).
   #
   # cargo-fuzz requires nightly, so this sets RUSTUP_TOOLCHAIN to override the
-  # 1.97.1 pin in rust-toolchain.toml -- the same override the cargo audit and
+  # pin in rust-toolchain.toml -- the same override the cargo audit and
   # cargo deny jobs use, for the same reason: the tool's needs are not the
   # library's build.
   #
@@ -265,8 +265,8 @@ jobs:
       - name: Build wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          # Pinned: see rust-toolchain.toml. 1.98.0 costs this crate ~26%.
-          rust-toolchain: 1.97.1
+          # Pinned: see rust-toolchain.toml for why and how to bump.
+          rust-toolchain: 1.98.0
           args: --release --out dist
           sccache: "true"
           manylinux: auto
@@ -337,7 +337,7 @@ jobs:
           cache: pip
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
       # Cache the cargo registry and build artifacts so the two builds below
       # reuse compiled crates instead of starting from scratch (#47).
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -521,7 +521,7 @@ jobs:
           cache: pip
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
         with:
-          toolchain: 1.97.1
+          toolchain: 1.98.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Build the sdist

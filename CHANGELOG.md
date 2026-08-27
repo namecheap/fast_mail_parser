@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Rust toolchain pin moved from 1.97.1 to 1.98.0** (#120). The pin was a holding
+  action against a measured 15-30% slowdown under 1.98.0; the cause turned out to be
+  the two mailparse loops above -- the compiler had not changed their instructions,
+  only their addresses -- and with those replaced the toolchain A/B on the CPU that
+  showed the worst of it reads 1.98.0 within +/-0.5% of 1.97.1 on every parse path.
+  Published wheels are built with 1.98.0 from the next release. The pin stays a pin
+  rather than floating to `stable`, because the benchmark gate builds both sides
+  with the same compiler and so cannot see a compiler regression; bumping it is a
+  measured change (`toolchain-ab.yml`), described in `rust-toolchain.toml`.
 - **Base64 whitespace is stripped with `memchr`** instead of a test-and-push per byte,
   the second change in the patched `vendor/mailparse` (also on
   [staktrace/mailparse#142](https://github.com/staktrace/mailparse/pull/142)). With the

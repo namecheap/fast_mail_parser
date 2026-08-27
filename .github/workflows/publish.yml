@@ -46,8 +46,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          # Pinned: see rust-toolchain.toml. 1.98.0 costs this crate ~26%.
-          rust-toolchain: 1.97.1
+          # Pinned: see rust-toolchain.toml for why and how to bump.
+          rust-toolchain: 1.98.0
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: "true"
@@ -79,8 +79,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          # Pinned: see rust-toolchain.toml. 1.98.0 costs this crate ~26%.
-          rust-toolchain: 1.97.1
+          # Pinned: see rust-toolchain.toml for why and how to bump.
+          rust-toolchain: 1.98.0
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: "true"
@@ -109,8 +109,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          # Pinned: see rust-toolchain.toml. 1.98.0 costs this crate ~26%.
-          rust-toolchain: 1.97.1
+          # Pinned: see rust-toolchain.toml for why and how to bump.
+          rust-toolchain: 1.98.0
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: "true"
@@ -138,8 +138,8 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
-          # Pinned: see rust-toolchain.toml. 1.98.0 costs this crate ~26%.
-          rust-toolchain: 1.97.1
+          # Pinned: see rust-toolchain.toml for why and how to bump.
+          rust-toolchain: 1.98.0
           target: ${{ matrix.platform.target }}
           args: --release --out dist
           sccache: "true"
