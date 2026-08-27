@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`parse_email_tree(payload)`** returns the message's MIME tree with the
+  structure intact, and **`walk(part)`** iterates it depth-first in the same order
+  as the stdlib's `email.message.Message.walk` (#99). A pure addition:
+  `parse_email` is unchanged.
+  - Two things the flat projection cannot express. A `multipart/alternative`
+    node's children are the plain and HTML renderings *of the same thing*, which
+    `text_plain`/`text_html` cannot relate. And a `message/rfc822` part -- a
+    bounce or forward -- is now parsed rather than opaque: `is_message` is `True`
+    and the embedded message's own root is the part's single child, so its
+    headers are reachable instead of being an attachment blob to re-parse.
+  - Embedded nesting counts against the same recursion cap as multipart nesting.
+  - Tree topology is asserted against the stdlib's `walk()` over the whole
+    fixture and RFC corpus, which is the strongest correctness oracle available.
+
 - An internal panic now raises `ParseError` instead of PyO3's `PanicException`
   (#102). This is not about memory safety -- PyO3 already catches panics at the
   boundary, so one never aborted the process -- it is about which `except` clause

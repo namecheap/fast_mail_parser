@@ -1,9 +1,13 @@
+from collections.abc import Iterator
 from datetime import datetime
 
 __all__ = [
     "parse_email",
+    "parse_email_tree",
     "parse_many",
+    "walk",
     "PyMail",
+    "PyMimePart",
     "PyAttachment",
     "PyAddress",
     "ParseError",
@@ -11,6 +15,38 @@ __all__ = [
     "MimeStructureError",
     "DecodeError",
 ]
+
+
+class PyMimePart:
+    """One node of a message's MIME tree, with the structure intact.
+
+    ``PyMail`` is a flattened projection of this -- bodies in one list,
+    attachments in another, containers dropped. Every flattening loses something:
+    which ``text/html`` part corresponds to which ``text/plain`` sibling, whether
+    a node was ``multipart/alternative`` or ``multipart/mixed``, where a bounce's
+    inner message begins.
+
+    ``content`` is the transfer-decoded bytes of a leaf, and ``None`` for a
+    ``multipart/*`` container -- whose body is just its children with boundaries
+    between them.
+
+    ``is_message`` is ``True`` for ``message/rfc822``: the embedded message's own
+    root is this part's single child, so a bounce's headers are reachable rather
+    than opaque. Such nesting counts against the same recursion cap as a
+    multipart tree.
+
+    ``headers`` keeps every value of every header, keys in the order the names
+    first appeared -- the same semantics as ``PyMail.headers``.
+    """
+
+    content_type: str
+    headers: dict[str, list[str]]
+    filename: str
+    content_id: str | None
+    disposition: str | None
+    is_message: bool
+    content: bytes | None
+    children: list[PyMimePart]
 
 
 class PyAddress:
@@ -160,6 +196,24 @@ def parse_email(payload: str | bytes) -> PyMail:
     """
 
 
+def parse_email_tree(payload: str | bytes) -> PyMimePart:
+    """Parse a message into its MIME tree, structure intact.
+
+    Additive: ``parse_email`` is unchanged. Accepts the same payloads and raises
+    the same ``ParseError`` subtypes, including the size and recursion caps.
+
+    Use this when the shape of the message matters -- forensics, bounce
+    processing, deciding which body belongs to which alternative -- and
+    ``parse_email`` when the flat projection is what you want.
+    """
+
+
+def walk(part: PyMimePart) -> Iterator[PyMimePart]:
+    """Yield ``part`` and every part beneath it, depth first.
+
+    The same order as the stdlib's ``email.message.Message.walk``. It is a
+    generator, so stopping early costs nothing for the rest of the tree.
+    """
 def parse_many(
     payloads: list[str | bytes],
     *,
