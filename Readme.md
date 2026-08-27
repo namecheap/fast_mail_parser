@@ -371,14 +371,15 @@ median of three interleaved rounds on the CI runner:
 
 | | | |
 | --- | --- | --- |
-| `mode="metadata"` | 0.58 ms | decodes nothing |
-| `mode="lazy"`, nothing read | 0.62 ms | bodies decoded, attachments deferred |
-| `mode="full"` | 1.77 ms | the default |
-| `mode="lazy"`, every attachment read | 1.79 ms | the same work, in a worse order |
+| `mode="metadata"` | 0.52 ms | decodes nothing |
+| `mode="lazy"`, nothing read | 0.56 ms | bodies decoded, attachments deferred |
+| `mode="full"` | 2.00 ms | the default |
+| `mode="lazy"`, every attachment read | 2.04 ms | the same work, in a worse order |
 
-So deferring saves about 65% when you were not going to decode everything, and
+So deferring saves about 70% when you were not going to decode everything, and
 costs about 2% when you were. **If you are going to read every attachment, use the
-default mode** — this one is for when you are not.
+default mode** — this one is for when you are not. Absolute times move with the
+runner; the ratios are what to read.
 
 Two things to know before choosing it:
 
