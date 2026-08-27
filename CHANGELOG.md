@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `headers` keys are now in the order the header names first appeared in the
+  message, stably across parses. They came from a Rust `HashMap`, whose iteration
+  order is randomised per instance, and that order became the Python dict's
+  insertion order -- so identical bytes produced a different key order on every
+  parse (forty distinct orders in forty parses) and the message's own header order
+  was unrecoverable. Dict *content* was unaffected, which is why it went unnoticed
+  (#157, found by the fuzz harness on its first run).
 - `parse_many(payloads, threads=0)` now raises `ValueError` instead of silently
   behaving as `threads=None`. Treating 0 as "the machine's default" hid caller
   bugs: `threads=os.cpu_count() - 1` on a one-core machine, or an unset config

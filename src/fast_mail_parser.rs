@@ -18,9 +18,8 @@ mod mail_parser;
 
 use mailparse::MailParseError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDateTime, PyList, PyString, PyTzInfo};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
-use std::collections::HashMap;
 use std::num::NonZeroUsize;
 
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
@@ -185,8 +184,9 @@ pub struct PyMail {
     /// image referenced only by `Content-ID`.
     #[pyo3(get)]
     pub attachments: Vec<PyAttachment>,
-    #[pyo3(get)]
-    pub headers: HashMap<String, Vec<String>>,
+    /// Stored as ordered pairs, not a map: the key order is the point (#157).
+    /// Exposed through the `headers` getter below.
+    pub headers: Vec<(String, Vec<String>)>,
 }
 
 #[pymethods]
@@ -201,6 +201,22 @@ impl PyMail {
     /// the instant is exact while the original offset is not retained -- read
     /// `date` for that. An unparseable header yields `None`, leaving `date`
     /// intact as the raw string.
+    /// All values of every header, keyed by name, in the order the names first
+    /// appeared in the message.
+    ///
+    /// Built on access rather than stored as a dict. Python dicts preserve
+    /// insertion order, so inserting in wire order is what makes the ordering
+    /// observable -- and the previous `HashMap` field, converted per access,
+    /// produced a different order every time (#157).
+    #[getter]
+    fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = PyDict::new(py);
+        for (name, values) in &self.headers {
+            dict.set_item(name, values)?;
+        }
+        Ok(dict)
+    }
+
     #[getter]
     fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
         let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {

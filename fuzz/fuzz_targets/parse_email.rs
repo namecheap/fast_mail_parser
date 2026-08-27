@@ -21,17 +21,14 @@ use libfuzzer_sys::fuzz_target;
 
 /// Render a parse deterministically for comparison.
 ///
-/// `Mail`'s derived `Debug` cannot be compared across parses: `headers` is a
-/// `std::collections::HashMap`, whose iteration order is randomised per instance,
-/// so two parses of the same bytes format their headers in different orders. The
-/// first run of this target found exactly that -- a flaw in the check, not in the
-/// parser, though it did expose a real one: #157.
-///
-/// Sorting the header entries removes that noise while still comparing every
-/// field, so a genuine difference anywhere in the result still fails.
+/// Headers are compared **in order**, deliberately. This target's first run
+/// failed here because `headers` was a `HashMap` whose iteration order is
+/// randomised per instance -- which turned out to be a real bug rather than only
+/// a flawed check (#157), since that order reached callers. Now that the core
+/// keeps wire order, comparing unsorted means this target also guards against a
+/// regression to nondeterministic ordering.
 fn canonical(mail: &mail_parser::Mail) -> String {
-    let mut headers: Vec<_> = mail.headers.iter().collect();
-    headers.sort();
+    let headers = &mail.headers;
 
     let attachments: Vec<_> = mail
         .attachments
