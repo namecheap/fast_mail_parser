@@ -371,7 +371,16 @@ pub(crate) fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailP
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
 
-    let mail = parse_mail(payload)?;
+    // The same repair as the flat path and the tree, so no two views of a message
+    // whose header block was never terminated can disagree about it (#150).
+    //
+    // This entry point was the one the repair missed, because it landed while
+    // that work was in flight. Nothing caught it: the corpus test for this mode
+    // still excluded the only fixture with the defect. The `parse_agreement` fuzz
+    // target found it on its first run, which is the case it was written for --
+    // two derivations of one message quietly disagreeing.
+    let repaired = repair_missing_separator(payload);
+    let mail = parse_mail(repaired.as_deref().unwrap_or(payload))?;
     let headers = collect_headers(&mail);
 
     let subject = mail
