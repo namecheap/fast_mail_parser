@@ -18,6 +18,7 @@ mod mail_parser;
 
 use mailparse::MailParseError;
 use pyo3::prelude::*;
+use pyo3::pybacked::PyBackedBytes;
 use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
@@ -304,16 +305,47 @@ impl PyMail {
 /// unchanged because ASCII == its own UTF-8, and non-ASCII code points round-trip
 /// correctly instead of being truncated to their low byte). Any other type raises
 /// Python `TypeError`.
-fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Vec<u8>> {
+/// A caller's payload, ready to be read with the GIL released.
+///
+/// `bytes` is borrowed rather than copied (#96). Holding a `PyBackedBytes` keeps
+/// the Python object alive and hands out its buffer directly, and reading it
+/// detached is sound because `bytes` is immutable -- nothing can change or free
+/// it underneath us while we hold the reference.
+///
+/// The copy this avoids was not a rounding error at batch sizes. `parse_many`
+/// duplicated every payload before parsing any of them, so a batch of ten
+/// thousand one-megabyte messages needed ten gigabytes of copies *in addition to*
+/// the originals the caller still held.
+///
+/// `str` is a different case and still gets copied. Under the limited API,
+/// obtaining UTF-8 from a `str` means asking CPython to encode it, which
+/// allocates -- there is no buffer to borrow. Callers who care about throughput
+/// should pass `bytes`, which is also what reading a mail file or socket gives
+/// them.
+enum Payload {
+    Borrowed(PyBackedBytes),
+    Owned(Vec<u8>),
+}
+
+impl AsRef<[u8]> for Payload {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Payload::Borrowed(bytes) => bytes.as_ref(),
+            Payload::Owned(bytes) => bytes.as_slice(),
+        }
+    }
+}
+
+fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
     let obj = payload.bind(py);
 
     if let Ok(bytes) = obj.cast::<PyBytes>() {
-        return Ok(bytes.as_bytes().to_vec());
+        return Ok(Payload::Borrowed(PyBackedBytes::from(bytes.clone())));
     }
 
     if let Ok(text) = obj.cast::<PyString>() {
         if let Ok(text) = text.to_str() {
-            return Ok(text.as_bytes().to_vec());
+            return Ok(Payload::Owned(text.as_bytes().to_vec()));
         }
     }
 
@@ -342,7 +374,7 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     // borrows from a Python object while the GIL is released. Errors and the
     // `PyMail` are produced after re-attaching, where the interpreter is needed.
     let mail = py
-        .detach(|| mail_parser::parse_email(message.as_slice()))
+        .detach(|| mail_parser::parse_email(message.as_ref()))
         .map_err(to_py_err)?;
 
     Ok(PyMail::from_mail(mail))
@@ -383,9 +415,11 @@ fn parse_many_inner(
     threads: Option<usize>,
     raise_on_error: bool,
 ) -> PyResult<Py<PyList>> {
-    // Convert every payload to owned bytes *before* releasing the GIL: this
-    // touches Python objects, and nothing may borrow from one while detached.
-    let messages: Vec<Vec<u8>> = payloads
+    // Resolve every payload *before* releasing the GIL: this touches Python
+    // objects, which requires the interpreter. What is held afterwards is a
+    // reference to each `bytes` object plus its buffer pointer, not a copy of
+    // its contents, so the batch is no longer duplicated in full (#96).
+    let messages: Vec<Payload> = payloads
         .iter()
         .map(|payload| payload_to_bytes(payload, py))
         .collect::<PyResult<_>>()?;

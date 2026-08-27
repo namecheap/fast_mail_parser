@@ -19,8 +19,11 @@ with their payloads decoded. That is the comparison worth publishing, and it is
 what `make bench-table` renders.
 
 Names matter here: `.github/scripts/check_benchmark.py` selects the gate pair by
-substring, so the table pair must not contain `fast_mail_parser` or
-`mail_parser` (note `mailparser_lib` has no underscore).
+**exact** name -- substring matching was ambiguous, since any benchmark
+mentioning a library name made the selection two-valued and failed the gate
+rather than being ignored. New benchmarks are therefore free to be named after
+what they measure; they ride along in the interleaved comparison without
+disturbing the gate pair.
 """
 
 import email
@@ -119,3 +122,14 @@ def test__stdlib_email___full_read(large_message: str, benchmark: Callable):
     assert _stdlib_full(raw)[0], "expected a subject"
 
     benchmark(_stdlib_full, raw)
+
+
+def test__fast_mail_parser___parse_many(large_message: str, benchmark: Callable):
+    from fast_mail_parser import parse_many
+
+    # Single-threaded on purpose: this measures per-payload overhead -- the
+    # handling of the caller's bytes -- and thread scheduling would only add
+    # noise to that. Parallel throughput is a separate question.
+    batch = [large_message.encode()] * 8
+
+    benchmark(lambda: parse_many(batch, threads=1))

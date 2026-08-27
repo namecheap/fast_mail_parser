@@ -68,8 +68,8 @@ pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
 ///
 /// `threads` caps the worker count; `None` uses the machine's parallelism.
 /// Callers with a batch smaller than the thread count do not spawn idle workers.
-pub(crate) fn parse_many(
-    payloads: &[Vec<u8>],
+pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
+    payloads: &[P],
     threads: Option<NonZeroUsize>,
 ) -> Vec<Result<Mail, MailParseError>> {
     if payloads.is_empty() {
@@ -83,7 +83,10 @@ pub(crate) fn parse_many(
     let workers = available.min(payloads.len()).max(1);
 
     if workers == 1 {
-        return payloads.iter().map(|payload| Mail::new(payload)).collect();
+        return payloads
+            .iter()
+            .map(|payload| Mail::new(payload.as_ref()))
+            .collect();
     }
 
     let cursor = AtomicUsize::new(0);
@@ -100,7 +103,7 @@ pub(crate) fn parse_many(
                         if index >= payloads.len() {
                             break;
                         }
-                        mine.push((index, Mail::new(&payloads[index])));
+                        mine.push((index, Mail::new(payloads[index].as_ref())));
                     }
                     mine
                 })
