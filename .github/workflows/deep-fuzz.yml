@@ -1,0 +1,153 @@
+name: Deep fuzz
+
+# The PR job fuzzes for 60 seconds with a fixed seed: enough to catch a gross
+# regression, not enough to explore. Real fuzzing needs time and a corpus that
+# grows, which is what this is for (#102).
+#
+# Two things make a weekly run worth more than 30x the PR job:
+#
+#   - The corpus is cached and restored, so coverage compounds week over week
+#     instead of restarting from the fixtures every time. This is most of the
+#     value: a fuzzer's reach is mostly a function of the corpus it inherits.
+#   - No fixed seed, so each run explores a different path. The PR job pins the
+#     seed deliberately, to stay reproducible; here that would mean repeating one
+#     search every week forever.
+#
+# A crasher becomes an artifact, a minimized reproducer, and an entry on a single
+# pinned issue rather than a new issue per run.
+on:
+  schedule:
+    # Mondays, 03:17 UTC. Off the hour: scheduled jobs cluster there and get
+    # queued behind everyone else's.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Fuzzing time per target, seconds"
+        default: "1800"
+      inject_canary:
+        description: "Plant the canary input to test the crash-reporting path"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Never two deep runs at once: they would race on the corpus cache and the
+  # slower one's save would clobber the faster one's findings.
+  group: deep-fuzz
+  cancel-in-progress: false
+
+jobs:
+  deep-fuzz:
+    name: parse_email (${{ inputs.seconds || 1800 }}s)
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+      # Keep in step with the short pass in test.yml.
+      CARGO_FUZZ_VERSION: "0.13.2"
+      FUZZ_SECONDS: ${{ inputs.seconds || 1800 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: fuzz
+
+      - name: Cache cargo-fuzz binary
+        id: cache-cargo-fuzz
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-${{ env.CARGO_FUZZ_VERSION }}
+      - name: Install cargo-fuzz
+        if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --version ${{ env.CARGO_FUZZ_VERSION }} --locked
+
+      - name: Restore the accumulated corpus
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/parse_email
+          # A cache entry is immutable, so each run writes a new key and inherits
+          # the newest previous one by prefix.
+          key: fuzz-corpus-parse_email-${{ github.run_id }}
+          restore-keys: fuzz-corpus-parse_email-
+
+      - name: Seed the corpus from the test fixtures
+        run: |
+          mkdir -p fuzz/corpus/parse_email
+          inherited=$(find fuzz/corpus/parse_email -type f | wc -l)
+          cp tests/data/*.eml tests/data/rfc/*.eml fuzz/corpus/parse_email/
+          echo "inherited $inherited inputs from the cache, "\
+               "$(find fuzz/corpus/parse_email -type f | wc -l) after seeding"
+          echo "corpus_inherited=$inherited" >> "$GITHUB_ENV"
+
+      - name: Plant the canary
+        if: inputs.inject_canary
+        run: |
+          # Exercises the crash path on demand. The target panics on exactly
+          # these bytes; see CANARY in fuzz/fuzz_targets/parse_email.rs.
+          printf '%s' 'FMP_FUZZ_CANARY_DO_NOT_REPORT_42' \
+            > fuzz/corpus/parse_email/zz-canary
+          echo "::warning::canary planted -- this run is expected to crash"
+
+      - name: Fuzz parse_email
+        id: fuzz
+        run: |
+          # No -seed: each run should explore somewhere new.
+          set -o pipefail
+          cargo fuzz run parse_email -- \
+            -max_total_time="$FUZZ_SECONDS" \
+            -print_final_stats=1 2>&1 | tee fuzz-output.log
+
+      - name: Save the accumulated corpus
+        # Also on failure: the inputs found before the crash are worth keeping.
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/parse_email
+          key: fuzz-corpus-parse_email-${{ github.run_id }}
+
+      - name: Minimize the crasher
+        if: failure() && steps.fuzz.conclusion == 'failure'
+        run: |
+          # A raw crasher is whatever the mutator happened to be holding; the
+          # minimized one is what a regression fixture should be made from.
+          for crasher in fuzz/artifacts/parse_email/*; do
+            [ -f "$crasher" ] || continue
+            echo "::group::tmin $(basename "$crasher")"
+            cargo fuzz tmin parse_email "$crasher" || \
+              echo "minimization failed; the raw crasher is still in the artifact"
+            echo "::endgroup::"
+          done
+
+      - name: Upload crashers and log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: deep-fuzz-${{ github.run_id }}
+          path: |
+            fuzz/artifacts
+            fuzz-output.log
+          if-no-files-found: ignore
+
+      - name: Report a crasher
+        if: failure() && steps.fuzz.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/report_fuzz_crash.sh
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deep fuzz"
+            echo
+            echo "- ran for ${FUZZ_SECONDS}s"
+            echo "- corpus: ${corpus_inherited} inherited, $(find fuzz/corpus/parse_email -type f | wc -l) now"
+            echo "- crashers: $(find fuzz/artifacts -type f 2>/dev/null | wc -l)"
+          } >> "$GITHUB_STEP_SUMMARY"

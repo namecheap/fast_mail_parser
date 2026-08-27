@@ -172,12 +172,18 @@ RUSTUP_TOOLCHAIN=nightly cargo fuzz run parse_email
 `RUSTUP_TOOLCHAIN` is needed because `rust-toolchain.toml` pins a stable version;
 the env var is the only thing that overrides a toolchain file.
 
-Three invariants are asserted on arbitrary input: **no panic** (the one that
-matters most, since a panic crossing the FFI boundary takes down the host
-process), **determinism** (the same bytes parse the same twice, compared over the
-whole `Debug` output rather than a chosen subset), and **bounded output** (decoded
-size stays within a generous multiple of the input, so nothing can amplify its
-way through memory).
+Three invariants are asserted on arbitrary input:
+
+- **No panic** — still the one that matters most, though not because a panic
+  takes down the host process: it never did. PyO3 catches panics at the boundary,
+  and since #162 the binding converts them to `ParseError`. What a panic costs is
+  a message reported as unparseable instead of parsed, so finding one here is
+  finding it before a mail pipeline does.
+- **Determinism** — the same bytes parse the same twice, compared over every
+  field, headers **in order**. The harness's first run failed here and it was a
+  real bug (#157), not a flawed check.
+- **Bounded output** — decoded size stays within a generous multiple of the
+  input, so nothing can amplify its way through memory.
 
 Two things about the harness are deliberate and worth knowing before changing it:
 
@@ -192,9 +198,24 @@ Two things about the harness are deliberate and worth knowing before changing it
 `fuzz/Cargo.toml` duplicates the `charset` and `mailparse` versions from the root
 manifest. They must stay in step, or the harness stops testing what ships.
 
-CI runs a 60-second deterministic pass on every PR; a crasher is uploaded as an
-artifact. Anything found should be minimised and committed as a regression
-fixture under `tests/`.
+CI runs a 60-second deterministic pass on every PR, seeded so it stays
+reproducible; a crasher is uploaded as an artifact.
+
+A **weekly deep run** (`.github/workflows/deep-fuzz.yml`, Mondays) fuzzes for 30
+minutes with no fixed seed and, importantly, **caches the corpus between runs**,
+so coverage compounds instead of restarting from the fixtures every week — that
+accumulation is most of what makes a scheduled run worth more than the PR pass.
+
+A crasher there is minimised, uploaded, and reported onto a single pinned issue
+labelled `fuzz-crash`: one issue that gets comments, not a new issue per week,
+because a crasher stays in the corpus and keeps being found until it is fixed.
+Anything found should be minimised and committed as a regression fixture under
+`tests/`, so the finding stays found.
+
+To rehearse that reporting path without waiting for a real crash, dispatch the
+workflow with `inject_canary`. It plants an input the target panics on by design
+(`CANARY` in `fuzz/fuzz_targets/parse_email.rs`) and the resulting issue says so
+— close it afterwards.
 
 ## Linting
 
