@@ -194,3 +194,25 @@ def test__without_the_exclusion_the_same_data_fails(tmp_path: Path):
 
     assert result.returncode == 1
     assert "Verdict: significant" in result.stdout
+
+
+def test__a_significant_verdict_tells_the_reader_to_re_run(tmp_path: Path):
+    # The gate has a false-positive mode its own noise floor cannot see: a code
+    # layout difference costs nothing on one CPU and ~2x on another, tightly and
+    # repeatably, while the pure-Python controls stay flat. The only cheap defence
+    # is re-running, so a failure has to say so.
+    slower = [(1.500, 10.0), (1.505, 10.1), (1.498, 9.95)]
+
+    result = _run(tmp_path, slower, BASE)
+
+    assert result.returncode == 1
+    assert "Re-run before acting on this" in result.stdout
+    assert "96% apart" in result.stdout
+
+
+def test__the_machine_is_reported(tmp_path: Path):
+    # Two runs of the same commit cannot be compared without knowing whether they
+    # ran on the same hardware.
+    result = _run(tmp_path, EQUAL, BASE)
+
+    assert "Measured on" in result.stdout

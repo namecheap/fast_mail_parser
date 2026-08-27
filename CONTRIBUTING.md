@@ -297,17 +297,23 @@ Both `lto = "fat"` and `codegen-units = 1` are already set, so a codegen-unit
 boundary is never the explanation -- worth knowing, since it is the natural first
 guess.
 
-**A version bump alone moves the decode path ~3.5%.** Measured both directions
-(#204): nothing in the crate reads `CARGO_PKG_VERSION`, but the version reaches
-the compiler as crate metadata, which feeds symbol naming and therefore layout.
-So the gate on a release-cut PR will report a few percent either way, above the
-noise floor, and that is the version string rather than the change. `parse_metadata`
-is the tell -- it never decodes, so it stays flat while everything else moves.
+**A version bump alone can move the decode path, and by how much depends on the
+CPU.** Nothing in the crate reads `CARGO_PKG_VERSION`, but the version reaches the
+compiler as crate metadata, which feeds symbol naming and therefore code layout.
+Measured (#204): one version pair differed by 3-4%, and another pair measured
+within 0.4% on one runner and **96% apart** on another -- identical binaries,
+per-round spread under 0.3% both times.
 
-This also bounds what the 7% threshold can police: a change that genuinely costs
-3% is not distinguishable from one that merely moved the version. If you need to
-know which you have, revert the version on a throwaway branch and let the gate
-measure that alone.
+So the gate has a false-positive mode that its own noise floor cannot see. The
+controls are pure Python and do not care how the extension was laid out, so they
+stay flat while every treatment benchmark moves together, tightly and repeatably.
+It looks exactly like a real regression.
+
+**Re-run a large failure before acting on it.** A real regression reproduces on
+different hardware; a layout-versus-CPU artifact does not. The gate prints the CPU
+it measured on for exactly this comparison. And note what it means for the 7%
+threshold: on unlucky hardware, a change that costs nothing can be reported well
+past it.
 
 ## Linting
 
