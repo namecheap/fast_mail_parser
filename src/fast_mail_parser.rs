@@ -99,7 +99,7 @@ fn to_py_err(error: MailParseError) -> PyErr {
 /// core: it formats, and it must not be inlined into a parse.
 #[cold]
 #[inline(never)]
-fn strict_rejection(warnings: &[mail_parser::Warning]) -> PyErr {
+fn strict_rejection(warnings: &[ParseWarning]) -> PyErr {
     // Non-empty by construction: the callers check before calling.
     let warning = &warnings[0];
     let location = if warning.part_path.is_empty() {
@@ -115,7 +115,7 @@ fn strict_rejection(warnings: &[mail_parser::Warning]) -> PyErr {
         warning.detail,
         warnings.len()
     );
-    match warning.kind {
+    match warning.kind.as_str() {
         mail_parser::KIND_ADDRESS_UNPARSEABLE => HeaderParseError::new_err(message),
         // Structure rather than header parsing: what the defect breaks is the
         // boundary between the header block and the MIME body, and the message
@@ -745,16 +745,30 @@ pub fn parse_email(
     // that `catch_panics` inlines cost the hot path 30%, for the second time in
     // one day (the first was #180). Code that never runs is not free here.
     //
-    // `strict` rides into the closure as a plain bool and is read once, after the
-    // parse, by an `inline(never)` helper; the shape above is unchanged.
-    if mode == "full" {
-        return catch_panics(|| {
-            let mail = parse_email_inner(py, payload, strict)?;
-            Ok(Py::new(py, mail)?.into_any())
-        });
+    // `strict` joins the condition rather than the closure, for the third time in
+    // one day: threading it through `parse_email_inner` instead -- one bool
+    // parameter and one branch calling a `#[cold]` helper -- cost **47% on every
+    // entry point and 96% on metadata mode**, measured against this base. Nothing
+    // in the core was to blame: the same warning machinery there measured +0.9%
+    // on its own. What matters is that this closure and `parse_email_inner` stay
+    // byte-for-byte what they were, so strict mode is a different path rather
+    // than an extra argument on this one.
+    if mode == "full" && !strict {
+        return catch_panics(|| Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()));
     }
 
     parse_email_other_mode(py, payload, mode, strict)
+}
+
+/// Which non-default thing `parse_email` was asked for.
+///
+/// Resolved before the closure below rather than inside it, so the slow paths
+/// share a single `catch_panics` instantiation. The count matters: #99 records a
+/// third instantiation costing 24% by stopping the one wrapping `parse_email`
+/// from being inlined.
+enum SlowPath {
+    StrictFull,
+    Metadata,
 }
 
 #[inline(never)]
@@ -764,7 +778,9 @@ fn parse_email_other_mode(
     mode: &str,
     strict: bool,
 ) -> PyResult<Py<PyAny>> {
-    match mode {
+    let path = match (mode, strict) {
+        ("full", _) => SlowPath::StrictFull,
+        ("metadata", false) => SlowPath::Metadata,
         // `strict` is refused here rather than ignored, and rather than
         // supported. Its promise is that nothing lossy got through, and metadata
         // mode never reads a body -- so the strongest thing it could honestly
@@ -772,10 +788,36 @@ fn parse_email_other_mode(
         // something weaker than it says is worse than a flag that is unavailable,
         // which is the same reasoning that leaves `text_plain` absent from this
         // mode rather than empty.
-        "metadata" if strict => Err(strict_needs_full_mode()),
-        "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
-        other => Err(unknown_mode(other)),
+        ("metadata", true) => return Err(strict_needs_full_mode()),
+        (other, _) => return Err(unknown_mode(other)),
+    };
+
+    catch_panics(|| parse_email_slow(py, payload, path))
+}
+
+/// Every path `parse_email`'s default branch does not take.
+///
+/// Cold, and marked so, for the reason the whole file repeats: `parse_email`'s
+/// default path must not pay for this existing.
+#[inline(never)]
+fn parse_email_slow(py: Python<'_>, payload: Py<PyAny>, path: SlowPath) -> PyResult<Py<PyAny>> {
+    match path {
+        SlowPath::StrictFull => parse_email_strict(py, payload),
+        SlowPath::Metadata => parse_email_metadata_mode(py, payload),
     }
+}
+
+/// `strict=True` on the full parse: the same parse, then a verdict on it.
+///
+/// Reads `PyMail.warnings` rather than the core's list so `parse_email_inner`
+/// keeps the signature and the body it has on the default path.
+#[inline(never)]
+fn parse_email_strict(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    let mail = parse_email_inner(py, payload)?;
+    if !mail.warnings.is_empty() {
+        return Err(strict_rejection(&mail.warnings));
+    }
+    Ok(Py::new(py, mail)?.into_any())
 }
 
 #[cold]
@@ -809,7 +851,7 @@ fn parse_email_metadata_mode(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<
     Ok(Py::new(py, PyMailMetadata::from_metadata(metadata))?.into_any())
 }
 
-fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>, strict: bool) -> PyResult<PyMail> {
+fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
     let message = payload_to_bytes(&payload, py)?;
 
     // The actual parse is pure Rust and never touches the Python interpreter, so
@@ -822,10 +864,6 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>, strict: bool) -> PyResu
     let mail = py
         .detach(|| mail_parser::parse_email(message.as_ref()))
         .map_err(to_py_err)?;
-
-    if strict && !mail.warnings.is_empty() {
-        return Err(strict_rejection(&mail.warnings));
-    }
 
     Ok(PyMail::from_mail(mail))
 }
@@ -906,6 +944,7 @@ fn parse_many_inner(
         // implementation: one notion of "this slot failed", two ways to reach it.
         let outcome = match result {
             Ok(mail) => {
+                let mail = PyMail::from_mail(mail);
                 if strict && !mail.warnings.is_empty() {
                     Err(strict_rejection(&mail.warnings))
                 } else {
@@ -915,7 +954,7 @@ fn parse_many_inner(
             Err(error) => Err(to_py_err(error)),
         };
         match outcome {
-            Ok(mail) => items.append(Py::new(py, PyMail::from_mail(mail))?)?,
+            Ok(mail) => items.append(Py::new(py, mail)?)?,
             Err(err) => {
                 if raise_on_error {
                     return Err(err);
