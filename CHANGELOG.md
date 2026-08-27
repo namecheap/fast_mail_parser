@@ -17,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rest of the rustc placement sensitivity: decoding paths still moved +22% on one CPU
   and +5% on another while the metadata paths had gone flat. The bytes removed are
   unchanged (exactly `u8::is_ascii_whitespace`), checked against the original filter
-  over every byte value. Interleaved A/B, Apple M4, against the master with the boundary
-  fix: full parse **0.830 -> 0.281 ms**, `parse_email_tree` 0.820 -> 0.271 ms,
-  `parse_many` (8 x 767 KiB) 6.57 -> 2.18 ms; metadata paths unchanged, as they decode
-  nothing. Against the master before either change the default path is 1.094 -> 0.281 ms.
+  over every byte value. Gate on the PR, median of three interleaved rounds on the CI
+  runner (AMD EPYC 7763), against the master with the boundary fix: full parse
+  **1.432 -> 0.575 ms**, `parse_email_tree` 1.419 -> 0.556 ms, `parse_many` (8 x 767 KiB)
+  11.29 -> 4.48 ms; metadata paths unchanged, as they decode nothing; the cross-library
+  table now reads 25x over mail-parser and 34x over the stdlib. An Apple M4 measured
+  0.830 -> 0.281 ms for the same pair, and 1.094 -> 0.281 ms against the master before
+  either change.
 - **The MIME boundary search is now `memchr::memmem`** instead of a byte-by-byte scan,
   through a patched copy of `mailparse` 0.16.1 in `vendor/mailparse` (upstream as
   [staktrace/mailparse#142](https://github.com/staktrace/mailparse/pull/142); see
