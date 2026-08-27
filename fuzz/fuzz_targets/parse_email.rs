@@ -2,12 +2,17 @@
 //!
 //! Invariants asserted on arbitrary input:
 //!
-//! 1. **No panic.** A panic reaching the FFI boundary is a crash in the host
-//!    process, so for a library that parses attacker-controlled mail this is the
-//!    invariant that matters most. libFuzzer treats any panic as a finding.
+//! 1. **No panic.** Still the invariant that matters most, though not for the
+//!    reason first written here: a panic never crashed the host process -- PyO3
+//!    catches it -- and since #162 the binding converts it to a `ParseError`.
+//!    What a panic costs is a message parsed as garbage instead of parsed, so
+//!    finding one here is finding it before a mail pipeline does. libFuzzer
+//!    treats any panic as a finding.
 //! 2. **Determinism.** The same bytes parse to the same result twice, compared
-//!    over every field via `canonical` -- which sorts the header map, because its
-//!    iteration order is randomised and is not part of the parse result.
+//!    over every field via `canonical`, headers **in order**. This target's first
+//!    run failed here, on a header map whose iteration order was randomised per
+//!    instance -- a real bug (#157), not a flawed check. Now that the core keeps
+//!    wire order, an ordering regression is a finding rather than noise.
 //! 3. **Bounded output.** Decoded output stays within a generous multiple of the
 //!    input, so no input can make the parser amplify its way through memory.
 
@@ -83,7 +88,24 @@ fn total_output_bytes(mail: &mail_parser::Mail) -> usize {
     bodies + attachments + headers + mail.subject.len() + mail.date.len()
 }
 
+/// Input that makes this target panic on purpose.
+///
+/// The scheduled deep run is supposed to turn a crasher into an artifact and a
+/// filed issue, and #102 asks for that path to be verified rather than trusted.
+/// Verifying it needs a crash on demand, and the whole point of the harness is
+/// that no known input produces one -- so this provides it.
+///
+/// Dispatching the deep-fuzz workflow with `inject_canary` writes these bytes
+/// into the corpus, and libFuzzer runs corpus inputs first. Nothing else reaches
+/// it: a 32-byte magic string is far outside what random mutation finds, and
+/// nothing in the seed corpus resembles it.
+const CANARY: &[u8] = b"FMP_FUZZ_CANARY_DO_NOT_REPORT_42";
+
 fuzz_target!(|data: &[u8]| {
+    if data == CANARY {
+        panic!("fuzz canary: this crash is a deliberate test of the reporting path");
+    }
+
     let first = mail_parser::parse_email(data);
     let second = mail_parser::parse_email(data);
 
