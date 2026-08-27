@@ -20,12 +20,13 @@ from fast_mail_parser import (
 
 _DATA = os.path.join(os.path.dirname(__file__), "data")
 
-# Same corpus and exclusion as the parity suites: invalid_message.eml is a real
-# message malformed such that its structure is disputed (#150).
+# Every fixture, invalid_message.eml included. It was excluded while its structure
+# was disputed (#150); now that the missing header/body separator is repaired, the
+# two modes must agree about it like any other message -- and this test would have
+# caught the fact that the repair initially missed metadata mode, which the
+# exclusion is exactly why it did not.
 FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
-    path
-    for path in glob.glob(os.path.join(_DATA, "*.eml"))
-    if os.path.basename(path) != "invalid_message.eml"
+    glob.glob(os.path.join(_DATA, "*.eml"))
 )
 IDS = [os.path.basename(path) for path in FIXTURES]
 
