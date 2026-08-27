@@ -315,11 +315,12 @@ The mode is uniform across the batch, which is what lets it pick the slot type;
 `ParseError` instances still occupy failed slots, and `raise_on_error`, `threads`
 and input order behave exactly as in the default mode.
 
-On the attachment-heavy fixture, a batch of 8 × 767 KiB with `threads=1`:
-`mode="full"` 8.96 ms, `mode="metadata"` 2.94 ms — **3.0x**, the same ratio the
-single-message mode gets, now available to the batch. On 2000 × 0.8 KB it is
-2.80 ms against 3.04 ms: small messages are mostly headers, so there is little
-decoding to skip, and the mode neither helps nor hurts much.
+On the attachment-heavy fixture, a batch of 8 × 767 KiB with `threads=1`, median
+of three interleaved rounds on the CI runner: `mode="full"` 16.16 ms,
+`mode="metadata"` 4.68 ms — **3.5x**, the same ratio the single-message mode gets,
+now available to the batch. On 2000 × 0.8 KB it is 4.11 ms against 4.67 ms — a
+1.14x edge, because small messages are mostly headers and there is little
+decoding to skip.
 
 `strict=True` with `mode="metadata"` raises `ValueError`, as it does on
 `parse_email` — a mode that never reads the bodies cannot promise nothing in them
@@ -503,8 +504,9 @@ data = pdf.content            # decoded here, and only this one
 That is the difference between the two — lazy mode keeps a copy of every leaf so
 it can decode one later, metadata mode keeps none and is the cheaper sweep.
 
-On the attachment-heavy fixture (767 KiB): full tree 1.10 ms, `mode="lazy"` with
-nothing read 0.38 ms, `mode="metadata"` 0.37 ms — **~2.9x**.
+On the attachment-heavy fixture (767 KiB), median of three interleaved rounds on
+the CI runner: full tree 2.02 ms, `mode="lazy"` with nothing read 0.61 ms,
+`mode="metadata"` 0.58 ms — **3.3x** and **3.5x**.
 
 Two things to know:
 

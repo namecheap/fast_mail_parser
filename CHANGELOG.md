@@ -16,17 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`parse_many(payloads, mode="metadata")`** is the mailbox sweep the mode was
     built for. The batch API removes per-message overhead (#96: ~12x at
     2000 × 0.8 KB) and metadata mode removes the decoding (#97: ~3x on an
-    attachment-heavy message); they now compose. Measured on the 767 KiB fixture,
-    8 messages, `threads=1`: full 8.96 ms, metadata 2.94 ms — **3.0x**, the same
-    ratio the single-message mode gets. On 2000 × 0.8 KB it is 2.80 ms against
-    3.04 ms, because small messages are mostly headers and there is little
-    decoding to skip.
+    attachment-heavy message); they now compose. Median of three interleaved
+    rounds on the CI runner, 767 KiB fixture, 8 messages, `threads=1`: full
+    16.16 ms, metadata 4.68 ms — **3.5x**, the same ratio the single-message mode
+    gets. On 2000 × 0.8 KB it is 4.11 ms against 4.67 ms, a 1.14x edge, because
+    small messages are mostly headers and there is little decoding to skip.
   - **`parse_email_tree(payload, mode="lazy")`** is the forensics case: walk the
     structure of a large message and decode the one part you want. A full-mode
     tree decodes every leaf, which is the wrong bill for exactly what the tree is
     best at. `mode="metadata"` decodes nothing *and retains nothing*. On the same
-    fixture: full tree 1.10 ms, lazy with nothing read 0.38 ms, metadata
-    0.37 ms — **~2.9x**.
+    fixture and runner: full tree 2.02 ms, lazy with nothing read 0.61 ms,
+    metadata 0.58 ms — **3.3x** and **3.5x**.
   - **Two new node types, `PyLazyMimePart` and `PyMimePartMetadata`**, rather than
     a wider `PyMimePart`. `PyMimePart.content` is `bytes | None` and its `None`
     *means* "this node is a `multipart/*` container"; a mode where it also meant
@@ -68,12 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     implementation was already duck-typed; the stub now says so with a
     value-restricted `TypeVar`, which is non-breaking — walking a `PyMimePart`
     still yields `PyMimePart`.
-  - **Measured, not assumed.** Interleaved A/B against `master`, three rounds a
-    side: worst treatment delta +0.5% against a 4.4% control noise floor, with
-    `parse_message` at -1.2% and `parse_many` at -0.2%. The default paths are
-    answered in the first lines of their entry points and are byte-for-byte what
-    they were; every new binding function carries `#[inline(never)]`, the two error
-    constructors are the existing `#[cold]` ones, and each new mode pair shares one
+  - **Measured, not assumed.** The CI benchmark gate's interleaved A/B against
+    `origin/master`: worst treatment delta **+0.8%** against an 8.2% control noise
+    floor, `parse_message` +0.5%, `parse_many` -0.2%, `parse_tree` +0.7%,
+    `parse_metadata` -0.0% — no significant difference, and positive means the
+    base was the slower side. The default paths are answered in the first lines of
+    their entry points and are byte-for-byte what they were; every new binding
+    function carries `#[inline(never)]`, the two error constructors are the
+    existing `#[cold]` ones, and each new mode pair shares one
     `catch_panics` call site. #99, #100, #135 and #180 are four records of code
     that never executes costing this hot path 15-96%.
   - The batch scheduler is now shared rather than copied: `parse_many_as` takes the
