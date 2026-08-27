@@ -89,27 +89,6 @@ jobs:
           key: fuzz-corpus-v2-parse_email-${{ github.run_id }}
           restore-keys: fuzz-corpus-v2-parse_email-
 
-      - name: Evict any canary left in the corpus
-        run: |
-          # The canary is planted INTO the corpus, and the corpus is cached, so a
-          # drill used to leave it there for every later run to trip over -- each
-          # one crashing within seconds and filing a crasher issue for a crash
-          # that was staged on purpose. Exactly what happened on the first real
-          # run after the drills.
-          #
-          # Matched by content rather than by the filename the drill uses, so a
-          # copy under any other name goes too.
-          mkdir -p fuzz/corpus/parse_email
-          found=$(grep -rlF 'FMP_FUZZ_CANARY_DO_NOT_REPORT_42' \
-            fuzz/corpus/parse_email 2>/dev/null || true)
-          if [ -n "$found" ]; then
-            echo "::warning::evicting canary inputs left in the restored corpus"
-            echo "$found" | while read -r stale; do
-              echo "  removing $stale"
-              rm -f "$stale"
-            done
-          fi
-
       - name: Seed the corpus from the test fixtures
         run: |
           mkdir -p fuzz/corpus/parse_email
@@ -119,18 +98,19 @@ jobs:
                "$(find fuzz/corpus/parse_email -type f | wc -l) after seeding"
           echo "corpus_inherited=$inherited" >> "$GITHUB_ENV"
 
-      - name: Plant the canary
-        if: inputs.inject_canary
-        run: |
-          # Exercises the crash path on demand. The target panics on exactly
-          # these bytes; see CANARY in fuzz/fuzz_targets/parse_email.rs.
-          printf '%s' 'FMP_FUZZ_CANARY_DO_NOT_REPORT_42' \
-            > fuzz/corpus/parse_email/zz-canary
-          echo "::warning::canary planted -- this run is expected to crash"
-
       - name: Fuzz parse_email
         id: fuzz
+        env:
+          # Arms the deliberate panic in the target, for a drill of the reporting
+          # path. Passed through the environment rather than as a magic input:
+          # libFuzzer learns the operands of comparisons against input, so an
+          # input-triggered canary is something it finds -- and finds within
+          # seconds, twice.
+          FMP_FUZZ_CANARY: ${{ inputs.inject_canary && '1' || '' }}
         run: |
+          if [ -n "${FMP_FUZZ_CANARY:-}" ]; then
+            echo "::warning::canary armed -- this run is expected to crash"
+          fi
           # No -seed: each run should explore somewhere new.
           #
           # The crash is recorded as an output instead of failing the step here,
@@ -149,9 +129,8 @@ jobs:
       - name: Save the accumulated corpus
         # Also on failure: the inputs found before the crash are worth keeping.
         #
-        # Never from a drill, though. A drill crashes within seconds, so its
-        # corpus has nothing in it worth keeping, and saving one is how the canary
-        # got into the cache in the first place.
+        # Never from a drill, though: it crashes on its first input, so its
+        # corpus holds nothing worth keeping.
         if: always() && inputs.inject_canary != true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
