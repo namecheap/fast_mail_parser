@@ -736,6 +736,22 @@ pub fn parse_email(
     mode: &str,
     strict: bool,
 ) -> PyResult<Py<PyAny>> {
+    // `strict` is answered first and then forgotten, so that everything below
+    // this line is byte-for-byte the revision before strict mode existed.
+    //
+    // That is not caution, it is a measurement. Threading the flag through
+    // `parse_email_inner` cost **+47% on every entry point and +96% on metadata
+    // mode**; routing metadata through a shared slow-path helper still cost +29%
+    // and +96%. Neither did any work: `parse_email_tree` and `parse_many`
+    // regressed by the same amount with their code untouched. Bisected with
+    // dispatched runs against one base, the warning machinery in the core
+    // measured +0.9% alone, the `ParseWarning` pyclass +0.3% alone, and the two
+    // `#[cold]` helpers +0.6% merely by existing. Only the plumbing was
+    // expensive, so there is none.
+    if strict {
+        return parse_email_strict_mode(py, payload, mode);
+    }
+
     // The default path is kept as close to what it was before the mode existed
     // as possible: one comparison, then the same closure. Everything else lives
     // behind an `inline(never)` boundary below.
@@ -744,80 +760,50 @@ pub fn parse_email(
     // in one arm, which drags in the formatting machinery -- inside the closure
     // that `catch_panics` inlines cost the hot path 30%, for the second time in
     // one day (the first was #180). Code that never runs is not free here.
-    //
-    // `strict` joins the condition rather than the closure, for the third time in
-    // one day: threading it through `parse_email_inner` instead -- one bool
-    // parameter and one branch calling a `#[cold]` helper -- cost **47% on every
-    // entry point and 96% on metadata mode**, measured against this base. Nothing
-    // in the core was to blame: the same warning machinery there measured +0.9%
-    // on its own. What matters is that this closure and `parse_email_inner` stay
-    // byte-for-byte what they were, so strict mode is a different path rather
-    // than an extra argument on this one.
-    if mode == "full" && !strict {
+    if mode == "full" {
         return catch_panics(|| Ok(Py::new(py, parse_email_inner(py, payload)?)?.into_any()));
     }
 
-    parse_email_other_mode(py, payload, mode, strict)
-}
-
-/// Which non-default thing `parse_email` was asked for.
-///
-/// Resolved before the closure below rather than inside it, so the slow paths
-/// share a single `catch_panics` instantiation. The count matters: #99 records a
-/// third instantiation costing 24% by stopping the one wrapping `parse_email`
-/// from being inlined.
-enum SlowPath {
-    StrictFull,
-    Metadata,
+    parse_email_other_mode(py, payload, mode)
 }
 
 #[inline(never)]
-fn parse_email_other_mode(
-    py: Python<'_>,
-    payload: Py<PyAny>,
-    mode: &str,
-    strict: bool,
-) -> PyResult<Py<PyAny>> {
-    let path = match (mode, strict) {
-        ("full", _) => SlowPath::StrictFull,
-        ("metadata", false) => SlowPath::Metadata,
-        // `strict` is refused here rather than ignored, and rather than
-        // supported. Its promise is that nothing lossy got through, and metadata
-        // mode never reads a body -- so the strongest thing it could honestly
-        // say is "nothing in the headers was repaired". A flag that means
-        // something weaker than it says is worse than a flag that is unavailable,
-        // which is the same reasoning that leaves `text_plain` absent from this
-        // mode rather than empty.
-        ("metadata", true) => return Err(strict_needs_full_mode()),
-        (other, _) => return Err(unknown_mode(other)),
-    };
-
-    catch_panics(|| parse_email_slow(py, payload, path))
-}
-
-/// Every path `parse_email`'s default branch does not take.
-///
-/// Cold, and marked so, for the reason the whole file repeats: `parse_email`'s
-/// default path must not pay for this existing.
-#[inline(never)]
-fn parse_email_slow(py: Python<'_>, payload: Py<PyAny>, path: SlowPath) -> PyResult<Py<PyAny>> {
-    match path {
-        SlowPath::StrictFull => parse_email_strict(py, payload),
-        SlowPath::Metadata => parse_email_metadata_mode(py, payload),
+fn parse_email_other_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+    match mode {
+        "metadata" => catch_panics(|| parse_email_metadata_mode(py, payload)),
+        other => Err(unknown_mode(other)),
     }
 }
 
-/// `strict=True` on the full parse: the same parse, then a verdict on it.
+/// `strict=True`: the same parse, and then a verdict on what it repaired.
 ///
-/// Reads `PyMail.warnings` rather than the core's list so `parse_email_inner`
-/// keeps the signature and the body it has on the default path.
+/// A path of its own rather than a flag on the one above, for the measured
+/// reason recorded there. It costs a second `catch_panics` instantiation, which
+/// #99 says is not free either -- but that function carries `#[inline(always)]`
+/// for exactly this, and an instantiation is cheaper than a hot-path argument.
+///
+/// Only `mode="full"` can honour it. Metadata mode never reads the bodies, so the
+/// strongest thing it could say is "nothing in the *headers* was repaired", and a
+/// flag meaning something weaker than it says is worse than one that is
+/// unavailable -- the same reasoning that leaves `text_plain` absent from that
+/// mode rather than empty.
+#[cold]
 #[inline(never)]
-fn parse_email_strict(py: Python<'_>, payload: Py<PyAny>) -> PyResult<Py<PyAny>> {
-    let mail = parse_email_inner(py, payload)?;
-    if !mail.warnings.is_empty() {
-        return Err(strict_rejection(&mail.warnings));
+fn parse_email_strict_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> PyResult<Py<PyAny>> {
+    if mode == "metadata" {
+        return Err(strict_needs_full_mode());
     }
-    Ok(Py::new(py, mail)?.into_any())
+    if mode != "full" {
+        return Err(unknown_mode(mode));
+    }
+
+    catch_panics(|| {
+        let mail = parse_email_inner(py, payload)?;
+        if !mail.warnings.is_empty() {
+            return Err(strict_rejection(&mail.warnings));
+        }
+        Ok(Py::new(py, mail)?.into_any())
+    })
 }
 
 #[cold]
