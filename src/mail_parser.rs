@@ -90,11 +90,11 @@ pub(crate) struct Warning {
     pub(crate) detail: String,
 }
 
-// The three `warn_*` helpers below are `#[cold]` and `#[inline(never)]`, which
-// is load-bearing rather than decoration. Each one formats a message, and a
-// `format!` inlined into the per-part loop is exactly the shape that cost ~30%
-// on the hot path in #135 while never executing. Keeping the formatting out of
-// line leaves the callers with a branch and a call they do not take.
+// Every `warn_*` helper below is `#[cold]` and `#[inline(never)]`, which is
+// load-bearing rather than decoration. Each one builds a message, and a `format!`
+// inlined into the per-part loop is exactly the shape that cost ~30% on the hot
+// path in #135 while never executing. Keeping that out of line leaves the callers
+// with a branch and a call they do not take.
 
 #[cold]
 #[inline(never)]
@@ -751,10 +751,10 @@ fn parse_addresses(
 
 /// Parse one named address header from a message's first occurrence of it.
 ///
-/// A thin wrapper so the five call sites in `Mail::new` stay one short line
-/// each: the header lookup has to happen inside the same expression as the
-/// parse, because `get_first_header` borrows the temporary `Headers` that
-/// `get_headers()` builds.
+/// A thin wrapper so its ten call sites stay one short line each: the header
+/// lookup has to happen inside the same expression as the parse, because
+/// `get_first_header` borrows the temporary `Headers` that `get_headers()`
+/// builds, so the two cannot be split across statements.
 fn header_addresses(
     mail: &ParsedMail<'_>,
     name: &'static str,

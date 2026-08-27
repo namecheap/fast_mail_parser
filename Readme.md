@@ -430,7 +430,8 @@ An exception is not the only way a parse can go wrong. Real mail is messier than
 "valid" or "invalid", and this parser has always been best-effort in the middle:
 a charset label it cannot resolve is decoded as us-ascii, an address header it
 cannot parse yields no mailboxes, a `Date` it cannot read leaves `date_parsed`
-at `None`. Every one of those returns a result. None of them used to say so.
+at `None`, and a header block that was never closed is resynced before parsing.
+Every one of those returns a result. None of them used to say so.
 
 `warnings` says so:
 
@@ -468,6 +469,7 @@ The kinds emitted today:
 | `charset-fallback` | The part declared a charset label that is not recognised, so its bytes were decoded as us-ascii — which turns every non-ASCII byte into `U+FFFD`. | The decoded text, lossy exactly where the replacement characters are. |
 | `address-unparseable` | An address header did not parse (mailparse rejects an address with no `@`), so no mailboxes were reported for it. | `to`/`cc`/… empty, or `from_` as `None`, with the raw value still in `headers`. |
 | `date-unparseable` | The `Date` header is not a date any parser here recognises. | `date` as the raw header string; `date_parsed` is `None`. |
+| `unterminated-header-block` | The header block was not closed by an empty line (RFC 5322 2.1), so the separator was restored before parsing — the stdlib calls this `MissingHeaderBodySeparatorDefect`. | The whole message, parts included. Left unrepaired this used to lose a body part silently ([#150](https://github.com/namecheap/fast_mail_parser/issues/150)). |
 
 `part_path` is a locator into the returned `PyMail`, not MIME tree coordinates.
 That is deliberate: `parse_email` hands back a flat projection, so a coordinate
@@ -510,6 +512,7 @@ except DecodeError:
 | `charset-fallback` | `DecodeError` |
 | `date-unparseable` | `DecodeError` |
 | `address-unparseable` | `HeaderParseError` |
+| `unterminated-header-block` | `MimeStructureError` |
 
 Strict mode adds rejections; it never reclassifies. A message that parses
 cleanly parses identically in both modes, and a message that fails outright
@@ -520,14 +523,18 @@ counts them all — parse without `strict=True` to read the rest.
 becomes that slot's exception rather than costing you the batch; add
 `raise_on_error=True` to fail the whole batch on the first repair.
 
-**What is not reported yet.** A broken quoted-printable body is repaired
-silently by the decoder rather than reported by it, so there is nothing this
-crate can observe without decoding twice — that is why there is no
-`transfer-decode-lossy` kind. Neither is the lost body part of
-[#150](https://github.com/namecheap/fast_mail_parser/issues/150): the repair for
-that message is what can say a repair happened, so its kind belongs with the
-fix. The channel exists so that both can be reported when they land, instead of
-each inventing its own way to be noticed.
+`strict=True` requires `mode="full"`. Combining it with `mode="metadata"` raises
+`ValueError` rather than being ignored: that mode never reads the bodies, so the
+strongest thing it could say is "nothing in the headers was repaired", and a flag
+that means something weaker than it says is worse than one that is unavailable.
+Metadata mode has no `warnings` attribute for the same reason — the same
+reasoning that leaves `text_plain` absent from it rather than empty.
+
+**What is not reported.** A broken quoted-printable body is repaired silently by
+the decoder rather than reported by it — mailparse decodes quoted-printable in
+its robust mode — so there is nothing this crate can observe without decoding
+twice. That is why there is no `transfer-decode-lossy` kind, and why the honest
+place to say so is here rather than in a list a reader would take as complete.
 
 ### Bodies vs. attachments
 

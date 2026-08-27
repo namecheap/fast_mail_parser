@@ -25,6 +25,7 @@ import pytest
 from fast_mail_parser import (
     DecodeError,
     HeaderParseError,
+    MimeStructureError,
     ParseError,
     ParseWarning,
     parse_email,
@@ -90,6 +91,15 @@ BAD_ADDRESS = b"Subject: addresses\r\nTo: not-an-address\r\n\r\nbody\r\n"
 # nothing rather than a bogus 1970 instant.
 BAD_DATE = b"Subject: dates\r\nDate: not a date\r\n\r\nbody\r\n"
 
+# The header block runs straight into the body with no blank line between them,
+# so the parser has to restore the separator before mailparse sees it (#150).
+# The colonless line is the body, and it is recovered rather than eaten.
+UNTERMINATED_HEADERS = b"Subject: no separator\r\nthis line is the body\r\n"
+
+# The real thing: a Mailchimp-delivered message with the same defect, whose first
+# MIME part used to disappear because of it.
+MALFORMED_FIXTURE = os.path.join(DATA, "invalid_message.eml")
+
 # One message that trips three separate repairs, to pin the order they are
 # recorded in: header-level repairs as the headers are read, then the body parts.
 EVERYTHING_BROKEN = (
@@ -122,12 +132,11 @@ def _pairs(payload: bytes) -> list[tuple[str, str]]:
 
 # --- the empty-list contract -------------------------------------------------
 
-# `invalid_message.eml` is excluded deliberately. It is the #150 fixture: a real
-# message whose header block is never terminated, so its first body part is
-# silently lost. Today that loss produces no warning, which is precisely the gap
-# this channel exists to close -- the repair for #150 is what will add the kind
-# that fires here, and pinning `warnings == []` for it would then be a test
-# fighting its own fix.
+# `invalid_message.eml` is the one fixture excluded, and #100 asks for exactly
+# that to be documented rather than quietly dropped: it legitimately warns. It is
+# the #150 message, whose header block is never terminated, so the parser repairs
+# the payload before mailparse reads it -- and now says so. Its warning is
+# asserted directly further down instead of being averaged into this sweep.
 CORPUS = sorted(
     path
     for path in glob.glob(os.path.join(DATA, "*.eml"))
@@ -212,6 +221,55 @@ def test__part_path_names_the_slot_the_content_landed_in():
     warning = mail.warnings[0]
     field, index = warning.part_path.rstrip("]").split("[")
     assert getattr(mail, field)[int(index)].startswith("second")
+
+
+# --- unterminated-header-block -----------------------------------------------
+
+
+def test__a_repaired_header_block_is_reported():
+    mail = parse_email(UNTERMINATED_HEADERS)
+
+    assert _pairs(UNTERMINATED_HEADERS) == [("unterminated-header-block", "")]
+    # The repair is what saves the body; the warning is what makes the repair
+    # visible. Both are asserted, because either alone would be a half-fix.
+    assert mail.subject == "no separator"
+    assert mail.text_plain == ["this line is the body\r\n"]
+
+
+def test__the_150_fixture_warns_and_keeps_both_bodies():
+    with open(MALFORMED_FIXTURE, "rb") as handle:
+        mail = parse_email(handle.read())
+
+    # This is the message the channel was motivated by: before #150 its
+    # text/plain alternative vanished with nothing raised about it. The repair
+    # brought it back; this makes the repair observable.
+    assert [(w.kind, w.part_path) for w in mail.warnings] == [
+        ("unterminated-header-block", ""),
+    ]
+    assert len(mail.text_plain) == 1
+    assert len(mail.text_html) == 1
+
+
+def test__a_terminated_header_block_is_not_a_repair():
+    # The negative case for the same rule: a colonless line in the *body* is
+    # ordinary, and warning about it would make the channel useless.
+    mail = parse_email(
+        b"Subject: intact\r\n\r\na body line with no colon in it\r\n"
+    )
+
+    assert mail.warnings == []
+
+
+def test__the_repair_is_reported_before_the_parse_finds_anything():
+    # The repair happens before mailparse is handed the payload, so it comes
+    # first -- which matters because strict mode reports warnings[0], and the
+    # defect that changed the input is the one worth naming.
+    payload = b"Subject: both\r\nDate: not a date\r\nthis line is the body\r\n"
+
+    assert [w.kind for w in parse_email(payload).warnings] == [
+        "unterminated-header-block",
+        "date-unparseable",
+    ]
 
 
 # --- address-unparseable -----------------------------------------------------
@@ -312,6 +370,10 @@ STRICT_CASES = {
     "charset-fallback": (CHARSET_FALLBACK, DecodeError),
     "address-unparseable": (BAD_ADDRESS, HeaderParseError),
     "date-unparseable": (BAD_DATE, DecodeError),
+    # Structure, not header parsing: what the defect breaks is the boundary
+    # between the header block and the MIME body, and the message reads correctly
+    # once it is restored.
+    "unterminated-header-block": (UNTERMINATED_HEADERS, MimeStructureError),
 }
 
 
@@ -419,3 +481,45 @@ def test__parse_many_agrees_with_parse_email_on_warnings():
     for payload, mail in zip(payloads, batch, strict=True):
         expected = [(w.kind, w.part_path) for w in parse_email(payload).warnings]
         assert [(w.kind, w.part_path) for w in mail.warnings] == expected
+
+
+# --- metadata mode -----------------------------------------------------------
+#
+# `mode="metadata"` (#97) deliberately has no warnings channel, and refuses
+# `strict=True` rather than ignoring it. The reason is the contract: the value of
+# `warnings` is that an empty list means nothing was repaired, and metadata mode
+# never reads a body -- so the strongest thing it could honestly say is "nothing
+# in the headers was repaired". Shipping the same attribute with a weaker
+# guarantee would break the one property it exists to provide. Same reasoning
+# that leaves `text_plain` absent from that mode rather than empty.
+
+
+def test__metadata_mode_has_no_warnings_attribute():
+    metadata = parse_email(CLEAN, mode="metadata")
+
+    assert not hasattr(metadata, "warnings")
+
+
+def test__metadata_mode_refuses_strict():
+    with pytest.raises(ValueError) as raised:
+        parse_email(BAD_DATE, mode="metadata", strict=True)
+
+    # The message has to say why, or the restriction reads as an oversight.
+    assert "mode=" in str(raised.value)
+
+
+def test__metadata_mode_still_parses_a_repaired_message():
+    # The refusal is about `strict`, not about malformed input: metadata mode
+    # reads this message the same as before.
+    metadata = parse_email(BAD_DATE, mode="metadata")
+
+    assert metadata.date == "not a date"
+    assert metadata.date_parsed is None
+
+
+def test__full_mode_accepts_strict_alongside_an_explicit_mode():
+    # `mode="full"` is the default spelled out, so it must behave identically.
+    assert parse_email(CLEAN, mode="full", strict=True).warnings == []
+
+    with pytest.raises(DecodeError):
+        parse_email(BAD_DATE, mode="full", strict=True)

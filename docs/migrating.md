@@ -209,6 +209,13 @@ repaired = parse_email(b"Subject: x\r\nTo: not-an-address\r\n\r\nhi\r\n")
 assert [w.kind for w in repaired.warnings] == ["address-unparseable"]
 assert repaired.to == []                      # best-effort result, unchanged
 assert repaired.headers["To"] == ["not-an-address"]
+
+# Structural repairs are reported the same way. This message never closes its
+# header block, so the separator is restored before parsing -- which is what
+# keeps the body from being swallowed.
+resynced = parse_email(b"Subject: x\r\nthis line is the body\r\n")
+assert [w.kind for w in resynced.warnings] == ["unterminated-header-block"]
+assert resynced.text_plain == ["this line is the body\r\n"]
 ```
 
 Pass `strict=True` when you would rather fail than accept a repair. Each

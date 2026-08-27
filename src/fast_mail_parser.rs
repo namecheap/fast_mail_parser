@@ -937,10 +937,12 @@ fn parse_many_inner(
 /// caps -- an embedded `message/rfc822` counts against the same depth limit as a
 /// multipart nest, so an onion of forwards cannot go deeper than a multipart tree.
 ///
-/// No warnings channel: this API hands back raw part bytes and never
-/// charset-decodes, so it makes none of the repairs `PyMail.warnings` reports.
-/// A tree-shaped channel would want real MIME coordinates, which this traversal
-/// has for free and the flat one does not -- see `ParseWarning.part_path`.
+/// No warnings channel, and no `strict`. It does apply the #150 header/body
+/// separator repair, so there is one repair it could report; what it has no
+/// place to put it is a return type, since `PyMimePart` is a node rather than a
+/// message. A tree-shaped channel is also the one that should carry real MIME
+/// coordinates, which this traversal has for free and the flat one does not --
+/// see `ParseWarning.part_path`. Both are one decision, and not this one.
 #[pyfunction]
 pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
     catch_panics(|| parse_email_tree_inner(py, payload))
