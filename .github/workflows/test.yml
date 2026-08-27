@@ -406,11 +406,17 @@ jobs:
           # must therefore guard itself with a skip.
           compare='${{ steps.base.outputs.compare }}'
           identical='${{ steps.differ.outputs.identical }}'
+          # Interleaving only earns its rounds when there are two sides to
+          # alternate between. With nothing to compare, the absolute floor reads
+          # a single report, so two further rounds would be runner time spent to
+          # produce numbers nothing looks at.
           sides="head"
+          rounds="1"
           if [ "$compare" = "true" ] && [ "$identical" != "true" ]; then
             sides="head base"
+            rounds="1 2 3"
           fi
-          for round in 1 2 3; do
+          for round in $rounds; do
             for side in $sides; do
               echo "::group::round $round — $side"
               "$RUNNER_TEMP/venv-$side/bin/pytest" -q tests/benchmark \
