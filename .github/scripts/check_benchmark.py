@@ -30,9 +30,16 @@ therefore sits inside the between-runner noise band: tight enough to catch a
 real regression means flaking on honest changes, and loose enough not to flake
 means missing the ~26% class of regression that motivated this (see issue #120).
 
-Comparing two builds in the same job cancels that, because both measurements see
-the same CPU in the same thermal state. At 0.3% noise a few-percent threshold is
-meaningful.
+Comparing two builds in the same job cancels most of that, because both
+measurements see the same CPU in the same thermal state. It is not sufficient on
+its own: pairing each build with its own measurement leaves a ~16% artifact from
+the build cycle itself, which on 2026-08-27 reported -0.2% on a real +15.7%
+toolchain regression (#120). The regression check therefore moved to
+``ab_median.py``, which builds both sides first and interleaves the measurements;
+at ~0.3% residual noise a few-percent threshold is meaningful there.
+
+What remains here is the absolute floor, which needs no base revision and catches
+drift a base comparison cannot see -- because the base drifted with it.
 
 The comparison uses each benchmark's *minimum* time, not the mean: the min is
 the cleanest observed run and the least noise-prone metric.
