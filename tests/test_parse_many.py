@@ -65,13 +65,11 @@ def test__accepts_mixed_str_and_bytes():
 
 _DATA = os.path.join(os.path.dirname(__file__), "data")
 
-# Every real fixture. invalid_message.eml is excluded because the two parsers
-# disagree about it -- it is malformed in a way both accept but interpret
-# differently -- not because it fails to parse; it does parse.
+# Every real fixture, invalid_message.eml included: it was excluded while the two
+# parsers still disagreed about it (#150), and the batch path has to reproduce the
+# single-message result on a repaired message as exactly as on any other.
 CORPUS = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
-    path
-    for path in glob.glob(os.path.join(_DATA, "*.eml"))
-    if os.path.basename(path) != "invalid_message.eml"
+    glob.glob(os.path.join(_DATA, "*.eml"))
 )
 
 
@@ -135,8 +133,8 @@ def test__chunking_a_batch_changes_nothing():
 
 def test__an_unparseable_payload_lands_in_its_own_slot_amid_real_messages():
     # BROKEN rather than tests/data/invalid_message.eml: despite its name that
-    # fixture parses successfully (see #150), so it cannot
-    # stand in for a parse failure.
+    # fixture parses successfully -- and since #150 it parses correctly -- so it
+    # cannot stand in for a parse failure.
     good = open(CORPUS[0], "rb").read()
     payloads = [good, BROKEN, good]
 

@@ -9,6 +9,10 @@ what it should do. Each one pins an open bug so that:
 
 Every test here names its issue. When that issue is closed, the test should be
 rewritten to assert the corrected behaviour, or deleted.
+
+#150 is the first to have been fixed, so its section below is the exception the
+rule above describes: those tests assert the recovered behaviour and stay here as
+the regression suite for the fix.
 """
 
 import email
@@ -17,7 +21,7 @@ import os
 
 import pytest
 
-from fast_mail_parser import parse_email
+from fast_mail_parser import parse_email, parse_email_tree, walk
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "data", "invalid_message.eml")
 
@@ -31,7 +35,7 @@ def malformed() -> bytes:
         return handle.read()
 
 
-# --- #150: unterminated header block swallows the first part ------------------
+# --- #150: an unterminated header block is repaired ---------------------------
 #
 # `invalid_message.eml` is a real Mailchimp-delivered message, bare-LF
 # throughout, whose header block is never terminated by a blank line. A folded
@@ -39,91 +43,139 @@ def malformed() -> bytes:
 # followed directly by the FIRST MIME boundary. The stdlib has a name for this
 # defect: MissingHeaderBodySeparatorDefect.
 #
-# So a parser scanning for the separator keeps consuming header lines -- 73 of
-# them, up to the first genuinely blank line. Reconstructing that block by hand
-# gives 30 distinct colon-bearing keys plus one colonless line (the boundary,
-# kept as a key with no value) = the 31 keys we report, which is what confirms
-# the mechanism rather than merely fitting it.
+# Left as it arrived, that message cost us the first part. mailparse stops
+# parsing headers only at a blank line and accepts a colonless line as a field
+# name, so it consumed 73 lines as headers -- 31 keys, one of them the boundary,
+# and two Content-Type values, the message's own and the part's. The boundary
+# that opened the text/plain part having been eaten, that part's content ended up
+# before the NEXT boundary, which makes it multipart preamble: discarded by
+# definition. The text/html part was delimited normally and survived, so the
+# message came back looking populated with its plain-text alternative silently
+# gone.
 #
-# Two consequences, both pinned below. The boundary that opened the text/plain
-# part was eaten as a header, so that part's content ends up BEFORE the next
-# boundary -- making it multipart preamble, which is discarded by definition.
-# The second boundary is intact, so the text/html part survives: the loss is
-# partial, which is what makes it easy to miss. And the lines absorbed after the
-# boundary are the first part's OWN headers, so the top-level header map ends up
-# carrying two Content-Type values.
-#
-# Note for anyone reading this looking for a detection signal: "multipart with
-# zero parts" does NOT fire here, because the html part parses fine.
+# `repair_missing_separator` in src/mail_parser.rs now restores the separator the
+# sender omitted, by the stdlib's rule: a non-continuation line in the header
+# block that cannot be a header field ends the header block, and the body starts
+# there. The tests below assert the recovery, the last three against the stdlib
+# rather than against numbers written down here.
 
 
 def test__150_malformed_message_still_parses(malformed: bytes):
-    # It does not raise. That is the whole problem: the failure is silent.
     mail = parse_email(malformed)
 
-    assert mail.subject, "expected the headers before the break to survive"
+    assert mail.subject == "Your June OpenShift Update"
 
 
-def test__150_only_the_first_part_is_lost(malformed: bytes):
+def test__150_the_lost_part_is_recovered(malformed: bytes):
     mail = parse_email(malformed)
 
-    # WRONG, pinned: the message has a text/plain part and we report none,
-    # because the boundary that opened it was eaten as a header.
-    assert mail.text_plain == []
-    # The second boundary survived, so the html part is recovered. The loss is
-    # partial, which is what makes it easy to miss.
+    # Both alternatives, which is what the message actually contains.
+    assert len(mail.text_plain) == 1
     assert len(mail.text_html) == 1
+    assert "OpenShift" in mail.text_plain[0]
 
 
-def test__150_boundary_is_reported_as_a_header_key(malformed: bytes):
+def test__150_boundary_is_not_a_header_key(malformed: bytes):
     mail = parse_email(malformed)
 
-    # WRONG, pinned: a boundary delimiter is not a header field.
-    assert f"--{BOUNDARY}" in mail.headers
+    assert f"--{BOUNDARY}" not in mail.headers
+
+    # The rule rather than the fixture: no key may be `--` + the boundary this
+    # message declares. That signature can only mean unterminated headers.
+    content_type = mail.headers["Content-Type"][0]
+    declared = content_type.split('boundary="')[1].split('"')[0]
+    assert f"--{declared}" not in mail.headers
 
 
-def test__150_part_headers_leak_into_the_top_level_map(malformed: bytes):
+def test__150_part_headers_stay_out_of_the_top_level_map(malformed: bytes):
     mail = parse_email(malformed)
 
-    # WRONG, pinned: the two lines absorbed after the swallowed boundary are the
-    # first part's own headers, so the message appears to declare Content-Type
-    # twice -- the real multipart/alternative one and the part's text/plain.
-    # A well-formed message has exactly one, which makes this a second cheap
-    # detection signal. It only became visible when headers started keeping
-    # every value (#123); before that the part's value silently overwrote the
-    # multipart one.
-    assert len(mail.headers["Content-Type"]) == 2
-    assert any("multipart/alternative" in v for v in mail.headers["Content-Type"])
-    assert any("text/plain" in v for v in mail.headers["Content-Type"])
+    # The two lines after the swallowed boundary are the first part's own
+    # headers. A message declares Content-Type once.
+    assert len(mail.headers["Content-Type"]) == 1
+    assert "multipart/alternative" in mail.headers["Content-Type"][0]
 
 
-def test__150_the_stdlib_recovers_what_we_lose(malformed: bytes):
-    # The contrast is the argument that this is our bug and not merely bad input:
-    # the same bytes give the stdlib the part we drop.
+def test__150_the_second_defect_is_left_as_it_is(malformed: bytes):
+    # The message carries two defects and only one of them loses data. The
+    # injected ` hello` line is a legal fold, so it still folds into the header
+    # above it -- as it does for the stdlib, which reads the same value.
+    mail = parse_email(malformed)
+
+    assert mail.headers["MIME-Version"] == ["1.0 hello"]
+
+
+def test__150_the_header_set_matches_the_stdlib(malformed: bytes):
     message = email.message_from_bytes(malformed, policy=email.policy.default)
 
-    bodies = [
-        part
+    mail = parse_email(malformed)
+
+    assert set(mail.headers) == set(dict(message.items()))
+
+
+def test__150_the_recovered_body_matches_the_stdlib(malformed: bytes):
+    message = email.message_from_bytes(malformed, policy=email.policy.default)
+    theirs = [
+        part.get_content()
         for part in message.walk()
         if part.get_content_type() == "text/plain"
         and part.get_content_disposition() != "attachment"
     ]
 
-    assert len(bodies) == 1
-    assert f"--{BOUNDARY}" not in dict(message.items())
+    ours = parse_email(malformed).text_plain
+
+    # Line endings aside, which differ here for the reason they differ on every
+    # fixture: the stdlib normalises body line endings to LF and this library
+    # returns the wire form. See docs/compatibility.md.
+    assert [text.replace("\r\n", "\n") for text in ours] == theirs
 
 
-def test__150_a_header_key_matches_the_declared_boundary(malformed: bytes):
-    # The signal a fix could detect cheaply and exactly: a header key equal to
-    # `--<the boundary this message declares>` can only mean the header block was
-    # never terminated. Well-formed mail cannot produce it.
-    mail = parse_email(malformed)
+def test__150_the_tree_agrees_with_the_flat_view(malformed: bytes):
+    # Both views parse the same payload through the same repair, so the structure
+    # one reports cannot contradict the bodies the other returns.
+    theirs = email.message_from_bytes(malformed, policy=email.policy.default)
 
-    content_type = mail.headers["Content-Type"][0]
-    assert content_type.startswith("multipart/")
+    ours = [part.content_type for part in walk(parse_email_tree(malformed))]
 
-    declared = content_type.split('boundary="')[1].split('"')[0]
-    assert f"--{declared}" in mail.headers, (
-        "the unterminated-header signature: the declared boundary appears as a "
-        "header key"
+    assert ours == [part.get_content_type() for part in theirs.walk()]
+
+
+# The repair fires only while scanning the header block, which ends at the first
+# blank line -- so a body line without a colon, which is most body lines, can
+# never reach it. These pin that boundary.
+
+
+def test__150_a_terminated_header_block_is_untouched():
+    mail = parse_email(
+        b"Subject: intact\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"\r\n"
+        b"a body line with no colon in it\r\n"
     )
+
+    assert mail.subject == "intact"
+    assert mail.text_plain == ["a body line with no colon in it\r\n"]
+
+
+def test__150_the_rule_is_the_colon_and_not_the_boundary():
+    # Nothing MIME-specific about it: the header block ends at the first line
+    # that cannot be a header field, whatever that line happens to say.
+    mail = parse_email(b"Subject: no separator\nthis line is the body\n")
+
+    assert mail.subject == "no separator"
+    assert mail.text_plain == ["this line is the body\n"]
+
+
+def test__150_a_folded_continuation_does_not_end_the_header_block():
+    # A continuation line carries no colon of its own. Ending the header block at
+    # one would be a new bug in the same place as the old one.
+    mail = parse_email(
+        b"Subject: folded\r\n"
+        b"X-Long: first\r\n"
+        b" second\r\n"
+        b"\r\n"
+        b"body\r\n"
+    )
+
+    assert mail.headers["X-Long"] == ["first second"]
+    assert mail.text_plain == ["body\r\n"]

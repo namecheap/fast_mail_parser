@@ -28,14 +28,14 @@ _DATA = os.path.join(os.path.dirname(__file__), "data")
 
 # The generated RFC corpus plus the hand-written fixtures, which are closer to
 # real-world mail and so likelier to surface a genuine divergence.
-# invalid_message.eml is excluded, but NOT because it fails to parse -- despite
-# the name, both parsers accept it. It is a real-world message malformed such
-# that the two disagree on the body and the header set, which is a documented
-# divergence to classify rather than a fixture to compare blindly.
+#
+# Nothing is excluded. invalid_message.eml used to be: the two parsers disagreed
+# about its body and its header set, because its header block is never terminated
+# and only the stdlib recovered from that (#150). Now that both do, it is compared
+# like every other fixture, and the three divergences it still shows are the
+# line-ending and unfolding ones that every real message shows.
 FIXTURES = sorted(glob.glob(os.path.join(_DATA, "rfc", "*.eml"))) + sorted(
-    path
-    for path in glob.glob(os.path.join(_DATA, "*.eml"))
-    if os.path.basename(path) != "invalid_message.eml"
+    glob.glob(os.path.join(_DATA, "*.eml"))
 )
 
 # (fixture, dimension) -> why the two legitimately differ.
@@ -84,6 +84,26 @@ DIVERGENCES: dict[tuple[str, str], str] = {
     ("valid_message", "headers"): (
         "on unfolding, this library collapses folding whitespace to one space; "
         "the stdlib preserves the original run"
+    ),
+    # invalid_message is bare-LF on the wire, but its parts are
+    # quoted-printable and encode their line endings as CRLF, so the decoded
+    # bodies carry CRLF and the same line-ending divergence as valid_message.
+    # Both parts are compared because both are now recovered (#150).
+    ("invalid_message", "text_plain"): (
+        "stdlib normalises body line endings to LF; this library preserves the "
+        "wire form (CRLF, encoded as =0D=0A by the quoted-printable part)"
+    ),
+    ("invalid_message", "text_html"): (
+        "stdlib normalises body line endings to LF; this library preserves the "
+        "wire form (CRLF, encoded as =0D=0A by the quoted-printable part)"
+    ),
+    # Both of the header divergences already documented for other fixtures, in
+    # one message: its ARC-*/Received/DKIM-Signature headers are folded, and its
+    # Date is 'Wed,  1 Jul 2020 ...' which the stdlib re-emits zero-padded.
+    ("invalid_message", "headers"): (
+        "on unfolding, this library collapses folding whitespace to one space "
+        "while the stdlib preserves the original run; and the stdlib renormalises "
+        "structured headers, zero-padding the day in Date"
     ),
 }
 

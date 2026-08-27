@@ -51,6 +51,86 @@ const MAX_MIME_DEPTH: usize = 256;
 pub(crate) const ERR_INPUT_TOO_LARGE: &str = "Input exceeds maximum allowed size";
 pub(crate) const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed depth";
 
+/// Restore the header/body separator when a message omits it, or `None` when the
+/// message has one and can be parsed exactly as it stands.
+///
+/// RFC 5322 section 2.1 ends the header block with an empty line. Real mail
+/// sometimes omits it -- `tests/data/invalid_message.eml` is a Mailchimp-delivered
+/// message that does, and the stdlib names the defect
+/// `MissingHeaderBodySeparatorDefect`.
+/// mailparse stops parsing headers only at an empty line, and it accepts a line
+/// with no colon as a field name with an empty value, so with the separator gone
+/// it keeps consuming the body as headers. In that fixture it swallows the first
+/// MIME boundary, which leaves the first part's body sitting before the *next*
+/// boundary -- making it multipart preamble, discarded by definition -- so the
+/// `text/plain` alternative vanished and nothing was raised about it (#150).
+///
+/// The recovery is the stdlib's: a non-continuation line in the header block that
+/// cannot be a header field ends the header block, and the body starts there.
+/// Handing mailparse the separator the sender left out is what makes it reach
+/// the same conclusion, and it needs no change to the header parsing itself,
+/// which mailparse owns.
+///
+/// "Cannot be a header field" is narrowed here to "contains no colon". The
+/// stdlib is stricter -- a field name may hold only printable ASCII other than
+/// colon, so `Subject : x`, or an 8-bit byte in a field name, ends the block for
+/// it too -- but mailparse accepts both of those as headers, and demoting them to
+/// body text would trade one silent loss for another. The colon is the part of
+/// the rule that identifies this defect. Two exemptions are the stdlib's own: a
+/// line starting with space or tab is a folded continuation, and a leading
+/// `From ` line is an mbox envelope header rather than a field.
+///
+/// What gets repaired is a whole message: the payload handed in, and an embedded
+/// `message/rfc822` when the tree parses one. A multipart *part*'s headers are
+/// parsed inside mailparse's boundary split, which is not reachable from here, so
+/// a part that omits its own separator is still read the way mailparse reads it.
+///
+/// Cost on a well-formed message is one pass over the header block, ending at the
+/// empty line it has: O(header bytes), one comparison per line, and no
+/// allocation. Only a defective message allocates, and it allocates once.
+///
+/// `#[inline(never)]` because this runs on every parse while being nothing worth
+/// inlining, and because code size in the parse path is not free in this crate --
+/// see the Performance section of CONTRIBUTING.md.
+#[inline(never)]
+fn repair_missing_separator(payload: &[u8]) -> Option<Vec<u8>> {
+    let mut at = 0;
+
+    while at < payload.len() {
+        let rest = &payload[at..];
+        let newline = rest.iter().position(|&b| b == b'\n');
+        let line = &rest[..newline.unwrap_or(rest.len())];
+
+        // An empty line is the separator, in its place: everything past it is
+        // body, which this scan never reads. A line starting with CR is either
+        // that same separator spelled `\r\n` or a lone CR where a header should
+        // start, which mailparse rejects on its own. Neither is ours to repair.
+        if line.is_empty() || line.starts_with(b"\r") {
+            return None;
+        }
+
+        let folded = matches!(line[0], b' ' | b'\t');
+        if !folded && !line.starts_with(b"From ") && !line.contains(&b':') {
+            // A bare LF, whatever the message's own line endings: mailparse
+            // takes a lone LF as the terminator and reports the body as starting
+            // after it, and its boundary search accepts a delimiter sitting at
+            // the first body byte. The separator is consumed rather than
+            // becoming body, so its spelling is not observable either way.
+            let mut repaired = Vec::with_capacity(payload.len() + 1);
+            repaired.extend_from_slice(&payload[..at]);
+            repaired.push(b'\n');
+            repaired.extend_from_slice(&payload[at..]);
+            return Some(repaired);
+        }
+
+        // No newline after this line means no body follows it, so there is no
+        // separator missing from between the two.
+        at += newline? + 1;
+    }
+
+    None
+}
+
 pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
 }
@@ -405,7 +485,8 @@ impl MimePart {
             // forwards cannot recurse further than a multipart tree can.
             let raw = part.get_body_raw()?;
             let inner = {
-                let parsed = parse_mail(&raw)?;
+                let repaired = repair_missing_separator(&raw);
+                let parsed = parse_mail(repaired.as_deref().unwrap_or(raw.as_slice()))?;
                 Self::build(&parsed, depth + 1)?
             };
             (Some(raw), vec![inner])
@@ -435,7 +516,10 @@ pub(crate) fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseErro
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
 
-    MimePart::build(&parse_mail(payload)?, 0)
+    // The same repair as the flat path, so the two views cannot disagree about a
+    // message whose header block was never terminated (#150).
+    let repaired = repair_missing_separator(payload);
+    MimePart::build(&parse_mail(repaired.as_deref().unwrap_or(payload))?, 0)
 }
 
 /// Month tokens `mailparse::dateparse` accepts.
@@ -543,12 +627,27 @@ pub(crate) struct Attachment {
     pub(crate) disposition: Option<String>,
 }
 
-impl<'a> Mail {
-    pub(crate) fn new(payload: &'a [u8]) -> Result<Self, MailParseError> {
+impl Mail {
+    /// Parse one message.
+    ///
+    /// Two steps, so that what mailparse sees is normalised first: a message
+    /// missing its header/body separator is parsed from a repaired copy of the
+    /// payload (#150). `from_payload` reads whatever buffer it is handed and
+    /// returns fully owned data, so that copy can be a local here.
+    pub(crate) fn new(payload: &[u8]) -> Result<Self, MailParseError> {
+        // Measured against the payload as received: a repair adds one byte, and
+        // no message should become oversized by being repaired.
         if payload.len() > MAX_INPUT_BYTES {
             return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
         }
 
+        let repaired = repair_missing_separator(payload);
+        Mail::from_payload(repaired.as_deref().unwrap_or(payload))
+    }
+}
+
+impl<'a> Mail {
+    fn from_payload(payload: &'a [u8]) -> Result<Self, MailParseError> {
         let mail = parse_mail(payload)?;
 
         let headers = collect_headers(&mail);
