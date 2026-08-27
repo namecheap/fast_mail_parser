@@ -1,0 +1,126 @@
+name: abi3 A/B
+
+# Measures what the stable ABI costs, by building the SAME source twice: once
+# with `pyo3/abi3-py311` (what we ship) and once version-specific for the
+# running interpreter. #101 makes the decision conditional on this number --
+# under 5%, ship abi3 everywhere; over, ship a hybrid.
+#
+# abi3 forbids some PyO3 fast paths, so the cost lands in the Python<->Rust
+# boundary rather than in parsing: string and bytes creation, building the
+# headers dict. Whether that is measurable is exactly the question.
+#
+# The two sides need separate build-and-measure cycles, and on this project two
+# such cycles read ~16% apart on a no-op -- far too noisy for a 5% threshold. So
+# both wheels are built first and the measurements are interleaved afterwards
+# (A, B, A, B, ...), with the median taken per side. The pure-Python benchmarks
+# ride along as a noise floor: they cannot care how the extension was built, so
+# their delta is measurement error, and a result is only believed when it clears
+# them. See .github/scripts/ab_median.py.
+on:
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: "Interleaved measurement rounds per side"
+        default: "3"
+      threshold:
+        description: "Delta above which a hybrid decision is needed, percent"
+        default: "5"
+      python-version:
+        description: "Interpreter to measure on (the version-specific side targets it)"
+        default: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    name: abi3 vs version-specific
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+
+      - name: Build the abi3 wheel (as shipped)
+        run: |
+          python -m pip install -q --upgrade pip
+          python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-abi3"
+
+      - name: Build the version-specific wheel
+        run: |
+          # Dropping the feature from Cargo.toml rather than passing a maturin
+          # flag: it is unambiguous and needs no assumption about how the build
+          # backend forwards arguments.
+          sed -i 's|, "pyo3/abi3-py311"||' Cargo.toml
+          # Never trust a sed silently -- if the pattern drifts, the "candidate"
+          # is the same build and the run reports a reassuring 0%.
+          if grep -q 'abi3' Cargo.toml; then
+            echo "::error::abi3 still present in Cargo.toml after the edit"
+            grep -n abi3 Cargo.toml
+            exit 1
+          fi
+          # A separate target dir, for the same reason cargo would otherwise hand
+          # back the previous build's artifacts.
+          CARGO_TARGET_DIR="$RUNNER_TEMP/target-versioned" \
+            python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-versioned"
+          git checkout Cargo.toml
+
+      - name: Check the two builds actually differ
+        run: |
+          abi3_whl=$(ls "$RUNNER_TEMP/w-abi3"/*.whl)
+          ver_whl=$(ls "$RUNNER_TEMP/w-versioned"/*.whl)
+          echo "abi3:            $(basename "$abi3_whl")"
+          echo "version-specific: $(basename "$ver_whl")"
+          # The wheel tag is the evidence: abi3 builds carry an `abi3` platform
+          # tag, version-specific ones carry `cpXY-cpXY`. Equal tags mean the
+          # A/B compared one build with itself.
+          case "$(basename "$abi3_whl")" in
+            *abi3*) ;;
+            *) echo "::error::the abi3 side is not tagged abi3"; exit 1 ;;
+          esac
+          case "$(basename "$ver_whl")" in
+            *abi3*) echo "::error::the version-specific side is tagged abi3"; exit 1 ;;
+          esac
+          echo "abi3_whl=$abi3_whl" >> "$GITHUB_ENV"
+          echo "ver_whl=$ver_whl" >> "$GITHUB_ENV"
+
+      - name: Install both builds
+        run: |
+          for side in abi3 versioned; do
+            python -m venv "$RUNNER_TEMP/venv-$side"
+            "$RUNNER_TEMP/venv-$side/bin/pip" install -q --upgrade pip
+          done
+          # `[test]` on the wheel path pulls the test extra from the wheel's own
+          # metadata, so the pinned versions come from pyproject.toml and neither
+          # venv rebuilds the extension.
+          "$RUNNER_TEMP/venv-abi3/bin/pip" install -q "${abi3_whl}[test]"
+          "$RUNNER_TEMP/venv-versioned/bin/pip" install -q "${ver_whl}[test]"
+
+      - name: Measure, interleaved
+        run: |
+          for round in $(seq 1 "${{ inputs.rounds }}"); do
+            for side in abi3 versioned; do
+              echo "::group::round $round — $side"
+              "$RUNNER_TEMP/venv-$side/bin/pytest" -q tests/benchmark \
+                --benchmark-min-rounds=25 \
+                --benchmark-json="$side-$round.json"
+              echo "::endgroup::"
+            done
+          done
+
+      - name: Compare
+        env:
+          AB_THRESHOLD_PCT: ${{ inputs.threshold }}
+        run: |
+          python .github/scripts/ab_median.py \
+            --a-label abi3 --b-label version-specific \
+            --a abi3-*.json --b versioned-*.json
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: abi3-ab-json
+          path: "*-[0-9].json"
