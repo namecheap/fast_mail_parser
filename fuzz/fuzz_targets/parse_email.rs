@@ -5,8 +5,9 @@
 //! 1. **No panic.** A panic reaching the FFI boundary is a crash in the host
 //!    process, so for a library that parses attacker-controlled mail this is the
 //!    invariant that matters most. libFuzzer treats any panic as a finding.
-//! 2. **Determinism.** The same bytes parse to the same result twice. Anything
-//!    else means hidden state, and would make every other test unreliable.
+//! 2. **Determinism.** The same bytes parse to the same result twice, compared
+//!    over every field via `canonical` -- which sorts the header map, because its
+//!    iteration order is randomised and is not part of the parse result.
 //! 3. **Bounded output.** Decoded output stays within a generous multiple of the
 //!    input, so no input can make the parser amplify its way through memory.
 
@@ -17,6 +18,44 @@
 mod mail_parser;
 
 use libfuzzer_sys::fuzz_target;
+
+/// Render a parse deterministically for comparison.
+///
+/// `Mail`'s derived `Debug` cannot be compared across parses: `headers` is a
+/// `std::collections::HashMap`, whose iteration order is randomised per instance,
+/// so two parses of the same bytes format their headers in different orders. The
+/// first run of this target found exactly that -- a flaw in the check, not in the
+/// parser, though it did expose a real one: #157.
+///
+/// Sorting the header entries removes that noise while still comparing every
+/// field, so a genuine difference anywhere in the result still fails.
+fn canonical(mail: &mail_parser::Mail) -> String {
+    let mut headers: Vec<_> = mail.headers.iter().collect();
+    headers.sort();
+
+    let attachments: Vec<_> = mail
+        .attachments
+        .iter()
+        .map(|a| (&a.mimetype, &a.filename, &a.content, &a.content_id, &a.disposition))
+        .collect();
+
+    format!(
+        "{:?}",
+        (
+            &mail.subject,
+            &mail.text_plain,
+            &mail.text_html,
+            &mail.date,
+            &mail.from_,
+            &mail.to,
+            &mail.cc,
+            &mail.bcc,
+            &mail.reply_to,
+            attachments,
+            headers,
+        )
+    )
+}
 
 /// How much larger than its input a parse is allowed to get.
 ///
@@ -53,12 +92,9 @@ fuzz_target!(|data: &[u8]| {
 
     match (&first, &second) {
         (Ok(a), Ok(b)) => {
-            // `Mail` has no PartialEq, and Debug covers every field, so this
-            // catches a difference anywhere in the result rather than in a
-            // hand-picked subset.
             assert_eq!(
-                format!("{a:?}"),
-                format!("{b:?}"),
+                canonical(a),
+                canonical(b),
                 "parsing the same input twice produced different results"
             );
 
