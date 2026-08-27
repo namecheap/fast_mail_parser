@@ -31,5 +31,12 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "parse_agreement"
+path = "fuzz_targets/parse_agreement.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = true

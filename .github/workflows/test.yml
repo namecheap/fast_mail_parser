@@ -184,9 +184,11 @@ jobs:
       # `rustc_*` attributes that today's nightly rejects, so an old cargo-fuzz
       # fails to build regardless of this repository.
       CARGO_FUZZ_VERSION: "0.13.2"
-      # Long enough to exercise the seeds and some mutation, short enough that it
-      # never dominates a PR run.
-      FUZZ_SECONDS: "60"
+      # Per target, and there are two, so the job's fuzzing budget is unchanged
+      # at a minute total: long enough to exercise the seeds and some mutation,
+      # short enough that it never dominates a PR run.
+      FUZZ_SECONDS: "30"
+      FUZZ_TARGETS: "parse_email parse_agreement"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -206,21 +208,27 @@ jobs:
         if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
         run: cargo install cargo-fuzz --version ${{ env.CARGO_FUZZ_VERSION }} --locked
 
-      - name: Seed the corpus from the test fixtures
+      - name: Seed the corpora from the test fixtures
         run: |
           # Seeded at run time rather than committed: the fixtures already live
           # in tests/, and duplicating ~200 KB of them under fuzz/ would mean two
           # copies to keep in step.
-          mkdir -p fuzz/corpus/parse_email
-          cp tests/data/*.eml tests/data/rfc/*.eml fuzz/corpus/parse_email/
-          echo "seeded $(ls fuzz/corpus/parse_email | wc -l) inputs"
+          for target in $FUZZ_TARGETS; do
+            mkdir -p "fuzz/corpus/$target"
+            cp tests/data/*.eml tests/data/rfc/*.eml "fuzz/corpus/$target/"
+          done
+          echo "seeded $(find fuzz/corpus -type f | wc -l) inputs across targets"
 
-      - name: Fuzz parse_email
+      - name: Fuzz
         run: |
-          cargo fuzz run parse_email -- \
-            -max_total_time="$FUZZ_SECONDS" \
-            -seed=1 \
-            -print_final_stats=1
+          for target in $FUZZ_TARGETS; do
+            echo "::group::$target"
+            cargo fuzz run "$target" -- \
+              -max_total_time="$FUZZ_SECONDS" \
+              -seed=1 \
+              -print_final_stats=1
+            echo "::endgroup::"
+          done
 
       - name: Upload crashers
         if: failure()

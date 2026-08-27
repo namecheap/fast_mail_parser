@@ -6,6 +6,11 @@ name: Deep fuzz
 #
 # Two things make a weekly run worth more than 30x the PR job:
 #
+# Two targets run in parallel, each with its own corpus: `parse_email` on the flat
+# parse, and `parse_agreement` checking the metadata and tree APIs against it
+# (#97, #99). The per-target budget is halved so the weekly runner cost is
+# unchanged.
+#
 #   - The corpus is cached and restored, so coverage compounds week over week
 #     instead of restarting from the fixtures every time. This is most of the
 #     value: a fuzzer's reach is mostly a function of the corpus it inherits.
@@ -32,7 +37,7 @@ on:
     inputs:
       seconds:
         description: "Fuzzing time per target, seconds"
-        default: "1800"
+        default: "900"
       inject_canary:
         description: "Plant the canary input to test the crash-reporting path"
         type: boolean
@@ -53,13 +58,19 @@ concurrency:
 
 jobs:
   deep-fuzz:
-    name: parse_email (${{ inputs.seconds || 1800 }}s)
+    name: ${{ matrix.target }} (${{ inputs.seconds || 900 }}s)
     runs-on: ubuntu-latest
+    strategy:
+      # One job per target, so each keeps its own corpus cache and a crash in one
+      # does not stop the other from running.
+      fail-fast: false
+      matrix:
+        target: [parse_email, parse_agreement]
     env:
       RUSTUP_TOOLCHAIN: nightly
       # Keep in step with the short pass in test.yml.
       CARGO_FUZZ_VERSION: "0.13.2"
-      FUZZ_SECONDS: ${{ inputs.seconds || 1800 }}
+      FUZZ_SECONDS: ${{ inputs.seconds || 900 }}
       FUZZ_MAX_LEN: ${{ inputs.max_len || 65536 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,19 +94,21 @@ jobs:
       - name: Restore the accumulated corpus
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: fuzz/corpus/parse_email
+          path: fuzz/corpus/${{ matrix.target }}
           # A cache entry is immutable, so each run writes a new key and inherits
-          # the newest previous one by prefix.
-          key: fuzz-corpus-v2-parse_email-${{ github.run_id }}
-          restore-keys: fuzz-corpus-v2-parse_email-
+          # the newest previous one by prefix. The key keeps the `v2-parse_email`
+          # lineage for that target, so the corpus accumulated before the second
+          # target existed is not thrown away.
+          key: fuzz-corpus-v2-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v2-${{ matrix.target }}-
 
       - name: Seed the corpus from the test fixtures
         run: |
-          mkdir -p fuzz/corpus/parse_email
-          inherited=$(find fuzz/corpus/parse_email -type f | wc -l)
-          cp tests/data/*.eml tests/data/rfc/*.eml fuzz/corpus/parse_email/
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          inherited=$(find "fuzz/corpus/${{ matrix.target }}" -type f | wc -l)
+          cp tests/data/*.eml tests/data/rfc/*.eml "fuzz/corpus/${{ matrix.target }}/"
           echo "inherited $inherited inputs from the cache, "\
-               "$(find fuzz/corpus/parse_email -type f | wc -l) after seeding"
+               "$(find "fuzz/corpus/${{ matrix.target }}" -type f | wc -l) after seeding"
           echo "corpus_inherited=$inherited" >> "$GITHUB_ENV"
 
       - name: Fuzz parse_email
@@ -122,7 +135,7 @@ jobs:
           # so the verdict can be decided further down. A canary drill and a real
           # finding both crash, and they mean opposite things.
           set -o pipefail
-          if cargo fuzz run parse_email -- \
+          if cargo fuzz run "${{ matrix.target }}" -- \
                -max_total_time="$FUZZ_SECONDS" \
                -max_len="$FUZZ_MAX_LEN" \
                -print_final_stats=1 2>&1 | tee fuzz-output.log; then
@@ -139,18 +152,18 @@ jobs:
         if: always() && inputs.inject_canary != true
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: fuzz/corpus/parse_email
-          key: fuzz-corpus-v2-parse_email-${{ github.run_id }}
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-v2-${{ matrix.target }}-${{ github.run_id }}
 
       - name: Minimize the crasher
         if: steps.fuzz.outputs.crashed == 'true'
         run: |
           # A raw crasher is whatever the mutator happened to be holding; the
           # minimized one is what a regression fixture should be made from.
-          for crasher in fuzz/artifacts/parse_email/*; do
+          for crasher in "fuzz/artifacts/${{ matrix.target }}"/*; do
             [ -f "$crasher" ] || continue
             echo "::group::tmin $(basename "$crasher")"
-            cargo fuzz tmin parse_email "$crasher" || \
+            cargo fuzz tmin "${{ matrix.target }}" "$crasher" || \
               echo "minimization failed; the raw crasher is still in the artifact"
             echo "::endgroup::"
           done
@@ -159,7 +172,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: deep-fuzz-${{ github.run_id }}
+          name: deep-fuzz-${{ matrix.target }}-${{ github.run_id }}
           path: |
             fuzz/artifacts
             fuzz-output.log
@@ -178,7 +191,8 @@ jobs:
             echo "### Deep fuzz"
             echo
             echo "- ran for ${FUZZ_SECONDS}s"
-            echo "- corpus: ${corpus_inherited} inherited, $(find fuzz/corpus/parse_email -type f | wc -l) now"
+            echo "- target: ${{ matrix.target }}"
+            echo "- corpus: ${corpus_inherited} inherited, $(find "fuzz/corpus/${{ matrix.target }}" -type f | wc -l) now"
             echo "- crashers: $(find fuzz/artifacts -type f 2>/dev/null | wc -l)"
           } >> "$GITHUB_STEP_SUMMARY"
 

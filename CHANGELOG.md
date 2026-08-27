@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A second fuzz target, `parse_agreement`, checks metadata mode and the tree API
+  against the flat parse on arbitrary input rather than only for absence of
+  panics: the envelope and the attachment inventory must agree between modes, and
+  every attachment the flat parse reports must appear in the tree (#102).
 - **`parse_email(payload, mode="metadata")`** reads the headers and the attachment
   inventory without transfer-decoding anything, returning a `PyMailMetadata`
   (#97). On an attachment-heavy message that is most of the work skipped.

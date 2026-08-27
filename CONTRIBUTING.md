@@ -201,8 +201,25 @@ manifest. They must stay in step, or the harness stops testing what ships.
 CI runs a 60-second deterministic pass on every PR, seeded so it stays
 reproducible; a crasher is uploaded as an artifact.
 
+There are two targets. `parse_email` fuzzes the flat parse for the three
+invariants above. `parse_agreement` fuzzes the two APIs added since — metadata
+mode (#97) and the tree (#99) — and asserts **agreement** rather than only absence
+of panics, because a re-derivation of the same message is most likely to be wrong
+by disagreeing with the original:
+
+- metadata mode must succeed wherever the full parse does, since it does strictly
+  less work (the converse is *not* asserted: a broken transfer encoding fails the
+  full parse and passes metadata, which is a documented difference)
+- subject, date and the whole header map must be identical between the two modes
+- the attachment inventory must match, field by field, except content and size
+- `encoded_size` is never below the decoded size, since no transfer encoding
+  shrinks its input
+- the tree parses deterministically, and every attachment the flat parse reports
+  appears as some leaf's content
+
 A **weekly deep run** (`.github/workflows/deep-fuzz.yml`, Mondays) fuzzes for 30
-minutes with no fixed seed and, importantly, **caches the corpus between runs**,
+minutes per target with no fixed seed and, importantly, **caches the corpus
+between runs**,
 so coverage compounds instead of restarting from the fixtures every week — that
 accumulation is most of what makes a scheduled run worth more than the PR pass.
 
