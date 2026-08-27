@@ -3,10 +3,13 @@ name: Toolchain A/B
 # Compares the SAME source built with two Rust toolchains, to decide whether the
 # pin in rust-toolchain.toml can be lifted (#120).
 #
-# History: a 1.98.0 build made this crate ~30% slower than 1.97.1, which is why
-# the toolchain is pinned. The original estimate (~26%) came from comparing
-# separate CI runs, where between-runner variance is itself ~26% -- the same
-# order as the effect it was trying to measure.
+# History: a 1.98.0 build measured 15-30% slower than 1.97.1, which is why the
+# toolchain was pinned to 1.97.1 in the first place. The original estimate (~26%)
+# came from comparing separate CI runs, where between-runner variance is itself
+# ~26% -- the same order as the effect it was trying to measure. The cause turned
+# out to be two byte-at-a-time loops in mailparse whose speed depended on where
+# the linker placed them (#120, #204); with those replaced (#213, #214) this
+# workflow read 1.98.0 within +/-0.5% of 1.97.1 and the pin moved to 1.98.0.
 #
 # Building both toolchains in one job fixed that, but not completely: the two
 # sides still need separate build-and-measure cycles, and two such cycles read
@@ -27,7 +30,7 @@ on:
     inputs:
       baseline:
         description: "Toolchain to compare against (the current pin)"
-        default: "1.97.1"
+        default: "1.98.0"
       candidate:
         description: "Toolchain to evaluate (a version, or `stable`)"
         default: "stable"

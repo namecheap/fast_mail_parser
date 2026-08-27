@@ -13,10 +13,12 @@ discuss what you would like to change.
 ## Prerequisites
 
 - **Rust** — the toolchain is pinned in
-  [`rust-toolchain.toml`](rust-toolchain.toml) to **1.97.1**; if you use
+  [`rust-toolchain.toml`](rust-toolchain.toml) to **1.98.0**; if you use
   `rustup`, the correct version is selected automatically in this directory.
-  The pin is deliberate: rustc 1.98.0 makes this crate ~26% slower and trips the
-  benchmark gate — see the comment in that file before changing it. The MSRV is
+  The pin is deliberate: the benchmark gate builds both sides with the same
+  compiler, so a compiler change is the one regression it cannot see — bump the
+  pin with the `toolchain-ab.yml` measurement, as the comment in that file
+  describes. The MSRV is
   a separate, lower bound (**1.83**, declared as `rust-version` in
   [`Cargo.toml`](Cargo.toml)). Some CI checks (`cargo audit`) run on **stable**
   rather than the pinned version.
@@ -282,8 +284,9 @@ Two things to know before changing anything in `src/`:
 
 **This crate is unusually sensitive to codegen.** A rustc minor version alone
 moved the parse path 15-96% (#120), which is why `rust-toolchain.toml` pins one.
-That case has since been traced to a single loop and fixed -- see below -- but
-the lesson stands: do not assume a change is free because it looks free.
+That case has since been traced to two loops and fixed -- see below -- and the
+pin has moved on to 1.98.0, but the lesson stands: do not assume a change is
+free because it looks free.
 
 **Cold code can slow the hot path.** `catch_panics` is generic, so every entry
 point instantiates it, and adding a third instantiation stopped the one wrapping
