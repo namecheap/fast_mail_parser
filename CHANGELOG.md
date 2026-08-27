@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Attachments come back as `PyAttachmentMetadata` with `encoded_size` -- the
     bytes the part occupies in the message, before decoding. Named for what it is:
     the decoded size cannot be known without the decode this mode exists to skip.
+    It is **not** an upper bound on the decoded size -- quoted-printable emits a
+    line break as CRLF, so a body of bare LFs decodes larger than it was encoded.
+    Decoding cannot more than double a part.
   - No `text_plain`/`text_html`, and absent rather than empty: an empty list
     cannot be told apart from "no text part", so a sweep counting bodyless
     messages would count all of them.

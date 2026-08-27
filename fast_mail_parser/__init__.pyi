@@ -72,6 +72,11 @@ class PyAttachmentMetadata:
     decoded size without doing the decode it exists to skip, and base64 inflates
     by about a third. In full mode the decoded size is ``len(content)``.
 
+    It is **not** an upper bound on the decoded size. Base64 decodes smaller, but
+    quoted-printable emits a line break as CRLF, so a body of bare LFs decodes
+    *larger* than it was encoded. Decoding cannot more than double a part, which
+    is the bound the test suite and the fuzz harness assert.
+
     A separate type rather than a ``PyAttachment`` whose ``content`` is ``None``,
     so that ``PyAttachment.content`` stays ``bytes`` for every caller who never
     asked for this mode.
