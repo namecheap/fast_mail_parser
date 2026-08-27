@@ -191,6 +191,42 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
     })
 }
 
+/// Every value of every header, keyed by name, in first-appearance key order.
+///
+/// Repeated keys keep all their values: collapsing to one kept only the last,
+/// discarding all but the final `Received`, `DKIM-Signature`, `Received-SPF`,
+/// ... -- which made delivery-path tracing and signature verification impossible
+/// (#12, #23).
+///
+/// A `HashMap` cannot carry the key order: its iteration order is randomised per
+/// instance, and that order became the Python dict's insertion order, so headers
+/// came back differently ordered on every parse of the same bytes (#157).
+///
+/// `positions` keeps insertion O(1). Scanning the vector for each field would be
+/// quadratic in the header count, which turns a message carrying thousands of
+/// headers into an amplification vector -- the sort of thing MAX_INPUT_BYTES and
+/// MAX_MIME_DEPTH exist to prevent elsewhere.
+///
+/// Shared by the flat view and the tree so the two cannot disagree about what a
+/// message's headers are.
+fn collect_headers(part: &ParsedMail<'_>) -> Vec<(String, Vec<String>)> {
+    let mut headers: Vec<(String, Vec<String>)> = Vec::new();
+    let mut positions: HashMap<String, usize> = HashMap::new();
+
+    for header in part.get_headers() {
+        let key = header.get_key();
+        match positions.get(&key).copied() {
+            Some(position) => headers[position].1.push(header.get_value()),
+            None => {
+                positions.insert(key.clone(), headers.len());
+                headers.push((key, vec![header.get_value()]));
+            }
+        }
+    }
+
+    headers
+}
+
 /// Month tokens `mailparse::dateparse` accepts.
 ///
 /// Its state machine only advances past the month once one of these matches,
@@ -304,38 +340,8 @@ impl<'a> Mail {
 
         let mail = parse_mail(payload)?;
 
-        // Keys in the order they first appear, and every value for a repeated
-        // key in the order it appeared. Collapsing to one value per key kept only
-        // the last, discarding all but the final `Received`, `DKIM-Signature`,
-        // `Received-SPF`, ... -- which made delivery-path tracing and signature
-        // verification impossible (#12, #23).
-        //
-        // A `HashMap` cannot carry the key order: its iteration order is
-        // randomised per instance, and that order became the Python dict's
-        // insertion order, so `mail.headers` came back differently ordered on
-        // every parse of the same bytes (#157).
-        //
-        // `positions` keeps insertion O(1). Scanning `headers` for each field
-        // would be quadratic in the header count, which turns a message carrying
-        // thousands of headers into an amplification vector -- the sort of thing
-        // MAX_INPUT_BYTES and MAX_MIME_DEPTH exist to prevent elsewhere.
-        let mut headers: Vec<(String, Vec<String>)> = Vec::new();
-        let mut positions: HashMap<String, usize> = HashMap::new();
-        for header in mail.get_headers() {
-            let key = header.get_key();
-            match positions.get(&key).copied() {
-                Some(position) => headers[position].1.push(header.get_value()),
-                None => {
-                    positions.insert(key.clone(), headers.len());
-                    headers.push((key, vec![header.get_value()]));
-                }
-            }
-        }
+        let headers = collect_headers(&mail);
 
-        // Read these straight from the parsed headers rather than back out of the
-        // map above, so the dedicated fields do not inherit its representation
-        // (#28). `get_first_value` is the first occurrence, which is the correct
-        // choice for a header that should appear once.
         let subject = mail
             .get_headers()
             .get_first_value("Subject")
