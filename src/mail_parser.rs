@@ -65,6 +65,7 @@ pub(crate) const KIND_CHARSET_FALLBACK: &str = "charset-fallback";
 pub(crate) const KIND_ADDRESS_UNPARSEABLE: &str = "address-unparseable";
 pub(crate) const KIND_DATE_UNPARSEABLE: &str = "date-unparseable";
 pub(crate) const KIND_UNTERMINATED_HEADERS: &str = "unterminated-header-block";
+pub(crate) const KIND_TRANSFER_DECODE_LOSSY: &str = "transfer-decode-lossy";
 
 // Held as a const so the helper that uses it is one short line instead of a
 // chain across a multi-line literal.
@@ -72,6 +73,56 @@ const DETAIL_UNTERMINATED_HEADERS: &str = "the header block was not \
      terminated by an empty line (RFC 5322 2.1); the separator was restored \
      before parsing, so no part was lost -- the stdlib calls this defect \
      MissingHeaderBodySeparatorDefect";
+
+/// Offset of a quoted-printable escape a strict decoder would reject, if any.
+///
+/// mailparse decodes quoted-printable in robust mode, which passes an invalid
+/// escape through as literal text instead of failing. So `=ZZ` survives as three
+/// characters where the sender meant one byte, and the parse reports success --
+/// a lossy repair with no error, which is what this channel exists for (#100).
+///
+/// Only the two valid forms are skipped: `=` with two hex digits, and `=` before
+/// a line ending (a soft break). Everything else, including a trailing `=` with
+/// nothing after it, is what a strict decoder rejects.
+///
+/// Line-ending canonicalisation is deliberately NOT reported. Robust mode also
+/// turns a bare LF into CRLF, which a strict decoder rejects too -- but most mail
+/// written with bare LFs would then warn, and a channel whose empty list means
+/// something cannot afford that (see the note on `Warning`). The bytes-changed
+/// case worth a warning is the one where the sender's intent is lost.
+///
+/// Parts that are not quoted-printable return immediately. `#[inline(never)]` for
+/// the usual reason in this crate: this is called from the per-part loop.
+#[inline(never)]
+fn quoted_printable_invalid_escape(part: &ParsedMail<'_>) -> Option<usize> {
+    let Body::QuotedPrintable(body) = part.get_body_encoded() else {
+        return None;
+    };
+
+    let raw = body.get_raw();
+    let mut at = 0;
+
+    while at < raw.len() {
+        if raw[at] != b'=' {
+            at += 1;
+            continue;
+        }
+
+        let rest = &raw[at + 1..];
+        if rest.starts_with(b"\r\n") || rest.starts_with(b"\n") {
+            at += 2;
+            continue;
+        }
+        if rest.len() >= 2 && rest[0].is_ascii_hexdigit() && rest[1].is_ascii_hexdigit() {
+            at += 3;
+            continue;
+        }
+
+        return Some(at);
+    }
+
+    None
+}
 
 /// One lossy repair the parser performed, recorded instead of raised (#100).
 ///
@@ -138,6 +189,20 @@ fn warn_separator(warnings: &mut Vec<Warning>) {
         detail: DETAIL_UNTERMINATED_HEADERS.to_owned(),
     };
     warnings.insert(0, warning);
+}
+
+#[cold]
+#[inline(never)]
+fn warn_transfer_decode(warnings: &mut Vec<Warning>, field: &str, index: usize, at: usize) {
+    warnings.push(Warning {
+        kind: KIND_TRANSFER_DECODE_LOSSY,
+        part_path: format!("{field}[{index}]"),
+        detail: format!(
+            "the quoted-printable escape at byte {at} of the encoded body is \
+             neither `=` followed by two hex digits nor a soft line break; it \
+             was passed through as literal text rather than decoded"
+        ),
+    });
 }
 
 #[cold]
@@ -903,7 +968,15 @@ impl<'a> Mail {
             // Python as `ParseError`.
             let content = part.get_body_raw()?;
 
+            // Checked once per part, reported below with the index the part
+            // actually lands at, so `part_path` locates it in the result.
+            let lossy_escape = quoted_printable_invalid_escape(&part);
+
             if !is_body {
+                if let Some(at) = lossy_escape {
+                    warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
+                }
+
                 let content_id = part
                     .get_headers()
                     .get_first_value("Content-ID")
@@ -927,6 +1000,9 @@ impl<'a> Mail {
                     let index = text_html.len();
                     warn_charset(&mut warnings, "text_html", index, &part.ctype.charset);
                 }
+                if let Some(at) = lossy_escape {
+                    warn_transfer_decode(&mut warnings, "text_html", text_html.len(), at);
+                }
                 text_html.push(text);
             } else {
                 // Only `text/plain` reaches here: `is_body` is false for every
@@ -935,6 +1011,9 @@ impl<'a> Mail {
                 if fell_back {
                     let index = text_plain.len();
                     warn_charset(&mut warnings, "text_plain", index, &part.ctype.charset);
+                }
+                if let Some(at) = lossy_escape {
+                    warn_transfer_decode(&mut warnings, "text_plain", text_plain.len(), at);
                 }
                 text_plain.push(text);
             }

@@ -470,6 +470,14 @@ The kinds emitted today:
 | `address-unparseable` | An address header did not parse (mailparse rejects an address with no `@`), so no mailboxes were reported for it. | `to`/`cc`/… empty, or `from_` as `None`, with the raw value still in `headers`. |
 | `date-unparseable` | The `Date` header is not a date any parser here recognises. | `date` as the raw header string; `date_parsed` is `None`. |
 | `unterminated-header-block` | The header block was not closed by an empty line (RFC 5322 2.1), so the separator was restored before parsing — the stdlib calls this `MissingHeaderBodySeparatorDefect`. | The whole message, parts included. Left unrepaired this used to lose a body part silently ([#150](https://github.com/namecheap/fast_mail_parser/issues/150)). |
+| `transfer-decode-lossy` | A quoted-printable part contained an escape that is neither `=` plus two hex digits nor a soft line break, and robust decoding passed it through as literal text instead of failing. | The decoded text with the escape still in it, undecoded — `=ZZ` stays three characters where the sender meant one byte. |
+
+`transfer-decode-lossy` deliberately does **not** report line-ending
+canonicalisation. Robust decoding also turns a bare LF into CRLF, which a strict
+decoder rejects too — but then most mail written with bare LFs would warn, and a
+channel whose empty list means something cannot afford to cry wolf. The case worth
+reporting is the one where the sender's intent is lost, not the one where the
+bytes are merely normalised.
 
 `part_path` is a locator into the returned `PyMail`, not MIME tree coordinates.
 That is deliberate: `parse_email` hands back a flat projection, so a coordinate
@@ -511,6 +519,7 @@ except DecodeError:
 | --- | --- |
 | `charset-fallback` | `DecodeError` |
 | `date-unparseable` | `DecodeError` |
+| `transfer-decode-lossy` | `DecodeError` |
 | `address-unparseable` | `HeaderParseError` |
 | `unterminated-header-block` | `MimeStructureError` |
 
