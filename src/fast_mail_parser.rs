@@ -110,6 +110,13 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
 ///
 /// This is a backstop, not a licence: a panic reaching here is a bug in this
 /// crate, and the error says so.
+///
+/// `inline(always)` is load-bearing, not decoration. This is generic, so every
+/// entry point instantiates it, and once there were three the instantiation
+/// wrapping `parse_email` stopped being inlined -- which turns the parse body
+/// into an opaque call behind unwind edges and cost 24% on large messages while
+/// the code responsible was never executed (#99).
+#[inline(always)]
 fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
     // `AssertUnwindSafe`: the closure touches Python state, which is not
     // `UnwindSafe`, but nothing observes that state after a panic -- the only
@@ -195,6 +202,9 @@ impl PyMimePart {
 }
 
 impl PyMimePart {
+    /// Cold by construction, and marked so: it recurses, it returns a large
+    /// struct, and `parse_email` never reaches it.
+    #[inline(never)]
     fn from_part(py: Python<'_>, part: mail_parser::MimePart) -> PyResult<Self> {
         let children = part
             .children
@@ -561,6 +571,7 @@ pub fn parse_email_tree(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePa
     catch_panics(|| parse_email_tree_inner(py, payload))
 }
 
+#[inline(never)]
 fn parse_email_tree_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMimePart> {
     let message = payload_to_bytes(&payload, py)?;
 
