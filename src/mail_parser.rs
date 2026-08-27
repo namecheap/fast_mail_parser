@@ -24,6 +24,7 @@
 //! Python bindings.
 
 use charset::{decode_ascii, Charset};
+use mailparse::body::Body;
 use mailparse::*;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
