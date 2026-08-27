@@ -236,6 +236,39 @@ canary crashed and was reported, and fails when it did not, because a canary tha
 goes undetected means the alarm is broken. A normal run fails on any crash, as
 you would expect.
 
+## Performance
+
+There is a benchmark gate on every pull request. It builds this revision **and**
+its base, then alternates measurement rounds between them and compares the
+medians, failing on more than a 7% regression. The pure-Python benchmarks ride
+along as a noise floor: they cannot be affected by how the Rust extension was
+built, so a result is only believed once it clears them.
+
+The interleaving is not ceremony. Pairing each build with its own measurement --
+which this gate used to do -- leaves a ~16% artifact from the build cycle itself,
+more than twice the threshold it is judging against. A toolchain comparison built
+that way reported -0.2% on what an interleaved measurement then showed to be
++15.7% (#120).
+
+Two things to know before changing anything in `src/`:
+
+**This crate is unusually sensitive to codegen.** A rustc minor version alone has
+moved the parse path 15-30%, which is why `rust-toolchain.toml` pins one. Do not
+assume a change is free because it looks free.
+
+**Cold code can slow the hot path.** `catch_panics` is generic, so every entry
+point instantiates it, and adding a third instantiation stopped the one wrapping
+`parse_email` from being inlined -- costing 24% on large messages while the new
+code was never executed (#99). It carries `#[inline(always)]` for that reason and
+the comment says so; the tree API's binding functions carry `#[inline(never)]` for
+the mirror reason. If the gate reports a regression from a change that "cannot
+possibly" affect the hot path, this is the first thing to suspect, and bisecting
+into throwaway branches is how it was found rather than guessed.
+
+Both `lto = "fat"` and `codegen-units = 1` are already set, so a codegen-unit
+boundary is never the explanation -- worth knowing, since it is the natural first
+guess.
+
 ## Linting
 
 The following checks are run in CI. Run them locally before opening a PR:
