@@ -268,7 +268,26 @@ class DecodeError(ParseError):
 
 
 @overload
-def parse_email(payload: str | bytes) -> PyMail: ...
+def parse_email(payload: str | bytes) -> PyMail:
+    """Parse raw content of email and return structured datatype.
+
+    A missing ``Subject`` or ``Date`` header yields the empty string ``""``
+    (not ``None``) on the returned ``PyMail``.
+
+    ``mode="metadata"`` reads the headers and the attachment inventory without
+    transfer-decoding anything, and returns a ``PyMailMetadata``. On an
+    attachment-heavy message that is most of the work skipped. The mode picks the
+    return type through these overloads, so callers of the default path see no
+    change at all.
+
+    ``mode`` must be ``"full"`` or ``"metadata"``; anything else raises
+    ``ValueError``. It is keyword-only.
+
+    Raises a ``ParseError`` subtype: ``HeaderParseError``,
+    ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle
+    all of them. Note that ``mode="metadata"`` cannot raise ``DecodeError``,
+    because it never decodes.
+    """
 
 
 @overload
@@ -279,29 +298,6 @@ def parse_email(payload: str | bytes, *, mode: Literal["full"]) -> PyMail: ...
 def parse_email(
     payload: str | bytes, *, mode: Literal["metadata"]
 ) -> PyMailMetadata: ...
-
-
-def parse_email(
-    payload: str | bytes, *, mode: str = "full"
-) -> PyMail | PyMailMetadata:
-    """Parse raw content of email and return structured datatype.
-
-    A missing ``Subject`` or ``Date`` header yields the empty string ``""``
-    (not ``None``) on the returned ``PyMail``.
-
-    ``mode="metadata"`` reads the headers and the attachment inventory without
-    transfer-decoding anything, and returns a ``PyMailMetadata``. On an
-    attachment-heavy message that is most of the work skipped. The overloads
-    above mean the mode picks the return type statically, so callers of the
-    default path see no change at all.
-
-    ``mode`` must be ``"full"`` or ``"metadata"``; anything else raises
-    ``ValueError``.
-
-    Raises a ``ParseError`` subtype: ``HeaderParseError``,
-    ``MimeStructureError`` or ``DecodeError``. Catch ``ParseError`` to handle
-    all of them.
-    """
 
 
 def parse_email_tree(payload: str | bytes) -> PyMimePart:

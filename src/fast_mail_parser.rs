@@ -237,6 +237,14 @@ impl PyMailMetadata {
     }
 }
 
+/// Convert an address list for the Python layer.
+///
+/// Also keeps the conversions below off rustfmt's `chain_width`, which is 60 and
+/// which `metadata.to.into_iter().map(...).collect()` exceeds by two characters.
+fn addresses(list: Vec<mail_parser::Address>) -> Vec<PyAddress> {
+    list.into_iter().map(PyAddress::from_address).collect()
+}
+
 impl PyMailMetadata {
     #[inline(never)]
     fn from_metadata(metadata: mail_parser::MailMetadata) -> Self {
@@ -244,18 +252,10 @@ impl PyMailMetadata {
             subject: metadata.subject,
             date: metadata.date,
             from_: metadata.from_.map(PyAddress::from_address),
-            to: metadata.to.into_iter().map(PyAddress::from_address).collect(),
-            cc: metadata.cc.into_iter().map(PyAddress::from_address).collect(),
-            bcc: metadata
-                .bcc
-                .into_iter()
-                .map(PyAddress::from_address)
-                .collect(),
-            reply_to: metadata
-                .reply_to
-                .into_iter()
-                .map(PyAddress::from_address)
-                .collect(),
+            to: addresses(metadata.to),
+            cc: addresses(metadata.cc),
+            bcc: addresses(metadata.bcc),
+            reply_to: addresses(metadata.reply_to),
             attachments: metadata
                 .attachments
                 .into_iter()
