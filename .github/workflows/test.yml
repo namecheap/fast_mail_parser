@@ -338,13 +338,21 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if [ -n "$PR_BASE_SHA" ]; then
-            base="$PR_BASE_SHA"
-          else
-            # workflow_dispatch: compare against the default branch. Falling
-            # back to HEAD (which disables the comparison below) is better than
-            # failing the job if the ref is unavailable.
-            base="$(git rev-parse origin/master 2>/dev/null || git rev-parse HEAD)"
+          # On a pull request the checkout is the MERGE ref: this branch already
+          # merged into the base branch as it is *now*. So the honest comparison
+          # is against the base branch as it is now, and not against
+          # `pull_request.base.sha`, which is the base as of the PR's last event
+          # and can lag behind it.
+          #
+          # Using the stale value attributes everything master did in between to
+          # the pull request. That is not hypothetical: #198 was reported at
+          # +15.2% on every decoding benchmark for a build that was byte-identical
+          # to one measuring +0.2% -- a 0.8.0 merge ref against a 0.7.0 base. It
+          # also means a release commit's own effect gets billed to whichever PR
+          # is open at the time instead of to the release.
+          base="$(git rev-parse origin/master 2>/dev/null || git rev-parse HEAD)"
+          if [ -n "$PR_BASE_SHA" ] && [ "$PR_BASE_SHA" != "$base" ]; then
+            echo "::notice::recorded base ${PR_BASE_SHA:0:8} is behind origin/master ${base:0:8}; comparing against origin/master, which is what merging this actually changes"
           fi
           echo "sha=$base" >> "$GITHUB_OUTPUT"
           if [ "$base" = "$(git rev-parse HEAD)" ]; then

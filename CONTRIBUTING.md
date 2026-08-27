@@ -266,6 +266,12 @@ medians, failing on more than a 7% regression. The pure-Python benchmarks ride
 along as a noise floor: they cannot be affected by how the Rust extension was
 built, so a result is only believed once it clears them.
 
+The base it compares against is the base branch **as it is now**, not the commit
+recorded when the pull request was opened. A pull request is checked out as its
+merge ref, so a stale base would attribute everything master did in the meantime
+to the branch -- which is how #198 came to be reported at +15.2% for a build
+byte-identical to one measuring +0.2%.
+
 The interleaving is not ceremony. Pairing each build with its own measurement --
 which this gate used to do -- leaves a ~16% artifact from the build cycle itself,
 more than twice the threshold it is judging against. A toolchain comparison built
