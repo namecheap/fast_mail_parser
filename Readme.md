@@ -1,340 +1,67 @@
 # fast_mail_parser
 
-![Test](https://github.com/namecheap/fast_mail_parser/workflows/Test/badge.svg)
-[![PyPI version](https://badge.fury.io/py/fast-mail-parser-ng.svg)](https://badge.fury.io/py/fast-mail-parser-ng)
-[![Downloads](https://pepy.tech/badge/fast-mail-parser-ng)](https://pepy.tech/project/fast-mail-parser-ng)
-
-> ## 📦 Now published as `fast-mail-parser-ng`
+> ## ⚠️ `fast-mail-parser-ng` is no longer maintained
 >
-> **Install it under the new name:**
+> **Install `fast-mail-parser` instead:**
 >
 > ```bash
-> pip install fast-mail-parser-ng
+> pip install fast-mail-parser
 > ```
 >
-> **Your code does not change.** The import path is still `fast_mail_parser`:
+> **Nothing in your code changes.** The import path has always been
+> `fast_mail_parser`, under either distribution name:
 >
 > ```python
 > from fast_mail_parser import parse_email
 > ```
 >
-> Migrating from `fast-mail-parser`? Change the name in your requirements file
-> and nothing else — no code edits, same API.
+> So the migration is one line in your requirements file, and nothing else:
 >
 > ```diff
-> - fast-mail-parser
-> + fast-mail-parser-ng
+> - fast-mail-parser-ng
+> + fast-mail-parser
 > ```
->
-> Looking for the old `fast-mail-parser` package? It is a different,
-> unmaintained upload frozen at 0.2.5 (June 2022) that this project cannot
-> publish to. See [Why the name changed](#why-the-name-changed).
 
-A very fast Python library for parsing `.eml` files. It is built on the Rust
-[mailparse](https://github.com/staktrace/mailparse) crate via
-[pyo3](https://github.com/PyO3/pyo3), and parses roughly **5–10x faster** than
-pure-Python implementations, depending on the CPU — see
-[Benchmark](#benchmark) for the measured spread and how to reproduce it.
+## Why this name existed
 
-## Quickstart
+`fast-mail-parser-ng` was a temporary home. The original `fast-mail-parser` name
+on PyPI belonged to an account this project no longer controlled and was frozen
+at an unmaintained 0.2.5 from June 2022; only a project owner can publish to a
+name, so fixes could not reach it. Rather than hold releases behind a PEP 541
+transfer queue indefinitely, 0.6.0 through 0.7.0 shipped here.
 
-```bash
-pip install fast-mail-parser-ng
-```
+Ownership of the original name has since been transferred directly, so releases
+go back to it from **0.8.0** onwards.
 
-```python
-from fast_mail_parser import parse_email
+## What happens to this project
 
-with open("message.eml", "rb") as f:
-    email = parse_email(f.read())
+**0.7.1 is the final release under this name.** Its code is identical to 0.7.0 —
+only this notice changed — so upgrading to it gains you nothing but the warning.
 
-print(email.subject)
-print(email.text_plain[0])
-```
+The project is being **archived** on PyPI: read-only, taking no further releases.
+The versions published here stay installable, so anything pinning `0.6.0`,
+`0.6.1`, `0.7.0` or `0.7.1` keeps working. Archiving marks a project finished; it
+removes nothing.
 
-That is the whole surface for the common case. See [Usage](#usage) for the full
-API, and [Python support](#python-support) for wheel coverage.
+## What you are missing by staying
 
-Coming from the stdlib `email` module, or upgrading from 0.6.x? See the
-[migration guide](https://github.com/namecheap/fast_mail_parser/blob/master/docs/migrating.md) — its snippets are
-executed in CI, so they cannot go stale — and
-[compatibility.md](https://github.com/namecheap/fast_mail_parser/blob/master/docs/compatibility.md) for every known
-difference from the stdlib, each one enforced by a test.
+Everything released after 0.7.0 is only on `fast-mail-parser`:
 
-## Why the name changed
+- **`parse_email_tree` + `walk`** — the MIME tree with its structure intact, and
+  `message/rfc822` parts parsed rather than opaque
+- **`mode="metadata"`** — headers and the attachment inventory with nothing
+  decoded, ~3.9x faster
+- **`mode="lazy"`** — attachment content decoded on first access and cached
+- **`PyMail.warnings` and `strict=True`** — the lossy repairs a parse performed,
+  reported instead of silently applied
+- **27% faster batch parsing**, wire-order `headers`, a repair for messages
+  missing their header/body separator, and internal panics surfacing as
+  `ParseError`
 
-The `fast-mail-parser` name on PyPI belongs to a PyPI account this project no
-longer controls, and it is frozen at an unmaintained **0.2.5 from June 2022**.
-Only a project owner can publish to a name, so fixes could not reach it — the
-PEP 541 transfer request
-([pypi/support#11044](https://github.com/pypi/support/issues/11044)) has been
-open and unattended since June 2026.
+## Links
 
-Rather than hold releases behind that queue indefinitely, this project publishes
-under a name it owns. The import path was deliberately left as
-`fast_mail_parser` so the change costs you one line in a requirements file and
-no code. If the transfer is ever granted, `fast-mail-parser` will resume as an
-alias.
+- **Current project:** https://pypi.org/project/fast-mail-parser/
+- **Source and issues:** https://github.com/namecheap/fast_mail_parser
+- **Changelog:** https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md
 
-Full history in the [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md).
-
-## Python support
-
-Wheels target the CPython stable ABI (`cp311-abi3`): one wheel per platform
-covers every supported CPython version, including versions released after the
-package — a new Python no longer has to wait for a new release.
-
-| Python | Support |
-| --- | --- |
-| CPython 3.11+ (including future versions) | Prebuilt wheel |
-| CPython 3.13t/3.14t (free-threaded) | Builds from source; the extension currently re-enables the GIL on import ([#101](https://github.com/namecheap/fast_mail_parser/issues/101)) |
-| CPython ≤ 3.10 | Not supported (last compatible release: 0.2.5) |
-| PyPy | Not supported |
-
-13 prebuilt wheels ship per release: manylinux and musllinux across x86_64,
-i686, aarch64, armv7, s390x and ppc64le; Windows x64 and x86; macOS arm64. Every
-release is published via PyPI Trusted Publishing with PEP 740 attestations.
-
-## Benchmark
-
-All three libraries asked for the **same result** — subject, both body lists, and
-attachments with their payloads decoded — on the same message:
-
-| Library | Work performed | Min time | Relative |
-| --- | --- | --- | --- |
-| **fast_mail_parser** | parse + decode bodies + decode attachments | 2.09 ms | 1.00x |
-| mail-parser | `from_string` + `.parse()` + read attributes | 13.45 ms | 6.44x |
-| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 17.93 ms | 8.59x |
-
-Corpus: `tests/data/large_message.eml` (multipart/mixed, 6 MIME parts, 2 base64
-attachments). CPython 3.12.14 on Linux x86_64 (GitHub Actions `ubuntu-latest`),
-mail-parser 4.6.4, minimum of 31+ rounds.
-
-**These ratios move with the hardware, so treat them as a magnitude rather than a
-constant.** An earlier run of this same comparison on a faster CI runner recorded
-8.50x and 10.01x rather than 6.44x and 8.59x, and an Apple Silicon laptop gives
-5.25x and 6.42x: the interpreted parsers and the Rust extension do not scale
-together across CPUs. Regenerate the table for your own machine with
-`make bench-table`, which prints its own methodology line; CI also renders it
-into the job summary of every benchmark run.
-
-Two things this table deliberately does *not* do:
-
-- It does not quote the CI gate's numbers. That gate compares a revision against
-  its base rather than against another library, precisely because absolute
-  cross-implementation ratios are unstable between machines — they were observed
-  to swing ~26% between CI runners while within-run noise was ~0.3%.
-- It does not reuse the gate's mail-parser baseline, which measures
-  `MailParser.from_string` alone. That call never invokes `.parse()`, so it is a
-  stable number for regression detection but not a fair cross-library figure.
-
-## Usage
-
-`parse_email` accepts the raw message as `str` or `bytes` and returns a
-`PyMail`. It raises `ParseError` if the payload cannot be parsed.
-
-`PyMail` exposes the following attributes:
-
-| Attribute | Type | Description |
-| --- | --- | --- |
-| `subject` | `str` | Subject header (empty string if missing). |
-| `date` | `str` | Date header (empty string if missing). |
-| `date_parsed` | `datetime \| None` | `date` as a tz-aware UTC datetime; computed on access. |
-| `from_` | `PyAddress \| None` | The `From` mailbox. Named `from_`; `from` is a keyword. |
-| `to` / `cc` / `bcc` / `reply_to` | `list[PyAddress]` | Recipients, groups flattened. |
-| `text_plain` | `list[str]` | All `text/plain` bodies. |
-| `text_html` | `list[str]` | All `text/html` bodies. |
-| `headers` | `dict[str, list[str]]` | All values of every header, in order. |
-| `attachments` | `list[PyAttachment]` | Non-body parts (see below). |
-
-Each `PyAttachment` has:
-
-| Attribute | Type | Description |
-| --- | --- | --- |
-| `mimetype` | `str` | The part's media type. |
-| `filename` | `str` | See below; `""` when the part declares none. |
-| `content` | `bytes` | Decoded bytes, transfer-encoding undone. |
-| `content_id` | `str \| None` | `Content-ID` with angle brackets stripped. |
-| `disposition` | `str \| None` | Raw `Content-Disposition` token, or `None` if absent. |
-
-### Addresses
-
-Address headers are parsed rather than handed back as strings — RFC 5322 address
-syntax (display names, quoted strings containing commas, groups, comments) is
-exactly what hand-rolled regexes get wrong:
-
-```python
-mail.from_.display_name   # 'Jane Doe'  (None for a bare address)
-mail.from_.address        # 'jane@example.com'
-
-[a.address for a in mail.to]   # ['a@example.com', 'b@example.com']
-```
-
-- RFC 5322 groups (`To: team: a@x, b@x;`) are **flattened** to their member
-  mailboxes; the group name is structure and is not exposed.
-- RFC 2047 encoded display names are decoded, including inside quoted names.
-- A header that does not parse yields an empty list (or `None` for `from_`)
-  rather than raising — a malformed `To:` never fails an otherwise good message,
-  and the raw value stays in `headers`.
-
-### Headers
-
-`headers` maps each header name to a **list** of every value it appeared with,
-in message order, so repeated fields survive:
-
-```python
-mail.headers["Received"]   # ['from mx1...', 'from mx2...', 'from mx3...']
-mail.headers["From"]       # ['sender@example.com'] -- always a list
-```
-
-`subject` and `date` are read from the parsed headers directly rather than out
-of this map, so they always reflect the first occurrence of their field.
-
-### Resolving inline images (`cid:`)
-
-`content_id` is exposed without angle brackets, which is the form RFC 2392
-`cid:` URLs use — so resolving the images an HTML body references is a lookup:
-
-```python
-import re
-
-mail = parse_email(raw)
-by_cid = {a.content_id: a for a in mail.attachments if a.content_id}
-
-for cid in re.findall(r'cid:([^"\'>\s]+)', mail.text_html[0]):
-    attachment = by_cid.get(cid)
-    if attachment:
-        print(cid, attachment.mimetype, len(attachment.content), "bytes")
-```
-
-`disposition` reports the part's raw `Content-Disposition` token, and
-distinguishes an absent header (`None`) from an explicit `inline` — the two are
-different statements about intent.
-
-### Parsing a batch
-
-`parse_many` parses a whole batch in one call, in parallel, releasing the GIL for
-the batch rather than per message:
-
-```python
-from fast_mail_parser import ParseError, parse_many
-
-results = parse_many(payloads)              # list[str | bytes] in, results in input order
-results = parse_many(payloads, threads=8)   # cap the workers; default is the machine's
-```
-
-Each slot is a `PyMail` **or** a `ParseError` instance — returned, not raised —
-so one malformed message does not cost you the rest of the batch, and inputs zip
-cleanly to outcomes:
-
-```python
-for payload, outcome in zip(payloads, parse_many(payloads)):
-    if isinstance(outcome, ParseError):
-        quarantine(payload, reason=str(outcome))
-    else:
-        index(outcome)
-```
-
-Pass `raise_on_error=True` to raise the first failure instead.
-
-**Chunk large workloads.** Every parsed message is materialised before the call
-returns, so a batch of ten thousand one-megabyte mails holds essentially all of it
-decoded at once. Feed it in chunks of a few hundred rather than a whole mailbox.
-
-### Error handling
-
-`parse_email` raises a subtype of `ParseError`, chosen by what actually went
-wrong:
-
-| Exception | Meaning |
-| --- | --- |
-| `HeaderParseError` | The header section could not be parsed — usually the input is not an email at all. |
-| `MimeStructureError` | Malformed MIME structure, or a resource cap tripped: over 100 MiB of input, or nesting deeper than 256 levels. |
-| `DecodeError` | A part's `Content-Transfer-Encoding` did not decode (bad base64, bad quoted-printable). |
-
-All three inherit from `ParseError`, so existing code keeps working:
-
-```python
-from fast_mail_parser import DecodeError, ParseError, parse_email
-
-try:
-    mail = parse_email(raw)
-except DecodeError:
-    quarantine(raw)          # one part's encoding is broken
-except ParseError:
-    reject(raw)              # not parseable at all
-```
-
-The distinction is worth acting on: a `DecodeError` says one part of an otherwise
-plausible message is corrupt, while a `HeaderParseError` usually says the bytes
-were never an email.
-
-### Bodies vs. attachments
-
-The two are disjoint — a part appears in exactly one place. Classification
-follows RFC 2183 rather than the media type alone:
-
-- A part is **body text** (`text_plain` / `text_html`) when it is `text/plain`
-  or `text/html` **and** is not marked `Content-Disposition: attachment`. A
-  `Content-Type; name` parameter does not change this — an inline text part
-  stays in the body.
-- Every other part is an **attachment**. That includes a `text/plain` part
-  marked `Content-Disposition: attachment` (its lines are *not* mixed into the
-  body) and inline images referenced by `Content-ID`.
-- `multipart/*` container nodes are MIME structure and appear in neither list.
-
-`filename` comes from the `Content-Disposition` `filename` parameter — including
-RFC 2231 extended values such as `filename*=utf-8''...` — falling back to the
-`Content-Type` `name` parameter. It is `""` when the part declares neither,
-which is normal for inline images.
-
-```python
-import sys
-
-from fast_mail_parser import parse_email, ParseError
-
-# parse_email accepts both str and bytes; reading in binary mode is safest.
-with open('message.eml', 'rb') as f:
-    message_payload = f.read()
-
-try:
-    email = parse_email(message_payload)
-except ParseError as e:
-    print("Failed to parse email:", e)
-    sys.exit(1)
-
-print("Subject:", email.subject)
-print("Date:", email.date)
-
-# headers is a dict[str, list[str]]: every occurrence of a repeated header is
-# kept, in the order it appeared. Single-valued headers are one-element lists.
-for name, values in email.headers.items():
-    for value in values:
-        print(f"{name}: {value}")
-
-# So a delivery path stays intact -- for Received, the first entry is the most
-# recent hop.
-for hop in email.headers.get("Received", []):
-    print("Received:", hop)
-
-# text_plain and text_html are lists of strings (one entry per matching part).
-for body in email.text_plain:
-    print("Plain text body:", body)
-
-for body in email.text_html:
-    print("HTML body:", body)
-
-# attachments is a list of PyAttachment objects.
-for attachment in email.attachments:
-    print("Attachment:", attachment.filename)
-    print("  mimetype:", attachment.mimetype)
-    print("  size:", len(attachment.content), "bytes")  # content is bytes
-```
-
-## Contributing
-
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
-
-Please make sure to update tests as appropriate.
-
-See [CONTRIBUTING.md](https://github.com/namecheap/fast_mail_parser/blob/master/CONTRIBUTING.md) for how to build from source, run the tests, and the PR conventions (linting, CI, DCO sign-off).
+Licensed under Apache-2.0.
