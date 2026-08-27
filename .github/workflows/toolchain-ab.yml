@@ -3,19 +3,25 @@ name: Toolchain A/B
 # Compares the SAME source built with two Rust toolchains, to decide whether the
 # pin in rust-toolchain.toml can be lifted (#120).
 #
-# rustc 1.98.0 makes this crate ~30% slower than 1.97.1, which is why the
-# toolchain is pinned. The original estimate (~26%) came from comparing separate
-# CI runs, where between-runner variance is itself ~26% -- the same order as the
-# effect. Building both toolchains in ONE job gives a real measurement:
+# History: a 1.98.0 build made this crate ~30% slower than 1.97.1, which is why
+# the toolchain is pinned. The original estimate (~26%) came from comparing
+# separate CI runs, where between-runner variance is itself ~26% -- the same
+# order as the effect it was trying to measure.
 #
-#   parse_message  1.376 ms -> 1.788 ms  (+30.0%)
-#   full_read      1.408 ms -> 1.811 ms  (+28.7%)
-#   mail-parser     9.960 ms -> 10.187 ms  (+2.3%)  <- pure-Python control
+# Building both toolchains in one job fixed that, but not completely: the two
+# sides still need separate build-and-measure cycles, and two such cycles read
+# ~16% apart on a no-op. That was fine for confirming a 30% effect and useless
+# for deciding whether a candidate is within 7%. A run on 2026-08-27 showed
+# exactly the problem -- the verdict said -0.2% while the pure-Python control,
+# which cannot be affected by the Rust toolchain at all, moved 10.5%.
 #
-# The control barely moves, which is what makes the other two trustworthy.
+# So the measurement is now interleaved: build both wheels first, then alternate
+# rounds between the two installed builds and take each side's median. The
+# pure-Python benchmarks come along as a noise floor, and a result is only
+# believed once it clears them. See .github/scripts/ab_median.py.
 #
-# Run it when a new Rust stable appears: if the candidate is within tolerance,
-# the pin can be lifted. That is the bar rust-toolchain.toml asks for.
+# Run it when a new Rust stable appears. If the candidate is within tolerance,
+# the pin can be lifted -- that is the bar rust-toolchain.toml asks for.
 on:
   workflow_dispatch:
     inputs:
@@ -28,6 +34,9 @@ on:
       tolerance:
         description: "Max tolerated slowdown vs baseline, percent"
         default: "7"
+      rounds:
+        description: "Interleaved measurement rounds per side"
+        default: "3"
 
 permissions:
   contents: read
@@ -45,54 +54,91 @@ jobs:
 
       - name: Install both toolchains
         run: |
+          python -m pip install -q --upgrade pip
           rustup toolchain install --profile minimal --no-self-update \
             "${{ inputs.baseline }}" "${{ inputs.candidate }}"
-          rustup run "${{ inputs.baseline }}" rustc --version
-          rustup run "${{ inputs.candidate }}" rustc --version
+          {
+            echo "### Toolchains"
+            echo
+            echo "- baseline: \`$(rustup run "${{ inputs.baseline }}" rustc --version)\`"
+            echo "- candidate: \`$(rustup run "${{ inputs.candidate }}" rustc --version)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Benchmark the baseline toolchain
+      - name: Build with the baseline toolchain
         env:
-          # Overrides rust-toolchain.toml, which an rustup toolchain file cannot
-          # do from the other direction. Verified precedence: this env var wins.
+          # Overrides rust-toolchain.toml, which a toolchain file cannot do from
+          # the other direction. Verified precedence: this env var wins over both
+          # the toolchain file and the setup action's input.
           RUSTUP_TOOLCHAIN: ${{ inputs.baseline }}
-        run: |
-          python -m venv "$RUNNER_TEMP/venv-baseline"
-          "$RUNNER_TEMP/venv-baseline/bin/pip" install -q --upgrade pip
-          "$RUNNER_TEMP/venv-baseline/bin/pip" install -q ".[test]"
-          "$RUNNER_TEMP/venv-baseline/bin/pytest" -q tests/benchmark \
-            --benchmark-min-rounds=25 --benchmark-json=baseline.json
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-baseline"
 
-      - name: Benchmark the candidate toolchain
+      - name: Build with the candidate toolchain
         env:
           RUSTUP_TOOLCHAIN: ${{ inputs.candidate }}
-        run: |
           # A separate target dir is load-bearing: without it cargo reuses the
           # baseline's artifacts and the "candidate" is silently the same binary,
           # which reports a reassuring 0% and means nothing.
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/target-candidate"
-          python -m venv "$RUNNER_TEMP/venv-candidate"
-          "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --upgrade pip
-          "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --no-cache-dir ".[test]"
-          "$RUNNER_TEMP/venv-candidate/bin/pytest" -q tests/benchmark \
-            --benchmark-min-rounds=25 --benchmark-json=candidate.json
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-candidate
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-candidate"
+
+      - name: Check the two builds actually differ
+        run: |
+          base_whl=$(ls "$RUNNER_TEMP/w-baseline"/*.whl)
+          cand_whl=$(ls "$RUNNER_TEMP/w-candidate"/*.whl)
+          # Both sides are abi3 wheels of the same version, so the filenames are
+          # identical and the tag says nothing here (unlike the abi3 A/B).
+          #
+          # Hash the extension itself, not the wheel: a wheel is a zip, and zip
+          # metadata could differ between two byte-identical builds, which would
+          # make this guard pass when it should fail. The `.so` is the artefact
+          # the measurement actually runs, and two toolchains cannot produce the
+          # same bytes for it.
+          base_hash=$(unzip -p "$base_whl" '*.so' | sha256sum | cut -d' ' -f1)
+          cand_hash=$(unzip -p "$cand_whl" '*.so' | sha256sum | cut -d' ' -f1)
+          echo "baseline  extension sha256: $base_hash"
+          echo "candidate extension sha256: $cand_hash"
+          if [ "$base_hash" = "$cand_hash" ]; then
+            echo "::error::both toolchains produced an identical extension -- the comparison would be meaningless"
+            exit 1
+          fi
+          echo "base_whl=$base_whl" >> "$GITHUB_ENV"
+          echo "cand_whl=$cand_whl" >> "$GITHUB_ENV"
+
+      - name: Install both builds
+        run: |
+          for side in baseline candidate; do
+            python -m venv "$RUNNER_TEMP/venv-$side"
+            "$RUNNER_TEMP/venv-$side/bin/pip" install -q --upgrade pip
+          done
+          # `[test]` on the wheel path pulls the test extra from the wheel's own
+          # metadata, so the pinned versions come from pyproject.toml and neither
+          # venv rebuilds the extension.
+          "$RUNNER_TEMP/venv-baseline/bin/pip" install -q --no-cache-dir "${base_whl}[test]"
+          "$RUNNER_TEMP/venv-candidate/bin/pip" install -q --no-cache-dir "${cand_whl}[test]"
+
+      - name: Measure, interleaved
+        run: |
+          for round in $(seq 1 "${{ inputs.rounds }}"); do
+            for side in baseline candidate; do
+              echo "::group::round $round — $side"
+              "$RUNNER_TEMP/venv-$side/bin/pytest" -q tests/benchmark \
+                --benchmark-min-rounds=25 \
+                --benchmark-json="$side-$round.json"
+              echo "::endgroup::"
+            done
+          done
 
       - name: Compare
         env:
-          BENCH_MAX_REGRESSION_PCT: ${{ inputs.tolerance }}
-          # Not meaningful here: this compares toolchains, not the library
-          # against another implementation. Set low so it never masks the verdict.
-          BENCH_MIN_SPEEDUP: "1.0"
+          AB_THRESHOLD_PCT: ${{ inputs.tolerance }}
         run: |
-          echo "candidate: ${{ inputs.candidate }}   baseline: ${{ inputs.baseline }}"
-          # Same gate script as the PR benchmark, pointed at toolchains instead
-          # of revisions: "this revision" is the candidate toolchain.
-          python .github/scripts/check_benchmark.py candidate.json baseline.json
+          python .github/scripts/ab_median.py \
+            --a-label "${{ inputs.candidate }}" --b-label "${{ inputs.baseline }}" \
+            --a candidate-*.json --b baseline-*.json
 
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: toolchain-ab-json
-          path: |
-            baseline.json
-            candidate.json
+          path: "*-[0-9].json"
