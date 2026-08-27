@@ -6,6 +6,11 @@ dropping, or retyping an attribute. These tests freeze that surface: the exact
 exported names, the attribute set and types of PyMail / PyAttachment, the input
 types parse_email accepts, and the errors it raises.
 
+The sets below are frozen, not descriptive: adding to one is a deliberate act.
+`warnings` on PyMail and the `ParseWarning` export were added that way for the
+parse-warnings channel (#100) -- purely additive, so nothing an existing
+consumer reads changed name or type.
+
 A failure here means a consumer-visible change. Treat it as a deliberate API
 break (update consumers, bump the version) — do not loosen the test to make it
 pass.
@@ -15,7 +20,7 @@ pass.
 import pytest
 
 import fast_mail_parser
-from fast_mail_parser import ParseError, PyAttachment, PyMail, parse_email
+from fast_mail_parser import ParseError, ParseWarning, PyAttachment, PyMail, parse_email
 
 EXPECTED_EXPORTS = {
     "parse_email",
@@ -32,6 +37,7 @@ EXPECTED_EXPORTS = {
     "PyAttachment",
     "PyAttachmentMetadata",
     "PyAddress",
+    "ParseWarning",
 }
 EXPECTED_MAIL_ATTRS = {
     "subject",
@@ -46,6 +52,10 @@ EXPECTED_MAIL_ATTRS = {
     "reply_to",
     "attachments",
     "headers",
+    # Added deliberately with the parse-warnings channel (#100). Additive: no
+    # existing attribute changed name or type, so an `except`/getattr written
+    # against the old surface is unaffected.
+    "warnings",
 }
 EXPECTED_ATTACHMENT_ATTRS = {
     "mimetype",
@@ -54,6 +64,21 @@ EXPECTED_ATTACHMENT_ATTRS = {
     "content_id",
     "disposition",
 }
+EXPECTED_WARNING_ATTRS = {
+    "kind",
+    "part_path",
+    "detail",
+}
+
+# An unrecognised charset label: mailparse's own test suite pins `x-unknown` as
+# a label the charset crate does not resolve, so this is the documented way to
+# reach the us-ascii fallback rather than a guess at what is unrecognised.
+CHARSET_FALLBACK_MESSAGE = (
+    b"Subject: fallback\r\n"
+    b"Content-Type: text/plain; charset=x-unknown\r\n"
+    b"\r\n"
+    b"body\r\n"
+)
 
 # First line starts with whitespace, so it is an overhanging continuation with
 # no preceding header key — mailparse rejects this, surfacing as ParseError.
@@ -103,6 +128,8 @@ def test__pymail_attribute_types(valid_mail: PyMail):
 
     assert isinstance(valid_mail.attachments, list)
 
+    assert isinstance(valid_mail.warnings, list)
+
 
 # --- PyAttachment surface ---------------------------------------------------
 
@@ -121,6 +148,30 @@ def test__pyattachment_attribute_types(attachment_mail: PyMail):
         assert isinstance(attachment.filename, str)
         # content must stay `bytes` (not e.g. list[int]) for binary-safe consumers.
         assert isinstance(attachment.content, bytes)
+
+
+# --- ParseWarning surface ---------------------------------------------------
+
+
+def test__parsewarning_attribute_set_is_frozen():
+    mail = parse_email(CHARSET_FALLBACK_MESSAGE)
+
+    assert mail.warnings, "fixture must produce a warning"
+    for warning in mail.warnings:
+        assert _public_attrs(warning) == EXPECTED_WARNING_ATTRS
+
+
+def test__parsewarning_attribute_types():
+    mail = parse_email(CHARSET_FALLBACK_MESSAGE)
+
+    assert mail.warnings, "fixture must produce a warning"
+    for warning in mail.warnings:
+        assert isinstance(warning, ParseWarning)
+        # All three are `str`, including part_path -- "" rather than None for a
+        # message-level warning, so consumers never branch on the type.
+        assert isinstance(warning.kind, str)
+        assert isinstance(warning.part_path, str)
+        assert isinstance(warning.detail, str)
 
 
 # --- parse_email input contract ---------------------------------------------

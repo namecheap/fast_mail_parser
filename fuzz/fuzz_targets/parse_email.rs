@@ -55,6 +55,11 @@ fn canonical(mail: &mail_parser::Mail) -> String {
             &mail.reply_to,
             attachments,
             headers,
+            // Included so "every field" stays true, and because the order of
+            // repairs is part of the contract: strict mode reports the first
+            // one, so a nondeterministic order would make it nondeterministic
+            // too. Compared unsorted, deliberately.
+            &mail.warnings,
         )
     )
 }
@@ -85,7 +90,18 @@ fn total_output_bytes(mail: &mail_parser::Mail) -> usize {
         .iter()
         .map(|(key, values)| key.len() + values.iter().map(String::len).sum::<usize>())
         .sum();
-    bodies + attachments + headers + mail.subject.len() + mail.date.len()
+    // Warning text counts too. A repair emits a constant-ish detail string plus
+    // a copy of the label or value it could not read, and triggering one costs
+    // fewer input bytes than it emits -- roughly 3.5x for a message that is
+    // nothing but parts with unrecognised charsets. That is comfortably inside
+    // the factor below, and counting it is what would catch a future kind whose
+    // detail is long enough not to be.
+    let warnings: usize = mail
+        .warnings
+        .iter()
+        .map(|w| w.kind.len() + w.part_path.len() + w.detail.len())
+        .sum();
+    bodies + attachments + headers + warnings + mail.subject.len() + mail.date.len()
 }
 
 /// Panic on purpose when `FMP_FUZZ_CANARY` is set in the environment.
