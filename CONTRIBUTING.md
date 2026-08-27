@@ -297,6 +297,18 @@ Both `lto = "fat"` and `codegen-units = 1` are already set, so a codegen-unit
 boundary is never the explanation -- worth knowing, since it is the natural first
 guess.
 
+**A version bump alone moves the decode path ~3.5%.** Measured both directions
+(#204): nothing in the crate reads `CARGO_PKG_VERSION`, but the version reaches
+the compiler as crate metadata, which feeds symbol naming and therefore layout.
+So the gate on a release-cut PR will report a few percent either way, above the
+noise floor, and that is the version string rather than the change. `parse_metadata`
+is the tell -- it never decodes, so it stays flat while everything else moves.
+
+This also bounds what the 7% threshold can police: a change that genuinely costs
+3% is not distinguishable from one that merely moved the version. If you need to
+know which you have, revert the version on a throwaway branch and let the gate
+measure that alone.
+
 ## Linting
 
 The following checks are run in CI. Run them locally before opening a PR:
