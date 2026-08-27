@@ -71,7 +71,27 @@ fn leaf_contents(part: &mail_parser::MimePart, out: &mut Vec<Vec<u8>>) {
     }
 }
 
+/// Panic on purpose when `FMP_FUZZ_CANARY` is set, so this target's own path to
+/// a filed issue can be rehearsed.
+///
+/// Duplicated from `parse_email.rs` on purpose. The canary has to live in every
+/// target, because the deep run is a matrix and its drill verdict is decided per
+/// job: a target without one reports "the canary did not crash, so the alarm is
+/// not working", which is true of that job and misleading about the alarm. That
+/// is exactly what the first drill after the matrix landed did.
+///
+/// Armed through the environment rather than an input: libFuzzer learns the
+/// operands of comparisons against input and would find a magic value, and a
+/// planted input persists in the cached corpus. Both of those happened.
+fn canary_armed() -> bool {
+    std::env::var_os("FMP_FUZZ_CANARY").is_some_and(|value| !value.is_empty())
+}
+
 fuzz_target!(|data: &[u8]| {
+    if canary_armed() {
+        panic!("fuzz canary: this crash is a deliberate test of the reporting path");
+    }
+
     let full = mail_parser::parse_email(data);
     let metadata = mail_parser::parse_email_metadata(data);
 
