@@ -18,21 +18,44 @@ TITLE="Deep fuzz: crasher in parse_email"
 mkdir -p fuzz/artifacts
 
 count=$(find fuzz/artifacts -type f | wc -l | tr -d ' ')
-files=$(find fuzz/artifacts -type f | sort | sed 's|^|- `|; s|$|`|')
+# Also capped: 45 crashers is a plausible haul, and an unbounded list is how a
+# report grows past what GitHub will accept.
+MAX_LISTED=20
+files=$(find fuzz/artifacts -type f | sort | head -n "$MAX_LISTED" \
+  | sed 's|^|- `|; s|$|`|')
 [ -n "$files" ] || files="- (none on disk; see the log)"
+if [ "$count" -gt "$MAX_LISTED" ]; then
+  files="${files}
+- ... and $((count - MAX_LISTED)) more, in the artifact"
+fi
 
 # The tail carries libFuzzer's dedup token and where it wrote the reproducer.
-excerpt=$(tail -n 40 fuzz-output.log 2>/dev/null || echo "(no log captured)")
+#
+# Capped by BYTES as well as lines, because a line has no bound: an assertion
+# message can be as large as the values it prints, and this harness compares whole
+# header maps. Forty such lines came to hundreds of kilobytes, the body went to
+# `gh` as a command-line argument, and the report died with "Argument list too
+# long" -- on the first real finding, so 45 crashers went unreported.
+EXCERPT_BYTES=3000
+excerpt=$(tail -n 40 fuzz-output.log 2>/dev/null | tail -c "$EXCERPT_BYTES" \
+  || echo "(no log captured)")
+[ -n "$excerpt" ] || excerpt="(no log captured)"
 
 # ...but not reliably the panic message. A Rust panic prints the location and
 # then the message on the following line, and 40 lines of stack frames can push
 # both out of the tail -- which is exactly what happened on the first drill. So
 # pull it out explicitly: it is the single most useful line in the log.
-panic=$(grep -m1 -A2 "panicked at" fuzz-output.log 2>/dev/null || true)
+# Capped for the same reason as the excerpt: a panic message is as large as the
+# values it prints, and this harness prints whole header maps. Uncapped, this
+# single field reached 40 KB on the first real finding.
+PANIC_BYTES=1500
+panic=$(grep -m1 -A2 "panicked at" fuzz-output.log 2>/dev/null \
+  | head -c "$PANIC_BYTES" || true)
 if [ -z "$panic" ]; then
   # No Rust panic: a timeout, an OOM, or a signal. libFuzzer's own summary says
   # which.
-  panic=$(grep -m1 -E "^(SUMMARY|==[0-9]+==ERROR)" fuzz-output.log 2>/dev/null || true)
+  panic=$(grep -m1 -E "^(SUMMARY|==[0-9]+==ERROR)" fuzz-output.log 2>/dev/null \
+    | head -c "$PANIC_BYTES" || true)
 fi
 [ -n "$panic" ] || panic="(the log records no panic or summary line)"
 
@@ -90,10 +113,27 @@ gh label create "$LABEL" \
 existing=$(gh issue list --label "$LABEL" --state open --limit 1 \
   --json number --jq '.[0].number // empty')
 
+# Written to a file rather than passed as an argument: a single argv string is
+# capped by the kernel (MAX_ARG_STRLEN, 128 KiB), and this body is assembled from
+# fuzzer output whose size is not ours to choose. GitHub also rejects a body over
+# 65536 characters, so it is trimmed to fit with a line saying so.
+body_file=$(mktemp)
+trap 'rm -f "$body_file"' EXIT
+printf '%s\n' "$body" > "$body_file"
+
+MAX_BODY=60000
+if [ "$(wc -c < "$body_file")" -gt "$MAX_BODY" ]; then
+  head -c "$MAX_BODY" "$body_file" > "${body_file}.trimmed"
+  printf '\n\n_Report trimmed to %s bytes; the full log is in the artifact._\n' \
+    "$MAX_BODY" >> "${body_file}.trimmed"
+  mv "${body_file}.trimmed" "$body_file"
+  echo "report trimmed to $MAX_BODY bytes"
+fi
+
 if [ -n "$existing" ]; then
   echo "commenting on existing #${existing}"
-  gh issue comment "$existing" --body "$body"
+  gh issue comment "$existing" --body-file "$body_file"
 else
   echo "opening a new issue"
-  gh issue create --title "$TITLE" --label "$LABEL" --body "$body"
+  gh issue create --title "$TITLE" --label "$LABEL" --body-file "$body_file"
 fi

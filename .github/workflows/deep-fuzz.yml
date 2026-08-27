@@ -197,6 +197,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verdict
+        # Always, even when reporting failed. Reporting is how a finding reaches a
+        # human, but the verdict is how it reaches CI, and one must not be able to
+        # swallow the other -- on the first real finding the reporter died and took
+        # the verdict's step with it.
+        if: always()
         # The drill and a real finding both crash, so "did it crash" is not the
         # verdict on its own. Before this, a working drill went red and a drill
         # whose canary went UNDETECTED went green -- the signal was inverted, and
