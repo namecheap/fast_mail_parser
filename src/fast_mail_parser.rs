@@ -449,9 +449,7 @@ impl ParseWarning {
     fn __repr__(&self) -> String {
         format!(
             "<ParseWarning {} {:?}: {}>",
-            self.kind,
-            self.part_path,
-            self.detail
+            self.kind, self.part_path, self.detail
         )
     }
 }
