@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-28
+
+Measured against the published 0.8.0 wheel on an Apple M4 (interleaved, 3 rounds, controls
+within 3.8%): full parse **1.079 -> 0.225 ms**, `parse_email_tree` 1.071 -> 0.216 ms,
+`parse_many` (8 x 767 KiB) 8.852 -> 1.835 ms, `mode="metadata"` **0.365 -> 0.030 ms**.
+
+The version bump itself moved the decoding paths **+3-7%** against the last master commit on
+the M4 (two interleaved A/Bs, metadata paths within 0.7%) -- the code-layout effect #204
+describes, now measured at release time rather than discovered later. The two loops that made
+it 0-96% are fixed; what remains is the base64 decode proper.
+
 ### Changed
 
 - **The base64 whitespace strip in the vendored mailparse is now dependency-free**, and
@@ -698,7 +709,9 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.5.0...v0.6.0
