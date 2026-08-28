@@ -316,8 +316,9 @@ builds at +/-0.2%.
 
 The fix replaces that scan with `memchr::memmem` -- vectorised, and laid out
 independently of this crate -- via the patched copy in `vendor/mailparse`
-(upstream as staktrace/mailparse#142; `vendor/mailparse/PATCH.md` has the removal
-steps). Metadata mode went 0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
+(a permanent carry: upstream declined the change as an added dependency;
+`vendor/mailparse/PATCH.md` has the sync procedure). Metadata mode went
+0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
 
 With that gone, sampling the *full* parse put **77.7%** of what remained in
 `decode_base64`'s whitespace filter -- `iter().filter().cloned().collect()`, a

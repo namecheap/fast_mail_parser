@@ -19,8 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same compiler and so cannot see a compiler regression; bumping it is a
   measured change (`toolchain-ab.yml`), described in `rust-toolchain.toml`.
 - **Base64 whitespace is stripped with `memchr`** instead of a test-and-push per byte,
-  the second change in the patched `vendor/mailparse` (also on
-  [staktrace/mailparse#142](https://github.com/staktrace/mailparse/pull/142)). With the
+  the second change in the patched `vendor/mailparse`. With the
   boundary search fixed, that filter was **77.7%** of a full parse of the 767 KiB fixture
   -- more than the base64 decode itself -- and the toolchain A/B showed it carried the
   rest of the rustc placement sensitivity: decoding paths still moved +22% on one CPU
@@ -34,9 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.830 -> 0.281 ms for the same pair, and 1.094 -> 0.281 ms against the master before
   either change.
 - **The MIME boundary search is now `memchr::memmem`** instead of a byte-by-byte scan,
-  through a patched copy of `mailparse` 0.16.1 in `vendor/mailparse` (upstream as
-  [staktrace/mailparse#142](https://github.com/staktrace/mailparse/pull/142); see
-  `vendor/mailparse/PATCH.md` for the removal steps once it ships). That one loop was
+  through a patched copy of `mailparse` 0.16.1 in `vendor/mailparse`. The copy is
+  permanent: the change was proposed upstream and declined (staktrace/mailparse#142 --
+  no new external dependencies), so `vendor/mailparse/PATCH.md` describes how to merge
+  future mailparse releases into it rather than how to remove it. That one loop was
   **96.5%** of a metadata-mode parse, and it was the codegen cliff #120 and #204 were
   circling: the same 88 instructions ran at half speed on x86-64 depending on where the
   linker placed them, so a rustc minor version or a version-string bump could move the
