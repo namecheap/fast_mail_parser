@@ -219,11 +219,13 @@ by disagreeing with the original:
 - the tree parses deterministically, and every attachment the flat parse reports
   appears as some leaf's content
 
-A **weekly deep run** (`.github/workflows/deep-fuzz.yml`, Mondays) fuzzes for 30
-minutes per target with no fixed seed and, importantly, **caches the corpus
-between runs**,
-so coverage compounds instead of restarting from the fixtures every week — that
-accumulation is most of what makes a scheduled run worth more than the PR pass.
+An **on-demand deep run** (`.github/workflows/deep-fuzz.yml`, `workflow_dispatch`)
+fuzzes for 15 minutes per target by default with no fixed seed and, importantly,
+**caches the corpus between runs** and seeds a cold cache from the published
+campaign corpus, so coverage compounds instead of restarting from the fixtures —
+that accumulation is most of what makes a long run worth more than the PR pass.
+It used to run weekly; the schedule was stopped on 2026-08-28 after the 24 CPU-hour
+campaign below, so dispatch it after a change to the parse path.
 
 **The initial 24 CPU-hours** the fuzzing issue (#102) asked for ran on 2026-08-28,
 locally: two targets, five forked workers each, 8,640 s per target, ASan, on an

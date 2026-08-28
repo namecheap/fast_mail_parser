@@ -2,21 +2,22 @@ name: Deep fuzz
 
 # The PR job fuzzes for 60 seconds with a fixed seed: enough to catch a gross
 # regression, not enough to explore. Real fuzzing needs time and a corpus that
-# grows, which is what this is for (#102).
-#
-# Two things make a weekly run worth more than 30x the PR job:
+# grows, which is what this is for (#102). It runs on demand: the initial
+# 24 CPU-hour campaign ran locally on 2026-08-28 and found nothing, and the
+# weekly schedule that used to be here was stopped the same day; dispatch it
+# after a change to the parse path, or to refresh the corpus asset.
 #
 # Two targets run in parallel, each with its own corpus: `parse_email` on the flat
 # parse, and `parse_agreement` checking the metadata and tree APIs against it
-# (#97, #99). The per-target budget is halved so the weekly runner cost is
-# unchanged.
+# (#97, #99).
 #
-#   - The corpus is cached and restored, so coverage compounds week over week
-#     instead of restarting from the fixtures every time. This is most of the
-#     value: a fuzzer's reach is mostly a function of the corpus it inherits.
+#   - The corpus is cached and restored, so coverage compounds across runs
+#     instead of restarting from the fixtures every time; on a cold cache it is
+#     seeded from the campaign corpus published as a release asset. This is most
+#     of the value: a fuzzer's reach is mostly a function of the corpus it inherits.
 #   - No fixed seed, so each run explores a different path. The PR job pins the
 #     seed deliberately, to stay reproducible; here that would mean repeating one
-#     search every week forever.
+#     search forever.
 #
 # Input size is capped, because leaving it uncapped made the run slow. libFuzzer
 # takes its default limit from the largest seed, and the seed corpus contains a
@@ -29,10 +30,6 @@ name: Deep fuzz
 # A crasher becomes an artifact, a minimized reproducer, and an entry on a single
 # pinned issue rather than a new issue per run.
 on:
-  schedule:
-    # Mondays, 03:17 UTC. Off the hour: scheduled jobs cluster there and get
-    # queued behind everyone else's.
-    - cron: "17 3 * * 1"
   workflow_dispatch:
     inputs:
       seconds:

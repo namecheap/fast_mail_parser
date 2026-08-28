@@ -1,16 +1,21 @@
 version: 2
+# Version updates are PAUSED (limit 0 on every ecosystem) since 2026-08-28: no
+# scheduled tasks run in this repository. Delete the three limit lines to resume.
+# Security updates are a separate repository setting and are unaffected.
 updates:
   # Rust crate dependencies (Cargo.toml / Cargo.lock at the repo root).
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
 
   # GitHub Actions used by the workflows in .github/workflows.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0
 
   # Python test dependencies from pyproject.toml's [project.optional-dependencies]
   # (pytest, pytest-benchmark, mail-parser). Previously uncovered, so these were
@@ -20,3 +25,4 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 0

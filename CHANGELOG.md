@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **No more scheduled tasks.** The weekly deep-fuzz cron is removed (the workflow stays
+  dispatchable, with the same corpus caching and release-asset seeding) and dependabot
+  version updates are paused with `open-pull-requests-limit: 0` on all three ecosystems.
 - **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
   seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
   `parse_email` 12.1 M executions to 5,047 edges, `parse_agreement` 5.5 M to 5,502,
