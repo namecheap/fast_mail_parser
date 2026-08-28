@@ -225,6 +225,26 @@ between runs**,
 so coverage compounds instead of restarting from the fixtures every week — that
 accumulation is most of what makes a scheduled run worth more than the PR pass.
 
+**The initial 24 CPU-hours** the fuzzing issue (#102) asked for ran on 2026-08-28,
+locally: two targets, five forked workers each, 8,640 s per target, ASan, on an
+Apple M4. `parse_email` executed 12.1 M inputs and reached 5,047 edges,
+`parse_agreement` 5.5 M and 5,502; neither found a crash, timeout or OOM. The
+minimised corpora (3,135 and 4,234 inputs) are too large to commit -- 129 MB raw,
+8.3 MB compressed -- so they live as `fuzz-corpus-min.tar.gz` on the newest
+`fuzz-corpus-*` GitHub release, and the deep run seeds from that asset whenever
+its cache is cold. To start from it locally:
+
+```bash
+gh release download "$(gh release list --json tagName --jq '[.[].tagName|select(startswith("fuzz-corpus-"))]|sort|last')" \
+  --pattern fuzz-corpus-min.tar.gz --dir /tmp
+tar -xzf /tmp/fuzz-corpus-min.tar.gz -C fuzz/corpus/parse_email --strip-components=2 corpus-min/parse_email
+RUSTUP_TOOLCHAIN=nightly cargo fuzz run parse_email -- -fork=5 -ignore_crashes=1 -max_total_time=3600 -max_len=65536 -timeout=10
+```
+
+Fork mode keeps going after a crash and leaves each one in `fuzz/artifacts/`; a
+single-process run stops at the first. Refreshing the asset is `-merge=1` from the
+accumulated corpus into an empty directory, then a new `fuzz-corpus-<date>` release.
+
 Generated inputs are capped at 64 KiB (`-max_len`). Uncapped, libFuzzer takes its
 limit from the largest seed — and the seed corpus contains a 0.75 MiB message — so
 it spent its time on ~59 KiB inputs at ~158 executions per second. Bugs per minute

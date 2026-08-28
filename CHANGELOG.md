@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
+  seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
+  `parse_email` 12.1 M executions to 5,047 edges, `parse_agreement` 5.5 M to 5,502,
+  zero crashes, timeouts or OOMs. The minimised corpora (129 MB raw, 8.3 MB compressed)
+  ship as `fuzz-corpus-min.tar.gz` on a `fuzz-corpus-*` release rather than in the
+  tree, and `deep-fuzz.yml` seeds from that asset when its cache is cold (lineage moved
+  to `v3` so the next run does). `publish.yml` is guarded to `v*` tags so a corpus
+  release does not build wheels.
+
 ## [0.9.0] - 2026-08-28
 
 Measured against the published 0.8.0 wheel on an Apple M4 (interleaved, 3 rounds, controls
