@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The vendored mailparse fast paths are now dependency-free.** Upstream declined the
+  `memchr` version as an added dependency, so the two functions now use word-at-a-time
+  scans in plain `std` (`vendor/mailparse/src/bytescan.rs`: `chunks_exact` +
+  `from_le_bytes`, the exact `haszero` / `hasless` word tests, `trailing_zeros` to jump to
+  a hit; no `unsafe`), and `memchr` leaves the lockfile. Same code is now proposed
+  upstream (staktrace/mailparse#142), so the vendored copy can be dropped if a release
+  carries it. Interleaved A/B against the `memchr` version, Apple M4: metadata paths
+  within 0.4%, full parse 0.256 -> 0.240 ms, `parse_many` 2.13 -> 1.97 ms -- the strip is
+  one pass where the `memchr` version made two searches per run.
 - **Rust toolchain pin moved from 1.97.1 to 1.98.0** (#120). The pin was a holding
   action against a measured 15-30% slowdown under 1.98.0; the cause turned out to be
   the two mailparse loops above -- the compiler had not changed their instructions,

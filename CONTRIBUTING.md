@@ -314,19 +314,22 @@ runners' Zen CPUs a scalar loop straddling the wrong 64-byte boundary falls out
 of the micro-op cache and runs at half speed. An Apple M4 measured the same two
 builds at +/-0.2%.
 
-The fix replaces that scan with `memchr::memmem` -- vectorised, and laid out
-independently of this crate -- via the patched copy in `vendor/mailparse`
-(a permanent carry: upstream declined the change as an added dependency;
-`vendor/mailparse/PATCH.md` has the sync procedure). Metadata mode went
-0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
+The fix replaces that scan with a word-at-a-time search -- 32 bytes per branch,
+so even a placement-induced halving would cost a fraction of what the byte loop
+did -- via the patched copy in `vendor/mailparse` (`src/bytescan.rs`; upstream
+declined a `memchr` version as an added dependency, and this dependency-free one
+is proposed in its place -- `vendor/mailparse/PATCH.md` has the sync and removal
+procedures). Metadata mode went 0.365 -> 0.030 ms and the full parse
+1.10 -> 0.76 ms.
 
 With that gone, sampling the *full* parse put **77.7%** of what remained in
 `decode_base64`'s whitespace filter -- `iter().filter().cloned().collect()`, a
 test and a push per byte -- and the toolchain A/B confirmed it carried the rest of
 the placement sensitivity: decoding paths still moved +22% on one runner and +5%
-on another while the metadata paths had gone flat. Same fix, same place: the
-whitespace is found with `memchr` and the runs between are copied whole. The
-full parse went 0.83 -> 0.28 ms on top.
+on another while the metadata paths had gone flat. Same fix, same place: words
+with no byte below `0x21` are skipped whole and the runs between whitespace are
+copied in one piece. The full parse went 0.83 -> 0.28 ms on top, and 0.26 -> 0.24
+again when the `memchr` version gave way to the dependency-free one.
 
 **What remains true.** The gate has a false-positive mode its noise floor cannot
 see: the controls are pure Python and do not care how the extension was laid out,
