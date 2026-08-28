@@ -314,7 +314,7 @@ runners' Zen CPUs a scalar loop straddling the wrong 64-byte boundary falls out
 of the micro-op cache and runs at half speed. An Apple M4 measured the same two
 builds at +/-0.2%.
 
-The fix replaces that scan with a word-at-a-time search -- 32 bytes per branch,
+The fix replaces that scan with a word-at-a-time search -- 64 bytes per branch,
 so even a placement-induced halving would cost a fraction of what the byte loop
 did -- via the patched copy in `vendor/mailparse` (`src/bytescan.rs`; upstream
 declined a `memchr` version as an added dependency, and this dependency-free one

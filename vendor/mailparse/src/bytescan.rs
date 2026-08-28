@@ -15,7 +15,7 @@
 //! - `below_mask(x, n)`: non-zero iff some byte of `x` is below `n`, exact for `n <= 128`.
 //!
 //! Where a mask is non-zero, its set bits say which bytes to look at, so a hit costs a
-//! `trailing_zeros` rather than a rescan of the word. The byte search tests four words
+//! `trailing_zeros` rather than a rescan of the word. The byte search tests eight words
 //! per branch; the whitespace strip, whose hits are frequent (every line), one.
 //!
 //! Both are exact, so a chunk is only examined byte by byte when it really contains
@@ -62,10 +62,10 @@ fn first_hit(mask: usize) -> usize {
     (mask.trailing_zeros() / 8) as usize
 }
 
-/// Words per step of the byte search: the four masks are OR-ed, so the no-hit case is
-/// one branch per 32 bytes, and the four loads and tests are independent work the CPU
-/// can overlap.
-const STEP_WORDS: usize = 4;
+/// Words per step of the byte search: the masks are OR-ed, so the no-hit case is one
+/// branch per 64 bytes -- a cache line -- and the loads and tests are independent work
+/// the CPU can overlap.
+const STEP_WORDS: usize = 8;
 const STEP: usize = STEP_WORDS * WORD;
 
 /// Index of the first `needle` in `haystack`.
@@ -74,12 +74,14 @@ pub(crate) fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
     let mut steps = haystack.chunks_exact(STEP);
     let mut offset = 0;
     for step in &mut steps {
-        let m0 = zero_byte_mask(word(&step[..WORD]) ^ repeated);
-        let m1 = zero_byte_mask(word(&step[WORD..2 * WORD]) ^ repeated);
-        let m2 = zero_byte_mask(word(&step[2 * WORD..3 * WORD]) ^ repeated);
-        let m3 = zero_byte_mask(word(&step[3 * WORD..]) ^ repeated);
-        if (m0 | m1 | m2 | m3) != 0 {
-            let (k, m) = [m0, m1, m2, m3]
+        let mut masks = [0usize; STEP_WORDS];
+        let mut any = 0;
+        for (k, m) in masks.iter_mut().enumerate() {
+            *m = zero_byte_mask(word(&step[k * WORD..(k + 1) * WORD]) ^ repeated);
+            any |= *m;
+        }
+        if any != 0 {
+            let (k, m) = masks
                 .iter()
                 .copied()
                 .enumerate()

@@ -14,8 +14,9 @@ exact `haszero` / `hasless` word tests (Anderson, *Bit Twiddling Hacks*) to deci
 a word needs a closer look, and `trailing_zeros` to jump to a hit rather than rescan.
 
 1. **`find_from_u8` in `src/lib.rs`** -- the search `parse_mail` runs for every MIME
-   boundary -- scanned byte by byte. It now calls `bytescan::find`, which tests four words
-   per branch for the key's first byte and compares the rest only at candidates. Same
+   boundary -- scanned byte by byte. It now calls `bytescan::find`, which tests eight words
+   -- a cache line -- per branch for the key's first byte and compares the rest only at
+   candidates. Same
    result: first occurrence of `key` at or after `ix_start`, `None` when there is none.
 2. **`decode_base64` in `src/body.rs`** stripped whitespace with
    `iter().filter(|c| !c.is_ascii_whitespace()).cloned().collect()`: a test and a
