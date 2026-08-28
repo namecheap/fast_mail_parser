@@ -316,17 +316,21 @@ builds at +/-0.2%.
 
 The fix replaces that scan with `memchr::memmem` -- vectorised, and laid out
 independently of this crate -- via the patched copy in `vendor/mailparse`
-(a permanent carry: upstream declined the change as an added dependency;
-`vendor/mailparse/PATCH.md` has the sync procedure). Metadata mode went
+(upstream declined the change as an added dependency and is offered a
+dependency-free version instead; `vendor/mailparse/PATCH.md` has the reasoning,
+the sync procedure and what switching would cost). Metadata mode went
 0.365 -> 0.030 ms and the full parse 1.10 -> 0.76 ms.
 
 With that gone, sampling the *full* parse put **77.7%** of what remained in
 `decode_base64`'s whitespace filter -- `iter().filter().cloned().collect()`, a
 test and a push per byte -- and the toolchain A/B confirmed it carried the rest of
 the placement sensitivity: decoding paths still moved +22% on one runner and +5%
-on another while the metadata paths had gone flat. Same fix, same place: the
-whitespace is found with `memchr` and the runs between are copied whole. The
-full parse went 0.83 -> 0.28 ms on top.
+on another while the metadata paths had gone flat. Same place, and here the fix
+is dependency-free (`vendor/mailparse/src/bytescan.rs`): a word with no byte below
+`0x21` is skipped whole, the mask of one that might says which bytes to check,
+and the runs between whitespace are copied in one piece. The full parse went
+0.83 -> 0.28 ms on top, and 0.25 -> 0.23 again when this one-pass version replaced
+the `memchr` two-search one.
 
 **What remains true.** The gate has a false-positive mode its noise floor cannot
 see: the controls are pure Python and do not care how the extension was laid out,

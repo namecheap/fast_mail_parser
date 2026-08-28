@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The base64 whitespace strip in the vendored mailparse is now dependency-free**, and
+  faster: `vendor/mailparse/src/bytescan.rs` skips any word with no byte below `0x21`, walks
+  the exact `hasless` mask of one that might, and copies runs in one piece -- plain `std`,
+  no `unsafe`. One pass where the `memchr` version made two searches per run: full parse
+  0.254 -> 0.228 ms and `parse_many` 2.09 -> 1.83 ms on an Apple M4, -2.5 to -2.9% on the
+  CI gate's EPYC 7763. The MIME boundary search keeps `memchr`: dependency-free versions of
+  it measured +13-14% (four words per branch) and +9-11% (eight) on the metadata paths on
+  x86, so it stays. Context: upstream declined the `memchr` change as an added dependency
+  (staktrace/mailparse#142); a dependency-free version of both loops is offered instead
+  (staktrace/mailparse#143), and `vendor/mailparse/PATCH.md` records what switching to it
+  would cost if a release carries it.
 - **Rust toolchain pin moved from 1.97.1 to 1.98.0** (#120). The pin was a holding
   action against a measured 15-30% slowdown under 1.98.0; the cause turned out to be
   the two mailparse loops above -- the compiler had not changed their instructions,
