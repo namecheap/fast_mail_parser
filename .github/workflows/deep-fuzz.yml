@@ -96,11 +96,35 @@ jobs:
         with:
           path: fuzz/corpus/${{ matrix.target }}
           # A cache entry is immutable, so each run writes a new key and inherits
-          # the newest previous one by prefix. The key keeps the `v2-parse_email`
-          # lineage for that target, so the corpus accumulated before the second
-          # target existed is not thrown away.
-          key: fuzz-corpus-v2-${{ matrix.target }}-${{ github.run_id }}
-          restore-keys: fuzz-corpus-v2-${{ matrix.target }}-
+          # the newest previous one by prefix. The lineage moved to v3 when the
+          # 24 CPU-hour campaign corpus (#102) was published: a cold v3 cache is
+          # seeded from that release asset below, which is richer than anything
+          # the v2 lineage had accumulated.
+          key: fuzz-corpus-v3-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-v3-${{ matrix.target }}-
+
+      - name: Seed from the published corpus when the cache is cold
+        # First run of a lineage, or GitHub evicted an unused entry: start from
+        # the minimised corpus of the 24 CPU-hour campaign, published as an asset
+        # on the newest `fuzz-corpus-*` release, instead of from the 19 fixtures.
+        # Those releases carry no code; publish.yml ignores them by its tag guard.
+        if: ${{ hashFiles(format('fuzz/corpus/{0}/**', matrix.target)) == '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+                  --jq '[.[].tagName | select(startswith("fuzz-corpus-"))] | sort | last // empty')
+          if [ -z "$tag" ]; then
+            echo "no fuzz-corpus release yet; seeding from the fixtures only"
+            exit 0
+          fi
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'fuzz-corpus-min.tar.gz' --dir "$RUNNER_TEMP"
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          tar -xzf "$RUNNER_TEMP/fuzz-corpus-min.tar.gz" -C "fuzz/corpus/${{ matrix.target }}" \
+            --strip-components=2 "corpus-min/${{ matrix.target }}"
+          echo "seeded $(find "fuzz/corpus/${{ matrix.target }}" -type f | wc -l) inputs from release $tag"
+          echo "corpus_seeded_from=$tag" >> "$GITHUB_ENV"
 
       - name: Seed the corpus from the test fixtures
         run: |
@@ -193,6 +217,7 @@ jobs:
             echo "- ran for ${FUZZ_SECONDS}s"
             echo "- target: ${{ matrix.target }}"
             echo "- corpus: ${corpus_inherited} inherited, $(find "fuzz/corpus/${{ matrix.target }}" -type f | wc -l) now"
+            echo "- cold-cache seed: ${corpus_seeded_from:-not needed (cache hit)}"
             echo "- crashers: $(find fuzz/artifacts -type f 2>/dev/null | wc -l)"
           } >> "$GITHUB_STEP_SUMMARY"
 
