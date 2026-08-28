@@ -122,7 +122,11 @@ pub(crate) fn find_from(line: &str, ix_start: usize, key: &str) -> Option<usize>
 fn find_from_u8(line: &[u8], ix_start: usize, key: &[u8]) -> Option<usize> {
     assert!(!key.is_empty());
     assert!(ix_start <= line.len());
-    bytescan::find(&line[ix_start..], key).map(|v| ix_start + v)
+    // `memchr` rather than `bytescan::find`: on x86-64 its AVX2 path is ~10% ahead of a
+    // word-at-a-time scan on the structure-only parse (measured on the CI gate), and this
+    // copy's rule is no degradation. The dependency-free `bytescan` version of this search
+    // is what upstream is offered; see PATCH.md.
+    memchr::memmem::find(&line[ix_start..], key).map(|v| ix_start + v)
 }
 
 #[test]

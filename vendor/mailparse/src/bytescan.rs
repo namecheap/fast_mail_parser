@@ -1,8 +1,8 @@
 //! Byte scans that look at a machine word at a time instead of a byte at a time.
 //!
-//! Two loops in the parse path used to test every byte of the message body on its
-//! own: the search for the next MIME boundary, and the whitespace strip before
-//! base64 decoding. On a message with large attachments they are most of the parse,
+//! The whitespace strip before base64 decoding used to test every byte of the body on
+//! its own. (In this copy the MIME boundary search uses `memchr` instead -- see
+//! `find_from_u8` and PATCH.md; upstream is offered a word-at-a-time version of both.) On a message with large attachments they are most of the parse,
 //! and a byte-at-a-time loop's speed also depends on where the linker happens to
 //! place it -- the same instructions ran at half speed on x86-64 when the loop
 //! straddled a 64-byte boundary.
@@ -11,12 +11,10 @@
 //! `from_ne_bytes` (plain loads; no `unsafe`) and use two classic word tricks to
 //! decide whether a chunk needs a closer look:
 //!
-//! - `zero_byte_mask(x)`: non-zero iff some byte of `x` is zero.
 //! - `below_mask(x, n)`: non-zero iff some byte of `x` is below `n`, exact for `n <= 128`.
 //!
 //! Where a mask is non-zero, its set bits say which bytes to look at, so a hit costs a
-//! `trailing_zeros` rather than a rescan of the word. The byte search tests eight words
-//! per branch; the whitespace strip, whose hits are frequent (every line), one.
+//! `trailing_zeros` rather than a rescan of the word.
 //!
 //! Both are exact, so a chunk is only examined byte by byte when it really contains
 //! a candidate. See Anderson, "Bit Twiddling Hacks", `haszero` and `hasless`.
@@ -28,14 +26,6 @@
 const WORD: usize = core::mem::size_of::<usize>();
 const LO: usize = usize::from_ne_bytes([0x01; WORD]);
 const HI: usize = usize::from_ne_bytes([0x80; WORD]);
-
-/// Each byte of the result has its high bit set iff that byte of `x` is zero -- exactly
-/// so for the lowest such byte; bytes above it may be marked spuriously by the borrow,
-/// which is why callers re-check when they walk more than the first hit.
-#[inline]
-fn zero_byte_mask(x: usize) -> usize {
-    x.wrapping_sub(LO) & !x & HI
-}
 
 /// Each byte of the result has its high bit set iff that byte of `x` is below `n`
 /// (`n <= 128`), with the same caveat as `zero_byte_mask` above the lowest hit: never a
@@ -60,58 +50,6 @@ fn word(chunk: &[u8]) -> usize {
 #[inline]
 fn first_hit(mask: usize) -> usize {
     (mask.trailing_zeros() / 8) as usize
-}
-
-/// Words per step of the byte search: the masks are OR-ed, so the no-hit case is one
-/// branch per 64 bytes -- a cache line -- and the loads and tests are independent work
-/// the CPU can overlap.
-const STEP_WORDS: usize = 8;
-const STEP: usize = STEP_WORDS * WORD;
-
-/// Index of the first `needle` in `haystack`.
-pub(crate) fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
-    let repeated = LO.wrapping_mul(needle as usize);
-    let mut steps = haystack.chunks_exact(STEP);
-    let mut offset = 0;
-    for step in &mut steps {
-        let mut masks = [0usize; STEP_WORDS];
-        let mut any = 0;
-        for (k, m) in masks.iter_mut().enumerate() {
-            *m = zero_byte_mask(word(&step[k * WORD..(k + 1) * WORD]) ^ repeated);
-            any |= *m;
-        }
-        if any != 0 {
-            let (k, m) = masks
-                .iter()
-                .copied()
-                .enumerate()
-                .find(|&(_, m)| m != 0)
-                .unwrap();
-            return Some(offset + k * WORD + first_hit(m));
-        }
-        offset += STEP;
-    }
-    steps
-        .remainder()
-        .iter()
-        .position(|&b| b == needle)
-        .map(|i| offset + i)
-}
-
-/// Index of the first occurrence of `key` in `haystack`, or `None`.
-///
-/// Scans for `key[0]` a word at a time and compares the rest only at candidates.
-pub(crate) fn find(haystack: &[u8], key: &[u8]) -> Option<usize> {
-    let first = *key.first()?;
-    let mut at = 0;
-    while let Some(i) = find_byte(&haystack[at..], first) {
-        let candidate = at + i;
-        if haystack[candidate..].starts_with(key) {
-            return Some(candidate);
-        }
-        at = candidate + 1;
-    }
-    None
 }
 
 /// `body` without its ASCII whitespace -- exactly the bytes `u8::is_ascii_whitespace`
@@ -153,14 +91,7 @@ pub(crate) fn strip_ascii_whitespace(body: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find, find_byte, strip_ascii_whitespace};
-
-    fn naive_find(haystack: &[u8], key: &[u8]) -> Option<usize> {
-        if key.is_empty() || haystack.len() < key.len() {
-            return None;
-        }
-        (0..=haystack.len() - key.len()).find(|&i| &haystack[i..i + key.len()] == key)
-    }
+    use super::strip_ascii_whitespace;
 
     fn naive_strip(body: &[u8]) -> Vec<u8> {
         body.iter()
@@ -188,43 +119,6 @@ mod tests {
             }
         }
         out
-    }
-
-    #[test]
-    fn find_byte_matches_position() {
-        for h in corpus() {
-            for needle in [b'-', b'\n', b'a', 0x00, 0xff, b'z'] {
-                assert_eq!(
-                    find_byte(&h, needle),
-                    h.iter().position(|&b| b == needle),
-                    "{:?} / {:?}",
-                    h,
-                    needle
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn find_matches_naive_search() {
-        let keys: &[&[u8]] = &[
-            b"-",
-            b"--",
-            b"--ab",
-            b"\n",
-            b"\r\n",
-            b"ab=",
-            b"zz",
-            b"\x00\xff",
-        ];
-        for h in corpus() {
-            for key in keys {
-                assert_eq!(find(&h, key), naive_find(&h, key), "{:?} / {:?}", h, key);
-            }
-        }
-        assert_eq!(find(b"abc", b""), None);
-        assert_eq!(find(b"", b"a"), None);
-        assert_eq!(find(b"ab", b"abc"), None);
     }
 
     #[test]
