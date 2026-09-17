@@ -62,7 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two independent interleaved A/Bs pooled to 8 rounds per side, pure-Python controls within
   1.1%: full `parse_email` **0.254 -> 0.168 ms (-34%)**, `parse_email_tree` 0.246 -> 0.159 ms,
   `full_read` 0.261 -> 0.172 ms, `parse_many` (8 x 767 KiB) **1.989 -> 1.318 ms (-34%)**.
-  `mode="metadata"` and untouched lazy parses never call this function and are flat.
+  The CI gate's EPYC agrees, interleaved against the merge base on the same runner:
+  `parse_email` **0.536 -> 0.316 ms (-41%)**, `parse_email_tree` 0.540 -> 0.320 ms,
+  `full_read` 0.573 -> 0.354 ms, `parse_many` **4.382 -> 2.583 ms (-41%)**, controls within
+  1.1%. `mode="metadata"` and untouched lazy parses never call this function and are flat
+  on both (x86: +0.9% and -1.3%, inside the noise floor).
 
 - **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
   seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
