@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Internal: the binding layer is split into modules, with shared getters and batch-slot
+  helpers** (#233). The crate root was the 2000-line binding file and had one module boundary in
+  it, so a change to one mode could not be reviewed without loading the other seventeen hundred
+  lines. It is now the module list and the `#[pymodule]`, over `errors`, `payload`, `convert`,
+  `metadata`, `flat`, `lazy`, `tree` and `api`. Alongside it, the copies inside the binding are
+  gone: `date_parsed` had three, `children` three, the decode-and-cache body two, the strict gate
+  four and the `parse_many` result loop three. The strict rejection's message and what
+  `raise_on_error=False` puts in a failed slot are part of the API, and four copies of those were
+  four chances for them to stop agreeing. Code was moved, not edited; every `#[inline(never)]`,
+  `#[cold]` and `#[inline(always)]` stayed on the item it was on (21, 5 and 1, unchanged). No
+  behaviour or performance change: measured flat, worst real movement +1.2% against a 2.2% noise
+  floor.
+
 - **One envelope reader and one part classifier across the flat parsers** (#234). `Mail::from_payload`,
   `lazy_from_payload` and `metadata_from_payload` each carried their own copy of the eleven-statement
   envelope extraction (header map, Subject, Date, From/To/Cc/Bcc/Reply-To) and of the per-part
