@@ -1,6 +1,6 @@
 """DoS-hardening tests for parse_email (issue #21).
 
-These exercise the additive guards added in src/mail_parser.rs:
+These exercise the additive guards added in crates/fast_mail_parser_core/src/lib.rs:
   - MAX_INPUT_BYTES = 100 MiB  (oversized payload rejection)
   - MAX_MIME_DEPTH  = 256      (MIME recursion-depth cap)
 

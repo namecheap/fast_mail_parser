@@ -630,7 +630,7 @@ def test__threaded___parse_many_small_scaling(benchmark: Callable, threads):
 def _mixed_batch() -> list[bytes]:
     """200 messages of wildly different sizes, in a fixed shuffled order.
 
-    The workload the cursor scheduler exists for: `src/mail_parser.rs` justifies
+    The workload the cursor scheduler exists for: the parsing core justifies
     the atomic cursor over static chunking because "static chunking would stall a
     worker that happened to draw several large messages, and real mail batches are
     very uneven in size". Every other batch here is one size repeated, so nothing

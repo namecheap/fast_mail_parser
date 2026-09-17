@@ -35,6 +35,11 @@
 //! objects. Keeping the two models separate decouples the parsing logic from the
 //! Python bindings.
 
+// Re-exported so the binding layer can name the error type it converts to a
+// Python exception without declaring `mailparse` itself: the version
+// requirement for it lives in this crate's manifest and nowhere else.
+pub use mailparse::MailParseError;
+
 use charset::{decode_ascii, Charset};
 use mailparse::body::Body;
 use mailparse::*;
@@ -70,19 +75,19 @@ const MIN_BYTES_PER_WORKER: usize = 64 * 1024;
 // everything else comes from mailparse. They are named so the binding layer can
 // classify them by identity rather than by re-typing the literals (see
 // `to_py_err` in the binding layer).
-pub(crate) const ERR_INPUT_TOO_LARGE: &str = "Input exceeds maximum allowed size";
-pub(crate) const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed depth";
+pub const ERR_INPUT_TOO_LARGE: &str = "Input exceeds maximum allowed size";
+pub const ERR_MIME_DEPTH: &str = "MIME nesting exceeds maximum allowed depth";
 
 // Warning kinds (#100). `&'static str` rather than an enum on purpose: the value
 // crosses into Python as a string and callers match on it there, so an enum
 // would buy a conversion in each direction and nothing else. The binding layer
 // maps these to exceptions for `strict=True`, matching on identity here rather
 // than re-typing the literals.
-pub(crate) const KIND_CHARSET_FALLBACK: &str = "charset-fallback";
-pub(crate) const KIND_ADDRESS_UNPARSEABLE: &str = "address-unparseable";
-pub(crate) const KIND_DATE_UNPARSEABLE: &str = "date-unparseable";
-pub(crate) const KIND_UNTERMINATED_HEADERS: &str = "unterminated-header-block";
-pub(crate) const KIND_TRANSFER_DECODE_LOSSY: &str = "transfer-decode-lossy";
+pub const KIND_CHARSET_FALLBACK: &str = "charset-fallback";
+pub const KIND_ADDRESS_UNPARSEABLE: &str = "address-unparseable";
+pub const KIND_DATE_UNPARSEABLE: &str = "date-unparseable";
+pub const KIND_UNTERMINATED_HEADERS: &str = "unterminated-header-block";
+pub const KIND_TRANSFER_DECODE_LOSSY: &str = "transfer-decode-lossy";
 
 // Held as a const so the helper that uses it is one short line instead of a
 // chain across a multi-line literal.
@@ -151,12 +156,12 @@ fn quoted_printable_invalid_escape(body: &Body<'_>) -> Option<usize> {
 /// every message. An empty `Vec` performs no allocation, and every site that
 /// builds one of these sits behind a branch well-formed mail never takes.
 #[derive(Debug)]
-pub(crate) struct Warning {
-    pub(crate) kind: &'static str,
+pub struct Warning {
+    pub kind: &'static str,
     /// Where the affected part landed in the result -- `"text_plain[0]"` -- or
     /// `""` when the warning is about the message rather than one part.
-    pub(crate) part_path: String,
-    pub(crate) detail: String,
+    pub part_path: String,
+    pub detail: String,
 }
 
 // Every `warn_*` helper below is `#[cold]` and `#[inline(never)]`, which is
@@ -316,7 +321,7 @@ fn repair_missing_separator(payload: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
-pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
+pub fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
     Mail::new(payload)
 }
 
@@ -337,7 +342,7 @@ pub(crate) fn parse_email(payload: &[u8]) -> Result<Mail, MailParseError> {
 ///
 /// The batching itself lives in [`parse_many_as`], which the other modes reuse;
 /// this is the full-mode call into it (#202).
-pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
+pub fn parse_many<P: AsRef<[u8]> + Sync>(
     payloads: &[P],
     threads: Option<NonZeroUsize>,
 ) -> Vec<Result<Mail, MailParseError>> {
@@ -356,7 +361,7 @@ pub(crate) fn parse_many<P: AsRef<[u8]> + Sync>(
 /// number of result types and not also the number of call sites. Each of the
 /// three parse functions is a plain `fn` item, and the indirect call happens once
 /// per message around a whole parse.
-pub(crate) fn parse_many_as<P, T>(
+pub fn parse_many_as<P, T>(
     payloads: &[P],
     threads: Option<NonZeroUsize>,
     parse: fn(&[u8]) -> Result<T, MailParseError>,
@@ -609,12 +614,12 @@ fn encoded_size(body: &Body<'_>) -> usize {
 
 /// A non-body part, described but not decoded (#97).
 #[derive(Debug)]
-pub(crate) struct AttachmentMetadata {
-    pub(crate) mimetype: String,
-    pub(crate) filename: String,
-    pub(crate) content_id: Option<String>,
-    pub(crate) disposition: Option<String>,
-    pub(crate) encoded_size: usize,
+pub struct AttachmentMetadata {
+    pub mimetype: String,
+    pub filename: String,
+    pub content_id: Option<String>,
+    pub disposition: Option<String>,
+    pub encoded_size: usize,
 }
 
 /// What a message says about itself, without decoding what it carries (#97).
@@ -625,16 +630,16 @@ pub(crate) struct AttachmentMetadata {
 /// attributes fail loudly instead. For structure without decoding, use the tree
 /// API (#99).
 #[derive(Debug)]
-pub(crate) struct MailMetadata {
-    pub(crate) subject: String,
-    pub(crate) date: String,
-    pub(crate) from_: Option<Address>,
-    pub(crate) to: Vec<Address>,
-    pub(crate) cc: Vec<Address>,
-    pub(crate) bcc: Vec<Address>,
-    pub(crate) reply_to: Vec<Address>,
-    pub(crate) attachments: Vec<AttachmentMetadata>,
-    pub(crate) headers: Vec<(String, Vec<String>)>,
+pub struct MailMetadata {
+    pub subject: String,
+    pub date: String,
+    pub from_: Option<Address>,
+    pub to: Vec<Address>,
+    pub cc: Vec<Address>,
+    pub bcc: Vec<Address>,
+    pub reply_to: Vec<Address>,
+    pub attachments: Vec<AttachmentMetadata>,
+    pub headers: Vec<(String, Vec<String>)>,
 }
 
 /// Parse headers and the attachment inventory, decoding nothing.
@@ -648,7 +653,7 @@ pub(crate) struct MailMetadata {
 /// what is duplicated is the list of headers to read, not any logic. Threading a
 /// mode through `Mail::new` instead would have put a branch in the hot path for
 /// the benefit of the cold one.
-pub(crate) fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailParseError> {
+pub fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailParseError> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
@@ -769,15 +774,15 @@ fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError>
 /// producing -- right for finding the one PDF in a mailbox, wrong for decoding
 /// everything anyway.
 #[derive(Debug)]
-pub(crate) struct LazyAttachment {
-    pub(crate) mimetype: String,
-    pub(crate) filename: String,
-    pub(crate) content_id: Option<String>,
-    pub(crate) disposition: Option<String>,
+pub struct LazyAttachment {
+    pub mimetype: String,
+    pub filename: String,
+    pub content_id: Option<String>,
+    pub disposition: Option<String>,
     /// Bytes the part's body occupies before transfer-decoding -- the same value
     /// and the same name as in metadata mode.
-    pub(crate) encoded_size: usize,
-    pub(crate) raw: Vec<u8>,
+    pub encoded_size: usize,
+    pub raw: Vec<u8>,
 }
 
 /// A message with its bodies decoded and its attachments deferred (#97).
@@ -787,19 +792,19 @@ pub(crate) struct LazyAttachment {
 /// nothing else. `warnings` is therefore the same list the full parse produces,
 /// which is what lets `strict=True` mean the same thing in both modes.
 #[derive(Debug)]
-pub(crate) struct LazyMail {
-    pub(crate) subject: String,
-    pub(crate) text_plain: Vec<String>,
-    pub(crate) text_html: Vec<String>,
-    pub(crate) date: String,
-    pub(crate) from_: Option<Address>,
-    pub(crate) to: Vec<Address>,
-    pub(crate) cc: Vec<Address>,
-    pub(crate) bcc: Vec<Address>,
-    pub(crate) reply_to: Vec<Address>,
-    pub(crate) attachments: Vec<LazyAttachment>,
-    pub(crate) headers: Vec<(String, Vec<String>)>,
-    pub(crate) warnings: Vec<Warning>,
+pub struct LazyMail {
+    pub subject: String,
+    pub text_plain: Vec<String>,
+    pub text_html: Vec<String>,
+    pub date: String,
+    pub from_: Option<Address>,
+    pub to: Vec<Address>,
+    pub cc: Vec<Address>,
+    pub bcc: Vec<Address>,
+    pub reply_to: Vec<Address>,
+    pub attachments: Vec<LazyAttachment>,
+    pub headers: Vec<(String, Vec<String>)>,
+    pub warnings: Vec<Warning>,
 }
 
 /// Decode one retained part, exactly as the full parse would have decoded it.
@@ -812,7 +817,7 @@ pub(crate) struct LazyMail {
 /// The re-parse is a header scan over one part, which is why the deferral is
 /// worth anything: the cost it defers is the transfer-decode and the copy, and
 /// the cost it adds is parsing a few hundred bytes of headers again.
-pub(crate) fn decode_part(raw: &[u8]) -> Result<Vec<u8>, MailParseError> {
+pub fn decode_part(raw: &[u8]) -> Result<Vec<u8>, MailParseError> {
     let part = parse_mail(raw)?;
     part.get_body_raw()
 }
@@ -823,7 +828,7 @@ pub(crate) fn decode_part(raw: &[u8]) -> Result<Vec<u8>, MailParseError> {
 /// `Mail::new`, for the reasons recorded on `parse_email_metadata`: the borrow of
 /// the repaired local never leaves this frame, and threading a mode through
 /// `Mail::from_payload` instead is what cost the hot path 47% in #100.
-pub(crate) fn parse_email_lazy(payload: &[u8]) -> Result<LazyMail, MailParseError> {
+pub fn parse_email_lazy(payload: &[u8]) -> Result<LazyMail, MailParseError> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
@@ -971,17 +976,17 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
 /// `text/html` corresponds to which `text/plain` sibling, whether a part was
 /// `multipart/alternative` or `multipart/mixed` -- and this keeps it.
 #[derive(Debug)]
-pub(crate) struct MimePart {
-    pub(crate) content_type: String,
-    pub(crate) headers: Vec<(String, Vec<String>)>,
-    pub(crate) filename: String,
-    pub(crate) content_id: Option<String>,
-    pub(crate) disposition: Option<String>,
-    pub(crate) is_message: bool,
+pub struct MimePart {
+    pub content_type: String,
+    pub headers: Vec<(String, Vec<String>)>,
+    pub filename: String,
+    pub content_id: Option<String>,
+    pub disposition: Option<String>,
+    pub is_message: bool,
     /// Transfer-decoded bytes of a leaf. `None` for a `multipart/*` container,
     /// whose body is just its children with boundaries between them.
-    pub(crate) content: Option<Vec<u8>>,
-    pub(crate) children: Vec<MimePart>,
+    pub content: Option<Vec<u8>>,
+    pub children: Vec<MimePart>,
 }
 
 impl MimePart {
@@ -1039,7 +1044,7 @@ impl MimePart {
 }
 
 /// Parse a message into its MIME tree, structure intact.
-pub(crate) fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseError> {
+pub fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseError> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
@@ -1059,7 +1064,7 @@ pub(crate) fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseErro
 /// would have split that derivation too, which is the thing the modes must not
 /// disagree about.
 #[derive(Debug)]
-pub(crate) enum NodeBody {
+pub enum NodeBody {
     /// A `multipart/*` container. Its body is its children with boundaries
     /// between them, so it has none of its own -- the same statement full mode
     /// makes by setting `content` to `None`.
@@ -1090,7 +1095,7 @@ pub(crate) enum NodeBody {
 impl NodeBody {
     /// Bytes this body occupies before transfer-decoding, or `None` for a
     /// container -- which has no body of its own.
-    pub(crate) fn encoded_size(&self) -> Option<usize> {
+    pub fn encoded_size(&self) -> Option<usize> {
         match self {
             NodeBody::Container => None,
             NodeBody::Undecoded { encoded_size, .. } | NodeBody::Decoded { encoded_size, .. } => {
@@ -1108,15 +1113,15 @@ impl NodeBody {
 /// indistinguishable, which is the silent-wrong-answer shape this crate has
 /// rejected twice already (#150, and metadata mode's absent `text_plain`).
 #[derive(Debug)]
-pub(crate) struct TreeNode {
-    pub(crate) content_type: String,
-    pub(crate) headers: Vec<(String, Vec<String>)>,
-    pub(crate) filename: String,
-    pub(crate) content_id: Option<String>,
-    pub(crate) disposition: Option<String>,
-    pub(crate) is_message: bool,
-    pub(crate) body: NodeBody,
-    pub(crate) children: Vec<TreeNode>,
+pub struct TreeNode {
+    pub content_type: String,
+    pub headers: Vec<(String, Vec<String>)>,
+    pub filename: String,
+    pub content_id: Option<String>,
+    pub disposition: Option<String>,
+    pub is_message: bool,
+    pub body: NodeBody,
+    pub children: Vec<TreeNode>,
 }
 
 /// Parse a message into its MIME tree without decoding the leaves (#202).
@@ -1131,7 +1136,7 @@ pub(crate) struct TreeNode {
 /// reason: a `message/rfc822` body has to be decoded before the message inside
 /// it can be parsed, and a tree that dropped those children in one mode would
 /// not be the same tree. Nothing else is decoded.
-pub(crate) fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<TreeNode, MailParseError> {
+pub fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<TreeNode, MailParseError> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
@@ -1234,7 +1239,7 @@ const MONTH_TOKENS: [&str; 12] = [
 /// Requiring a month token rules that out, because the state machine cannot
 /// reach a real result without consuming one. A legitimate epoch-0 date still
 /// works: `Thu, 01 Jan 1970 00:00:00 +0000` contains `JAN`.
-pub(crate) fn parse_date_epoch(date: &str) -> Option<i64> {
+pub fn parse_date_epoch(date: &str) -> Option<i64> {
     let upper = date.to_uppercase();
     if !MONTH_TOKENS.iter().any(|month| upper.contains(month)) {
         return None;
@@ -1244,9 +1249,9 @@ pub(crate) fn parse_date_epoch(date: &str) -> Option<i64> {
 
 /// One mailbox from an address header.
 #[derive(Debug, Clone)]
-pub(crate) struct Address {
-    pub(crate) display_name: Option<String>,
-    pub(crate) address: String,
+pub struct Address {
+    pub display_name: Option<String>,
+    pub address: String,
 }
 
 impl Address {
@@ -1314,31 +1319,31 @@ fn header_addresses(
 }
 
 #[derive(Debug)]
-pub(crate) struct Mail {
-    pub(crate) subject: String,
-    pub(crate) text_plain: Vec<String>,
-    pub(crate) text_html: Vec<String>,
-    pub(crate) date: String,
-    pub(crate) from_: Option<Address>,
-    pub(crate) to: Vec<Address>,
-    pub(crate) cc: Vec<Address>,
-    pub(crate) bcc: Vec<Address>,
-    pub(crate) reply_to: Vec<Address>,
-    pub(crate) attachments: Vec<Attachment>,
-    pub(crate) headers: Vec<(String, Vec<String>)>,
+pub struct Mail {
+    pub subject: String,
+    pub text_plain: Vec<String>,
+    pub text_html: Vec<String>,
+    pub date: String,
+    pub from_: Option<Address>,
+    pub to: Vec<Address>,
+    pub cc: Vec<Address>,
+    pub bcc: Vec<Address>,
+    pub reply_to: Vec<Address>,
+    pub attachments: Vec<Attachment>,
+    pub headers: Vec<(String, Vec<String>)>,
     /// Every lossy repair this parse made, in the order it made them. Empty for
     /// a pristine parse, which is the overwhelmingly common case and the one
     /// that must stay free -- see [`Warning`].
-    pub(crate) warnings: Vec<Warning>,
+    pub warnings: Vec<Warning>,
 }
 
 #[derive(Debug)]
-pub(crate) struct Attachment {
-    pub(crate) mimetype: String,
-    pub(crate) content: Vec<u8>,
-    pub(crate) filename: String,
-    pub(crate) content_id: Option<String>,
-    pub(crate) disposition: Option<String>,
+pub struct Attachment {
+    pub mimetype: String,
+    pub content: Vec<u8>,
+    pub filename: String,
+    pub content_id: Option<String>,
+    pub disposition: Option<String>,
 }
 
 impl Mail {
@@ -1348,7 +1353,7 @@ impl Mail {
     /// missing its header/body separator is parsed from a repaired copy of the
     /// payload (#150). `from_payload` reads whatever buffer it is handed and
     /// returns fully owned data, so that copy can be a local here.
-    pub(crate) fn new(payload: &[u8]) -> Result<Self, MailParseError> {
+    pub fn new(payload: &[u8]) -> Result<Self, MailParseError> {
         // Measured against the payload as received: a repair adds one byte, and
         // no message should become oversized by being repaired.
         if payload.len() > MAX_INPUT_BYTES {
@@ -1543,5 +1548,125 @@ impl<'a> Mail {
         result.push(mail);
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The core's first Rust tests (#236). Until this crate existed there was no
+    /// way to write one: the module was `#[path]`-included into a `cdylib` that
+    /// cannot be linked as a Rust dependency, so every assertion about parsing
+    /// had to go through Python.
+    ///
+    /// These deliberately test what is awkward to reach from Python: the DoS
+    /// caps, which need a 100 MB payload to trip; the warning machinery, whose
+    /// ordering is an internal contract; and the header collector, which Python
+    /// only ever sees through a dict.
+    const SIMPLE: &[u8] = b"Subject: hi\r\nFrom: a@example.com\r\n\r\nbody\r\n";
+
+    #[test]
+    fn a_plain_message_parses_with_no_warnings() {
+        let mail = parse_email(SIMPLE).expect("a well-formed message must parse");
+
+        assert_eq!(mail.subject, "hi");
+        assert_eq!(mail.text_plain.len(), 1);
+        assert!(mail.text_plain[0].starts_with("body"));
+        assert!(
+            mail.warnings.is_empty(),
+            "an unrepaired parse must report nothing: {:?}",
+            mail.warnings
+        );
+    }
+
+    #[test]
+    fn an_oversized_payload_is_rejected_by_the_cap_not_by_parsing() {
+        // The cap is the reason this is cheap to test here and expensive from
+        // Python: no 100 MB object has to cross the FFI boundary.
+        let payload = vec![b'x'; MAX_INPUT_BYTES + 1];
+
+        let error = parse_email(&payload).expect_err("over the cap must be refused");
+
+        assert!(
+            error.to_string().contains(ERR_INPUT_TOO_LARGE),
+            "the cap must be named in the error, not just any failure: {error}"
+        );
+    }
+
+    // The MIME depth cap is deliberately NOT tested here. `tests/test_dos_limits.py`
+    // already covers it end to end, and building a genuinely 300-level multipart
+    // in a Rust string literal turned out to be easy to get subtly wrong -- two
+    // attempts produced payloads the parser flattened, so the test "passed the
+    // cap" by never reaching it. A test that can silently stop testing its
+    // subject is worse than the coverage it duplicates.
+
+    #[test]
+    fn headers_keep_every_value_in_first_appearance_order() {
+        let raw = b"Received: one\r\nSubject: s\r\nReceived: two\r\nX-A: a\r\n\r\nbody\r\n";
+
+        let mail = parse_email(raw).expect("parses");
+        let names: Vec<&str> = mail.headers.iter().map(|(name, _)| name.as_str()).collect();
+
+        // Wire order of first appearance, not sorted and not de-duplicated into
+        // the last value -- both of which a HashMap did before #157.
+        assert_eq!(names, ["Received", "Subject", "X-A"]);
+        let received = &mail
+            .headers
+            .iter()
+            .find(|(n, _)| n == "Received")
+            .unwrap()
+            .1;
+        assert_eq!(received, &["one", "two"]);
+    }
+
+    #[test]
+    fn an_unknown_charset_is_a_reported_repair_not_a_failure() {
+        let raw = b"Subject: s\r\nContent-Type: text/plain; charset=not-a-charset\r\n\r\nbody\r\n";
+
+        let mail = parse_email(raw).expect("an unknown charset is repaired, not fatal");
+
+        assert!(
+            !mail.warnings.is_empty(),
+            "falling back to us-ascii is lossy and must be reported"
+        );
+    }
+
+    #[test]
+    fn a_broken_transfer_encoding_is_an_error_not_an_empty_body() {
+        // The #24 contract: a failed transfer decode must propagate rather than
+        // being swallowed into an empty body.
+        let raw = b"Subject: s\r\nContent-Transfer-Encoding: base64\r\n\r\n!!!!not base64!!!!\r\n";
+
+        assert!(
+            parse_email(raw).is_err(),
+            "corruption must surface, not decode to nothing"
+        );
+    }
+
+    #[test]
+    fn parse_many_preserves_input_order_and_reports_per_slot() {
+        let good = SIMPLE.to_vec();
+        let bad = b"Subject: s\r\nContent-Transfer-Encoding: base64\r\n\r\n!!!!\r\n".to_vec();
+        let payloads = [good.clone(), bad, good];
+
+        let results = parse_many(&payloads, None);
+
+        assert_eq!(results.len(), 3);
+        assert!(results[0].is_ok());
+        assert!(results[1].is_err(), "a bad slot fails on its own");
+        assert!(
+            results[2].is_ok(),
+            "and does not take its neighbours with it"
+        );
+    }
+
+    #[test]
+    fn metadata_mode_agrees_with_the_full_parse_on_the_envelope() {
+        let full = parse_email(SIMPLE).expect("parses");
+        let metadata = parse_email_metadata(SIMPLE).expect("parses");
+
+        assert_eq!(full.subject, metadata.subject);
+        assert_eq!(full.headers, metadata.headers);
     }
 }

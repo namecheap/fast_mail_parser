@@ -34,12 +34,18 @@ name = "fast_mail_parser"
 path = "src/fast_mail_parser.rs"
 crate-type = ["cdylib"]
 
+[workspace]
+members = ["crates/fast_mail_parser_core"]
+# Both are nested under this directory, and cargo adopts any path dependency
+# inside a workspace as a member unless excluded. `fuzz` needs nightly and keeps
+# its own lockfile; `vendor/mailparse` keeps its own test run under a separate
+# --target-dir, because a `target/` inside it would be swept into the sdist.
+exclude = ["fuzz", "vendor/mailparse"]
+
 [dependencies]
-# `charset` is also a transitive dependency of `mailparse`; we depend on it
-# directly to reuse the exact charset-decoding step mailparse applies in
-# `get_body`, so text parts are decoded only once (see `decode_charset`).
-charset = "0.1.3"
-mailparse = "0.16.1"
+# The parsing core. `charset` and `mailparse` live in its manifest now, so their
+# version requirements appear exactly once in the tree.
+fast_mail_parser_core = { path = "crates/fast_mail_parser_core" }
 pyo3 = "0.29"
 
 [features]

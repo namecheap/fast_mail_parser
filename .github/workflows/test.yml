@@ -51,7 +51,7 @@ jobs:
       # clippy::cast_possible_truncation pinpoints the str->bytes corruption bug.
       - name: cargo clippy
         if: always()
-        run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
+        run: cargo clippy --workspace --all-targets -- -D warnings -W clippy::cast_possible_truncation
         continue-on-error: true
 
       # `vendor/mailparse` is upstream 0.16.1 with three functions changed -- the
@@ -70,6 +70,13 @@ jobs:
       # unpatched upstream too, because the patch does not change behaviour. A
       # half-applied hand-merge would therefore show up only as an unexplained
       # 4-10x regression in the benchmark gate, on some unrelated PR.
+      # The parsing core is a crate now (#236), so it has Rust tests of its own
+      # for the first time. Blocking: these cover what is awkward to reach from
+      # Python -- the DoS caps, the warning machinery, per-slot batch semantics.
+      - name: core crate tests
+        if: always()
+        run: cargo test -p fast_mail_parser_core
+
       - name: vendored mailparse is upstream + upstream.patch
         if: always()
         run: bash .github/scripts/check_vendored_mailparse.sh
@@ -190,9 +197,10 @@ jobs:
   # cargo deny jobs use, for the same reason: the tool's needs are not the
   # library's build.
   #
-  # The harness lives in a standalone crate that includes src/mail_parser.rs by
-  # path, because the root crate is cdylib-only and its lib root is the PyO3
-  # layer. See fuzz/Cargo.toml.
+  # The harness lives in a standalone crate (nightly, own lockfile) that depends
+  # on crates/fast_mail_parser_core -- the same crate the extension links. The
+  # root crate is cdylib-only and its lib root is the PyO3 layer, so the harness
+  # cannot depend on that. See fuzz/Cargo.toml.
   # ---------------------------------------------------------------------------
   fuzz:
     name: fuzz (short pass)
@@ -553,7 +561,9 @@ jobs:
           # `vendor/mailparse/src/bytescan.rs` is load-bearing and easy to lose: it
           # exists only in this copy, so a mistake in the include glob would drop
           # it and a source build would fall back to the unpatched registry crate.
-          for needed in Cargo.toml pyproject.toml src/mail_parser.rs \
+          for needed in Cargo.toml pyproject.toml \
+                        crates/fast_mail_parser_core/Cargo.toml \
+                        crates/fast_mail_parser_core/src/lib.rs \
                         src/fast_mail_parser.rs vendor/mailparse/src/bytescan.rs \
                         vendor/mailparse/src/qp.rs vendor/mailparse/upstream.patch; do
             if ! tar -tzf "$sdist" | grep -q "/${needed}$"; then

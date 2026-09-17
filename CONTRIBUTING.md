@@ -192,13 +192,18 @@ Two things about the harness are deliberate and worth knowing before changing it
 - It is a **standalone crate, not a workspace member.** The root crate is
   `crate-type = ["cdylib"]` and its lib root is the PyO3 binding layer, so it can
   neither be linked as a Rust dependency nor built without Python symbols.
-- It therefore **includes `src/mail_parser.rs` by path**, which works only because
-  that module has no PyO3 dependency. If the core ever gains one, this harness
-  stops building — which is the right alarm, since the split is what the module
-  docs promise.
+- It therefore **depends on `crates/fast_mail_parser_core`**, the same crate the
+  extension depends on. That works only because the core has no PyO3 dependency.
+  If it ever gains one, this harness stops building — which is the right alarm,
+  since the split is what the core's docs promise, and `cargo tree -p
+  fast_mail_parser_core | grep pyo3` is how to check it deliberately.
 
-`fuzz/Cargo.toml` duplicates the `charset` and `mailparse` versions from the root
-manifest. They must stay in step, or the harness stops testing what ships.
+Until #236 the targets `#[path]`-included `src/mail_parser.rs` instead, and
+`fuzz/Cargo.toml` duplicated the `charset` and `mailparse` versions from the root
+manifest — two copies of one source compiled under different cfg, with nothing to
+say when they drifted. The core being a real crate removes both problems: the
+version requirements live in its manifest alone, and the harness links what
+ships.
 
 CI runs a 60-second deterministic pass on every PR, seeded so it stays
 reproducible; a crasher is uploaded as an artifact.

@@ -61,10 +61,15 @@ if ! diff -r "$upstream" "$tmp/ours"; then
 fi
 
 # `[patch.crates-io]` only applies while the patched version satisfies the
-# requirement, so a Dependabot bump of either root manifest alone would silently
-# switch the build back to the registry crate. Only the benchmark gate would
-# notice, and only as an unexplained regression.
-for manifest in Cargo.toml fuzz/Cargo.toml; do
+# requirement, so a Dependabot bump of one manifest alone would silently switch
+# the build back to the registry crate. Only the benchmark gate would notice, and
+# only as an unexplained regression.
+#
+# The requirement lives in the core crate since #236, not the root: the root
+# package depends on the core, and the core depends on mailparse. The fuzz
+# harness declares it separately because its agreement targets call mailparse
+# directly to build their oracle.
+for manifest in crates/fast_mail_parser_core/Cargo.toml fuzz/Cargo.toml; do
   if ! grep -qE "^mailparse = \"$VER\"" "$manifest"; then
     echo "::error::$manifest does not require mailparse \"$VER\"; [patch.crates-io] would stop applying"
     exit 1

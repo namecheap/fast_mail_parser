@@ -1,0 +1,26 @@
+# The parsing core, with no PyO3 in it.
+#
+# It was a `#[path]`-included file: `src/fast_mail_parser.rs` declared it as a
+# module, and both fuzz targets reached across the tree to include the same file
+# again. That worked, and it meant the core had no identity of its own -- nothing
+# could depend on it, and nothing could test it directly, so a library whose
+# reason to exist is parsing had zero Rust tests for the parsing.
+#
+# `publish = false`: this is an implementation detail of the extension, not an API
+# anyone should build against. The version tracks the root package so the two are
+# obviously one release.
+[package]
+name = "fast_mail_parser_core"
+version = "0.9.0"
+edition = "2021"
+rust-version = "1.83"
+license = "Apache-2.0"
+publish = false
+description = "PyO3-free parsing core for fast_mail_parser"
+
+[dependencies]
+# `charset` is also a transitive dependency of `mailparse`; we depend on it
+# directly to reuse the exact charset-decoding step mailparse applies in
+# `get_body`, so text parts are decoded only once (see `decode_charset`).
+charset = "0.1.3"
+mailparse = "0.16.1"
