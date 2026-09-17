@@ -101,6 +101,21 @@ def test__a_container_reports_no_content_but_its_leaves_do():
     ]
 
 
+def test__repeated_leaf_content_reads_return_the_same_object():
+    # #227: one `bytes` per leaf, published on first read, as the lazy tree type
+    # has done since #202. `children` already handed back the same nodes, so the
+    # cache has something to sit on.
+    root = parse_email_tree(ALTERNATIVE)
+    leaf = root.children[0]
+
+    first = leaf.content
+
+    assert leaf.content is first
+    assert root.children[0] is leaf
+    # A container has no bytes to share, and still says so.
+    assert root.content is None
+
+
 # --- embedded messages ---------------------------------------------------------
 
 
