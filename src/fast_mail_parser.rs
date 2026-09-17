@@ -1395,8 +1395,8 @@ fn parse_lazy_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyLazyMail> 
 
     // The GIL is released for the parse, as in every other mode. What the parse
     // retains per attachment is a copy of that part's encoded bytes, so nothing
-    // borrows from the caller's `bytes` once this returns -- which is what lets
-    // the attachments outlive the payload.
+    // borrows from the caller's payload once this returns -- which is what lets
+    // the attachments outlive it.
     let mail = py
         .detach(|| mail_parser::parse_email_lazy(message.as_ref()))
         .map_err(to_py_err)?;
@@ -1538,8 +1538,8 @@ fn parse_many_inner(
 ) -> PyResult<Py<PyList>> {
     // Resolve every payload *before* releasing the GIL: this touches Python
     // objects, which requires the interpreter. What is held afterwards is a
-    // reference to each `bytes` object plus its buffer pointer, not a copy of
-    // its contents, so the batch is no longer duplicated in full (#96).
+    // reference to each payload object plus its buffer pointer, not a copy of
+    // its contents, so the batch is no longer duplicated in full (#96, #226).
     let messages: Vec<Payload> = payloads
         .iter()
         .map(|payload| payload_to_bytes(payload, py))
