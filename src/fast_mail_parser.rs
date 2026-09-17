@@ -53,11 +53,6 @@ impl Headers {
         }
     }
 
-    /// The header pairs, for the Rust side; the Python projection is `to_dict`.
-    pub(crate) fn pairs(&self) -> &[(String, Vec<String>)] {
-        &self.pairs
-    }
-
     /// All values of every header, keyed by name, in the order the names first
     /// appeared in the message (#157). Built once, then shared.
     ///
@@ -248,7 +243,7 @@ fn catch_panics<T>(operation: impl FnOnce() -> PyResult<T>) -> PyResult<T> {
 /// `PyAttachment.content` stays `bytes` for every caller who never asked for this
 /// mode -- widening it to `bytes | None` would have broken every `mypy --strict`
 /// consumer of the default path.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyAttachmentMetadata {
     #[pyo3(get)]
@@ -292,7 +287,7 @@ impl PyAttachmentMetadata {
 /// triage sweep counting bodyless messages would count all of them, which is the
 /// same class of silent-wrong-answer as #150. A missing attribute fails loudly.
 /// For structure without decoding, `parse_email_tree` is the API that keeps it.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyMailMetadata {
     #[pyo3(get)]
     pub subject: String,
@@ -380,7 +375,7 @@ impl PyMailMetadata {
 /// `multipart/alternative` or `multipart/mixed`, where a bounce's inner message
 /// begins. Use `parse_email` when the convenience projection is what you want and
 /// this when the shape matters.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyMimePart {
     /// The part's media type: `"multipart/alternative"`, `"text/plain"`, ...
     #[pyo3(get)]
@@ -483,7 +478,7 @@ impl PyMimePart {
 /// indistinguishable from a container. A missing attribute fails loudly instead
 /// -- the same choice as `PyMailMetadata`, which omits `text_plain` rather than
 /// returning an empty list.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyMimePartMetadata {
     #[pyo3(get)]
     pub content_type: String,
@@ -541,7 +536,7 @@ impl PyMimePartMetadata {
 /// single-part message that is the whole payload, because the root *is* the leaf
 /// -- so this mode is for walking a large multipart message and decoding one part
 /// of it, which is what the tree is for, and not for small mail in bulk.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyLazyMimePart {
     #[pyo3(get)]
     pub content_type: String,
@@ -715,7 +710,7 @@ fn lazy_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyLazyMime
 /// Read-only, three `str` fields, no interior mutability -- the same shape as
 /// [`PyAddress`], so the free-threading invariant recorded in the `mail_parser`
 /// module still holds.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct ParseWarning {
     /// A stable token naming what was repaired: `"charset-fallback"`,
@@ -763,7 +758,7 @@ impl ParseWarning {
 }
 
 /// One mailbox from an address header, exposed to Python.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 #[derive(Clone)]
 pub struct PyAddress {
     /// The display name, or `None` when the header carries a bare address.
@@ -785,7 +780,7 @@ impl PyAddress {
     }
 }
 
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyAttachment {
     #[pyo3(get)]
     pub mimetype: String,
@@ -845,7 +840,7 @@ impl PyAttachment {
 ///
 /// Body parts and [`attachments`](Self::attachments) are disjoint; `multipart/*`
 /// container nodes appear in neither.
-#[pyclass]
+#[pyclass(frozen)]
 pub struct PyMail {
     #[pyo3(get)]
     pub subject: String,
@@ -996,7 +991,7 @@ impl PyMail {
 /// a breaking change and needs no window. It is the same reasoning that gave
 /// metadata mode its own attachment type instead of widening `content` to
 /// `bytes | None`.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyLazyAttachment {
     #[pyo3(get)]
     pub mimetype: String,
@@ -1136,7 +1131,7 @@ impl PyLazyAttachment {
 /// `warnings`, which is the same list the full parse produces, because lazy mode
 /// decodes every body part and finds every repair the full parse finds. That is
 /// what lets `strict=True` mean the same thing here.
-#[pyclass(skip_from_py_object)]
+#[pyclass(frozen, skip_from_py_object)]
 pub struct PyLazyMail {
     #[pyo3(get)]
     pub subject: String,
