@@ -51,6 +51,7 @@ include = [
     { path = "crates/fast_mail_parser_core/**/*", format = "sdist" },
     { path = "vendor/mailparse/**/*", format = "sdist" },
 ]
-# The fuzzing harness is a development tool; it has no place in a wheel or an
-# sdist, and it carries its own lockfile and nightly toolchain requirement.
-exclude = ["fuzz/**"]
+# The fuzzing harness and the bench crate are development tools; they have no
+# place in a wheel or an sdist, and each carries its own lockfile (the fuzz one
+# also needs nightly).
+exclude = ["fuzz/**", "bench/**"]

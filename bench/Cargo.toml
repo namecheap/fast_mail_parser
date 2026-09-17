@@ -1,0 +1,44 @@
+# Timing and allocation measurement for the parsing core, in Rust.
+#
+# The pytest benchmarks measure the extension through Python, which is the right
+# oracle for what a user experiences and a poor one for asking where the time
+# goes: every number carries the FFI crossing, the GIL, and the construction of
+# Python objects. This crate measures the core directly, so a question like
+# "how much of a full parse is the whitespace strip, and how much is the base64
+# decode" has an answer instead of a profile screenshot.
+#
+# Standalone, exactly like fuzz/: the root crate is `crate-type = ["cdylib"]`
+# with a PyO3 lib root, so it cannot be linked as a Rust dependency. The core
+# can, since #236 made it one.
+#
+# No criterion, no divan. They would be the only crates here outside `cargo
+# deny`'s reach, and medians and allocation counts do not need them.
+[package]
+name = "fast-mail-parser-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# These must match the root manifest, or this crate measures a different build
+# than the one that ships. The lint job checks it rather than trusting it.
+[dependencies]
+# The parsing core, linked rather than `#[path]`-included. #236 made it a crate
+# precisely so things like this could depend on it instead of reaching across the
+# tree for a source file -- which is also why this survives that file moving.
+fast_mail_parser_core = { path = "../crates/fast_mail_parser_core" }
+# Direct, because the bench binary calls mailparse itself to locate the largest
+# leaf part before timing anything.
+mailparse = "0.16.1"
+data-encoding = "2.6.0"
+# The decoder that actually ships since #228. Kept alongside data-encoding so the
+# two can be timed against each other in isolation, which is the only place that
+# comparison exists -- the pytest gate can only see them through a whole parse.
+base64-simd = "0.8"
+
+# The same patched copy the extension is built against; see vendor/mailparse/PATCH.md.
+[patch.crates-io]
+mailparse = { path = "../vendor/mailparse" }
+
+[profile.release]
+debug = "line-tables-only"
+strip = "none"

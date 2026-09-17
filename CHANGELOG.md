@@ -25,6 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A Rust bench crate that measures the core directly** (#225). The pytest benchmarks are
+  the right oracle for what the wheel costs a user and a poor one for asking where that
+  cost is: every number carries the FFI crossing, the GIL and the construction of Python
+  objects. `bench/` times the core itself, including two loops nothing could isolate
+  before -- the whitespace strip and the base64 decode, which are most of a full parse on
+  the large fixture. It also measures `b64-simd` against `b64-scalar`, which is what #228
+  bought on its own rather than diluted through a whole parse: **1.66x** on an Apple M4
+  (82.6 us against 136.8 us), with `bench/Cargo.lock` pinned to the versions the wheel
+  ships and a lint check that keeps it that way. `cargo test` in `bench/` counts allocations per mode with a
+  global allocator and turns the modes' documented memory claims into assertions: on the
+  785 KiB fixture a full parse peaks at **1,060,757 bytes** and metadata mode at
+  **11,929** -- 89x lower, because it copies no part bodies. One measured result corrects
+  the intuition: a *lazy* tree holds more than a decoded one on a small
+  attachment-bearing message, because lazy retains the encoded bytes and base64 is 4/3 of
+  what it decodes to. A `profiling` cargo profile (release codegen plus line tables) makes
+  the shipped build attributable to a line. No new runtime dependency; nothing under
+  `src/`, `vendor/` or `fast_mail_parser/` changes and the wheel is byte-identical.
+
+### Added
+
 - **A layout A/B, so code placement can be measured instead of argued about** (#240).
   This crate has been bitten by placement four times: a rustc minor version moved the
   parse path 15-96% (#120), a package-version bump did the same for a byte-identical
