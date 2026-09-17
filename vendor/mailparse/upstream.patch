@@ -1,0 +1,803 @@
+# vendor/mailparse = mailparse 0.16.1 (as published) + this patch.
+#
+# The machine-readable form of PATCH.md's "The changes" section, and the thing
+# .github/scripts/check_vendored_mailparse.sh re-applies on every CI run so that
+# claim cannot quietly stop being true. Upstream declined the change (#217), so
+# this copy is a permanent carry and every mailparse release is a hand-merge --
+# which is exactly the moment a change gets lost or half-applied. A silent loss
+# would pass the vendored test suite (upstream parses the same things) and show
+# up only as an unexplained 4-10x regression in the benchmark gate.
+#
+# Regenerate after any edit under vendor/mailparse/, and update PATCH.md with it:
+#
+#   T=$(mktemp -d)
+#   tar xzf ~/.cargo/registry/cache/*/mailparse-0.16.1.crate -C "$T"
+#   cp -R vendor/mailparse "$T/vendored"
+#   for f in PATCH.md upstream.patch Cargo.toml.orig .cargo_vcs_info.json Cargo.lock .cargo-ok; do
+#     rm -f "$T/mailparse-0.16.1/$f" "$T/vendored/$f"
+#   done
+#   ( cd "$T" && diff -ruN -x target mailparse-0.16.1 vendored ) > vendor/mailparse/upstream.patch
+#
+# (then re-add this header)
+diff -ruN -x target mailparse-0.16.1/Cargo.toml vendored/Cargo.toml
+--- mailparse-0.16.1/Cargo.toml	1970-01-01 01:00:01.000000000 +0100
++++ vendored/Cargo.toml	2026-09-17 12:03:55.686053778 +0100
+@@ -37,6 +37,12 @@
+ license = "0BSD"
+ repository = "https://github.com/staktrace/mailparse"
+ 
++[dependencies.base64-simd]
++version = "0.8"
++
++[dependencies.memchr]
++version = "2.7.0"
++
+ [dependencies.charset]
+ version = "0.1.3"
+ 
+@@ -44,7 +50,14 @@
+ version = "2.6.0"
+ 
+ [dependencies.quoted_printable]
+-version = "0.5.0"
++# Pinned exactly, not `0.5.0`. 0.5.2 changed what Robust mode emits for a body
++# whose last line ends in a soft break (`b"abc=\n"` -> `b"abc"`, where 0.5.1
++# gives `b"abc\r\n"`), and `src/qp.rs` reproduces 0.5.1 because that is what this
++# library ships. A caret requirement let `cargo update` change that behaviour --
++# for encoded-word headers too -- with nothing in the suite to catch it, and it
++# made this crate's own `cargo test` resolve a different version than the
++# extension links, so the differential test was not testing what ships.
++version = "=0.5.1"
+ 
+ [dev-dependencies.ouroboros]
+ version = "0.17.0"
+diff -ruN -x target mailparse-0.16.1/src/body.rs vendored/src/body.rs
+--- mailparse-0.16.1/src/body.rs	2006-07-24 02:21:28.000000000 +0100
++++ vendored/src/body.rs	2026-09-17 12:03:55.687864996 +0100
+@@ -136,20 +136,66 @@
+     }
+ }
+ 
++/// Decode a base64 body: SIMD where the CPU has it, with the crate's original
++/// decoder as the arbiter of everything the SIMD one turns down.
++///
++/// `base64_simd::STANDARD` accepts a strict subset of what
++/// `BASE64_MIME_PERMISSIVE` accepts on a whitespace-free buffer -- same
++/// alphabet, padding required by both, and this one is additionally strict
++/// about `=` appearing mid-stream and about non-zero trailing bits. So the set
++/// "SIMD accepts, data-encoding rejects" is empty, and anything both accept
++/// decodes to the same bytes. A success here is therefore exactly what the
++/// previous decoder would have produced, and every rejection still goes through
++/// `data_encoding` and surfaces the identical `DecodeError { position, kind }`.
++/// `simd_and_data_encoding_agree` below is what holds that claim up.
++///
++/// Decoding happens in place, over `cleaned`. That keeps the second large
++/// allocation this function used to make -- `data_encoding::decode` allocates
++/// *and zero-fills* a whole output buffer -- out of the picture entirely, at the
++/// cost of leaving the result with the input's capacity (~4/3 of the decoded
++/// length). `shrink_to_fit` gives that back, because the decoded `Vec` is
++/// retained for the lifetime of the Python attachment object that ends up
++/// holding it, so its capacity is resident memory rather than a transient.
++/// Decode a base64 body: SIMD where the CPU has it, with the crate's original
++/// decoder as the arbiter of everything the SIMD one turns down.
++///
++/// `base64_simd::STANDARD` accepts a strict subset of what
++/// `BASE64_MIME_PERMISSIVE` accepts on a whitespace-free buffer -- same
++/// alphabet, padding required by both, and this one is additionally strict about
++/// `=` appearing mid-stream and about non-zero trailing bits. So the set "SIMD
++/// accepts, data-encoding rejects" is empty, and anything both accept decodes to
++/// the same bytes. A success here is therefore exactly what the previous decoder
++/// would have produced, and every rejection still goes through `data_encoding`,
++/// surfacing the identical `DecodeError { position, kind }` to the same public
++/// error type. `simd_and_data_encoding_agree` below is what holds that claim up.
++///
++/// Decoding is out of place, into an exactly-sized buffer, and `cleaned` stays
++/// intact so the cold path can reuse it. The in-place form
++/// (`decode_inplace` over `cleaned`, then `truncate`) was measured too and looks
++/// strictly better on paper -- it reuses the strip's allocation instead of making
++/// a second one. It is not: in this crate, built as the extension is built
++/// (`lto = true`, `codegen-units = 1`), the in-place version made the whole parse
++/// **9% slower** while this one makes it **51% faster**, on the same machine, the
++/// same corpus and the same decoder. Standalone, the two are within 10% of each
++/// other. That gap is the code-layout sensitivity #204 documents, and it is why
++/// this function is written the way it is rather than the way that reads better.
++/// Measure before changing the shape of this.
+ fn decode_base64(body: &[u8]) -> Result<Vec<u8>, MailParseError> {
+-    let cleaned = body
+-        .iter()
+-        .filter(|c| !c.is_ascii_whitespace())
+-        .cloned()
+-        .collect::<Vec<u8>>();
++    let cleaned = crate::bytescan::strip_ascii_whitespace(body);
++
++    if let Ok(decoded) = base64_simd::STANDARD.decode_to_vec(&cleaned) {
++        return Ok(decoded);
++    }
++
+     Ok(data_encoding::BASE64_MIME_PERMISSIVE.decode(&cleaned)?)
+ }
+ 
++/// Decode a quoted-printable body with the run-copying decoder in `crate::qp`,
++/// which returns byte-identical output to `quoted_printable::decode(.., Robust)`
++/// without its three passes over the body. The crate is still what `header.rs`
++/// uses for RFC 2047 encoded words. See PATCH.md.
+ fn decode_quoted_printable(body: &[u8]) -> Result<Vec<u8>, MailParseError> {
+-    Ok(quoted_printable::decode(
+-        body,
+-        quoted_printable::ParseMode::Robust,
+-    )?)
++    Ok(crate::qp::decode_robust(body))
+ }
+ 
+ fn get_body_as_string(body: &[u8], ctype: &ParsedContentType) -> Result<String, MailParseError> {
+@@ -161,3 +207,156 @@
+     };
+     Ok(cow.into_owned())
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::decode_base64;
++
++    /// What `decode_base64` did before the SIMD fast path existed.
++    fn oracle(body: &[u8]) -> Result<Vec<u8>, data_encoding::DecodeError> {
++        let cleaned: Vec<u8> = body
++            .iter()
++            .filter(|c| !c.is_ascii_whitespace())
++            .cloned()
++            .collect();
++        data_encoding::BASE64_MIME_PERMISSIVE.decode(&cleaned)
++    }
++
++    fn assert_agrees(body: &[u8]) {
++        match (decode_base64(body), oracle(body)) {
++            (Ok(got), Ok(want)) => assert_eq!(got, want, "bytes differ for {body:?}"),
++            (Err(crate::MailParseError::Base64DecodeError(got)), Err(want)) => {
++                assert_eq!(got, want, "error differs for {body:?}")
++            }
++            (got, want) => panic!(
++                "acceptance differs for {body:?}: got {:?}, oracle {:?}",
++                got.map(|v| v.len()).map_err(|e| e.to_string()),
++                want.map(|v| v.len())
++            ),
++        }
++    }
++
++    /// Every input either decodes to the same bytes through both decoders, or is
++    /// rejected by both with the identical `DecodeError`. This is what makes the
++    /// SIMD fast path safe to take: it proves the set "SIMD accepts, the oracle
++    /// rejects" is empty over this corpus, so a success never changes behaviour.
++    #[test]
++    fn simd_and_data_encoding_agree() {
++        const ALPHABET: &[u8; 64] =
++            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
++
++        // Valid padded input at every length, plus the unpadded tails.
++        for len in 0..=200usize {
++            let raw: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
++            let encoded = data_encoding::BASE64.encode(&raw);
++            assert_agrees(encoded.as_bytes());
++            assert_agrees(encoded.trim_end_matches('=').as_bytes());
++        }
++
++        // `=` at and off a block boundary, and the degenerate pad shapes.
++        for body in [
++            &b"SGVsbA==byB3b3JsZA=="[..], // mid-stream padding: oracle accepts
++            b"aGVsbG8=d29ybGQ=",
++            b"A===",
++            b"AA=A",
++            b"=AAA",
++            b"AAA=AAAA",
++            b"QR==", // non-zero trailing bits
++            b"QUI=",
++            b"QUJD",
++            b"QUJ",
++            b"",
++            b"=",
++            b"==",
++            b"===",
++            b"====",
++        ] {
++            assert_agrees(body);
++        }
++
++        // Every byte, at every position of a 4-block -- this is what sweeps the
++        // non-alphabet bytes, the whitespace bytes, and `\x0b`/`\x00`.
++        for byte in 0u8..=255 {
++            for pos in 0..4 {
++                let mut block = *b"QUJD";
++                block[pos] = byte;
++                assert_agrees(&block);
++
++                let mut two = *b"QUJDQUJD";
++                two[pos + 4] = byte;
++                assert_agrees(&two);
++            }
++        }
++
++        // Whitespace interleaved through an otherwise valid body, including the
++        // vertical tab and NUL that are *not* ASCII whitespace and so survive the
++        // strip to be rejected.
++        for sep in [
++            &b"\r\n"[..],
++            b" ",
++            b"\t",
++            b"\x0c",
++            b"\n",
++            b"\r",
++            b"\x0b",
++            b"\x00",
++        ] {
++            let mut body = Vec::new();
++            for chunk in b"QUJDREVGR0hJSktM".chunks(3) {
++                body.extend_from_slice(chunk);
++                body.extend_from_slice(sep);
++            }
++            assert_agrees(&body);
++        }
++
++        // Pseudo-random draws from an alphabet that mixes valid symbols, padding,
++        // whitespace and rejects, in the style of `bytescan::tests::corpus`.
++        let mut state: u32 = 0x9E37_79B9;
++        for len in 0..80 {
++            for _ in 0..8 {
++                let mut body = Vec::with_capacity(len);
++                for _ in 0..len {
++                    state ^= state << 13;
++                    state ^= state >> 17;
++                    state ^= state << 5;
++                    const MIX: &[u8; 16] = b"AQ+/=\r\n \t-\x0b\x00\xffZz9";
++                    body.push(MIX[(state % 16) as usize]);
++                }
++                assert_agrees(&body);
++            }
++        }
++
++        // A body shaped like the real thing: 76-char lines, CRLF-wrapped.
++        let raw: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
++        let encoded = data_encoding::BASE64.encode(&raw);
++        let mut wrapped = Vec::new();
++        for line in encoded.as_bytes().chunks(76) {
++            wrapped.extend_from_slice(line);
++            wrapped.extend_from_slice(b"\r\n");
++        }
++        assert_agrees(&wrapped);
++        assert_eq!(decode_base64(&wrapped).unwrap(), raw);
++
++        // The alphabet itself, so no symbol is mis-mapped by either decoder.
++        assert_agrees(ALPHABET);
++    }
++
++    /// The decoded `Vec` outlives this call inside a Python attachment object, so
++    /// its capacity is resident memory rather than a transient. It must be the
++    /// decoded length, not the encoded one (~4/3 of it).
++    #[test]
++    fn decoded_capacity_is_not_the_input_capacity() {
++        let raw: Vec<u8> = (0..8192).map(|i| (i % 251) as u8).collect();
++        let encoded = data_encoding::BASE64.encode(&raw);
++
++        let decoded = decode_base64(encoded.as_bytes()).unwrap();
++
++        assert_eq!(decoded, raw);
++        assert!(
++            decoded.capacity() < encoded.len(),
++            "capacity {} should have been shrunk below the encoded length {}",
++            decoded.capacity(),
++            encoded.len()
++        );
++    }
++}
+diff -ruN -x target mailparse-0.16.1/src/bytescan.rs vendored/src/bytescan.rs
+--- mailparse-0.16.1/src/bytescan.rs	1970-01-01 01:00:00.000000000 +0100
++++ vendored/src/bytescan.rs	2026-09-17 12:03:55.688675668 +0100
+@@ -0,0 +1,153 @@
++//! Byte scans that look at a machine word at a time instead of a byte at a time.
++//!
++//! The whitespace strip before base64 decoding used to test every byte of the body on
++//! its own. (In this copy the MIME boundary search uses `memchr` instead -- see
++//! `find_from_u8` and PATCH.md; upstream is offered a word-at-a-time version of both.) On a message with large attachments they are most of the parse,
++//! and a byte-at-a-time loop's speed also depends on where the linker happens to
++//! place it -- the same instructions ran at half speed on x86-64 when the loop
++//! straddled a 64-byte boundary.
++//!
++//! These versions read `usize`-sized chunks with `chunks_exact` and
++//! `from_ne_bytes` (plain loads; no `unsafe`) and use two classic word tricks to
++//! decide whether a chunk needs a closer look:
++//!
++//! - `below_mask(x, n)`: non-zero iff some byte of `x` is below `n`, exact for `n <= 128`.
++//!
++//! Where a mask is non-zero, its set bits say which bytes to look at, so a hit costs a
++//! `trailing_zeros` rather than a rescan of the word.
++//!
++//! Both are exact, so a chunk is only examined byte by byte when it really contains
++//! a candidate. See Anderson, "Bit Twiddling Hacks", `haszero` and `hasless`.
++
++// `chunks_exact` with a constant size is what clippy would rewrite to `as_chunks`, which
++// is only stable from Rust 1.88 -- above this crate's minimum supported version.
++#![allow(clippy::chunks_exact_to_as_chunks)]
++
++const WORD: usize = core::mem::size_of::<usize>();
++const LO: usize = usize::from_ne_bytes([0x01; WORD]);
++const HI: usize = usize::from_ne_bytes([0x80; WORD]);
++
++/// Each byte of the result has its high bit set iff that byte of `x` is below `n`
++/// (`n <= 128`), with the same caveat as `zero_byte_mask` above the lowest hit: never a
++/// false negative, possibly a false positive, so callers re-check.
++#[inline]
++fn below_mask(x: usize, n: u8) -> usize {
++    x.wrapping_sub(LO.wrapping_mul(n as usize)) & !x & HI
++}
++
++/// The word at `chunk`, byte 0 in the low-order bits, so that a mask bit at position
++/// `p` refers to byte `p / 8` regardless of the machine's endianness.
++#[inline]
++fn word(chunk: &[u8]) -> usize {
++    // Callers pass exactly `WORD` bytes. Spelled with `copy_from_slice` rather than
++    // `try_into` so it reads the same in every edition; it compiles to one load.
++    let mut bytes = [0u8; WORD];
++    bytes.copy_from_slice(chunk);
++    usize::from_le_bytes(bytes)
++}
++
++/// Byte index of the lowest set bit of a non-zero mask.
++#[inline]
++fn first_hit(mask: usize) -> usize {
++    (mask.trailing_zeros() / 8) as usize
++}
++
++/// `body` without its ASCII whitespace -- exactly the bytes `u8::is_ascii_whitespace`
++/// names: space, tab, line feed, form feed, carriage return.
++///
++/// Every whitespace byte is below `0x21`, so a word with no byte below `0x21` has no
++/// whitespace and is skipped whole. For a word that has candidates, the mask says
++/// where they are, and each is re-checked with `is_ascii_whitespace`, so `0x0B` and
++/// the other control characters below `0x21` are kept, as before. Runs of kept bytes
++/// are copied in one piece rather than pushed one at a time. A base64 body is mostly
++/// 76-byte lines ending in CRLF, so the common case is two mask bits and one copy per
++/// line.
++pub(crate) fn strip_ascii_whitespace(body: &[u8]) -> Vec<u8> {
++    let mut cleaned = Vec::with_capacity(body.len());
++    let mut run_start = 0;
++    let mut offset = 0;
++    let mut words = body.chunks_exact(WORD);
++    for chunk in &mut words {
++        let mut mask = below_mask(word(chunk), 0x21);
++        while mask != 0 {
++            let i = offset + first_hit(mask);
++            if body[i].is_ascii_whitespace() {
++                cleaned.extend_from_slice(&body[run_start..i]);
++                run_start = i + 1;
++            }
++            mask &= mask - 1;
++        }
++        offset += WORD;
++    }
++    for (i, &b) in words.remainder().iter().enumerate() {
++        if b.is_ascii_whitespace() {
++            cleaned.extend_from_slice(&body[run_start..offset + i]);
++            run_start = offset + i + 1;
++        }
++    }
++    cleaned.extend_from_slice(&body[run_start..]);
++    cleaned
++}
++
++#[cfg(test)]
++mod tests {
++    use super::strip_ascii_whitespace;
++
++    fn naive_strip(body: &[u8]) -> Vec<u8> {
++        body.iter()
++            .filter(|c| !c.is_ascii_whitespace())
++            .cloned()
++            .collect()
++    }
++
++    /// Deterministic pseudo-random bytes drawn from a small alphabet, so that needles
++    /// actually occur, at every alignment relative to the word size.
++    fn corpus() -> Vec<Vec<u8>> {
++        let mut out = Vec::new();
++        let mut state: u32 = 0x9E37_79B9;
++        for len in 0..80 {
++            for _ in 0..4 {
++                let mut v = Vec::with_capacity(len);
++                for _ in 0..len {
++                    state ^= state << 13;
++                    state ^= state >> 17;
++                    state ^= state << 5;
++                    const ALPHABET: &[u8; 12] = b"-\r\n \tab=\x0c\x0b\x00\xff";
++                    v.push(ALPHABET[(state % 12) as usize]);
++                }
++                out.push(v);
++            }
++        }
++        out
++    }
++
++    #[test]
++    fn strip_matches_filter() {
++        for h in corpus() {
++            assert_eq!(strip_ascii_whitespace(&h), naive_strip(&h), "{:?}", h);
++        }
++        for b in 0u8..=255 {
++            let single = [b];
++            assert_eq!(
++                strip_ascii_whitespace(&single),
++                naive_strip(&single),
++                "{:?}",
++                b
++            );
++            let mixed = [
++                b' ', b, b'\t', b, b'\r', b'\n', b, b, b, b, b, b, b, b, b, b, b'\x0c', b,
++            ];
++            assert_eq!(
++                strip_ascii_whitespace(&mixed),
++                naive_strip(&mixed),
++                "{:?}",
++                b
++            );
++        }
++        // vertical tab is below 0x21 but is not ASCII whitespace: kept
++        assert_eq!(
++            strip_ascii_whitespace(b"a\x0bb\x0b\x0b\x0b\x0b\x0b\x0bc"),
++            b"a\x0bb\x0b\x0b\x0b\x0b\x0b\x0bc"
++        );
++    }
++}
+diff -ruN -x target mailparse-0.16.1/src/lib.rs vendored/src/lib.rs
+--- mailparse-0.16.1/src/lib.rs	2006-07-24 02:21:28.000000000 +0100
++++ vendored/src/lib.rs	2026-09-17 12:03:55.688290249 +0100
+@@ -13,10 +13,12 @@
+ 
+ mod addrparse;
+ pub mod body;
++mod bytescan;
+ mod dateparse;
+ mod header;
+ pub mod headers;
+ mod msgidparse;
++mod qp;
+ 
+ pub use crate::addrparse::{
+     addrparse, addrparse_header, GroupInfo, MailAddr, MailAddrList, SingleInfo,
+@@ -121,27 +123,11 @@
+ fn find_from_u8(line: &[u8], ix_start: usize, key: &[u8]) -> Option<usize> {
+     assert!(!key.is_empty());
+     assert!(ix_start <= line.len());
+-    if line.len() < key.len() {
+-        return None;
+-    }
+-    let ix_end = line.len() - key.len();
+-    if ix_start <= ix_end {
+-        for i in ix_start..=ix_end {
+-            if line[i] == key[0] {
+-                let mut success = true;
+-                for j in 1..key.len() {
+-                    if line[i + j] != key[j] {
+-                        success = false;
+-                        break;
+-                    }
+-                }
+-                if success {
+-                    return Some(i);
+-                }
+-            }
+-        }
+-    }
+-    None
++    // `memchr` rather than `bytescan::find`: on x86-64 its AVX2 path is ~10% ahead of a
++    // word-at-a-time scan on the structure-only parse (measured on the CI gate), and this
++    // copy's rule is no degradation. The dependency-free `bytescan` version of this search
++    // is what upstream is offered; see PATCH.md.
++    memchr::memmem::find(&line[ix_start..], key).map(|v| ix_start + v)
+ }
+ 
+ #[test]
+diff -ruN -x target mailparse-0.16.1/src/qp.rs vendored/src/qp.rs
+--- mailparse-0.16.1/src/qp.rs	1970-01-01 01:00:00.000000000 +0100
++++ vendored/src/qp.rs	2026-09-17 12:03:55.687672912 +0100
+@@ -0,0 +1,304 @@
++//! Quoted-printable body decoding, a run at a time instead of a byte at a time.
++//!
++//! This replaces `quoted_printable::decode(body, ParseMode::Robust)` for message
++//! *bodies* only; the RFC 2047 encoded-word path in `header.rs` still uses the
++//! crate, where inputs are header-sized and the semantics differ.
++//!
++//! The crate's decoder makes three passes over the body and a fourth allocation
++//! pass on top: it copies every byte into a `String` through a `filter_map`, walks
++//! that with `lines()` and `trim_end()`, then decodes with one bounds-checked
++//! `push` per byte into a `Vec` that was never given a capacity. On the 90 KB
++//! quoted-printable HTML part in `tests/data/valid_message.eml` that is most of
++//! the parse.
++//!
++//! This version reserves the output once, finds line breaks and escapes with
++//! `memchr`, and copies everything between them with `extend_from_slice`. The
++//! common case -- a line with no `=` in it -- is one copy.
++//!
++//! **Output is byte-identical to the crate's Robust mode.** That is not an
++//! aspiration: `decode_robust_matches_the_crate` below compares the two over a
++//! generated corpus at every length, over every `=xy` byte pair, and over
++//! hand-written cases for each rule, and the `qp_agreement` fuzz target compares
++//! them on arbitrary input. The rules being reproduced, read off the crate's
++//! source rather than the RFC (the RFC is not what this library shipped):
++//!
++//! 1. Bytes outside `{0x09, 0x0A, 0x0D} ∪ [0x20, 0x7E]` are dropped *before*
++//!    anything else, so they affect neither line splitting nor trimming.
++//! 2. Lines split on LF, with a CR immediately before it belonging to the
++//!    terminator (`str::lines` semantics). A final line without LF is a line.
++//! 3. Each line is trimmed of trailing space, tab and CR.
++//! 4. `=` + two hex digits is one byte; `=` at end of line is a soft break; `=X`
++//!    at end of line is literal and the line still ends; `=XY` with a non-hex
++//!    digit is three literal bytes and decoding continues after `Y`.
++//! 5. CRLF joins consecutive lines, except after a soft break.
++//! 6. If the filtered input ends with LF, one CRLF is appended -- even when the
++//!    last line ended in a soft break.
++
++use memchr::memchr;
++
++/// True for the bytes the crate's `filter_map` keeps.
++#[inline]
++fn is_kept(byte: u8) -> bool {
++    matches!(byte, b'\t' | b'\r' | b'\n' | b' '..=b'~')
++}
++
++/// Trailing bytes a line is trimmed of. After the filter these are the only
++/// characters `str::trim_end` can see inside a line, which is why this is not
++/// `trim_ascii_end` -- that set also includes the form feed the filter dropped.
++#[inline]
++fn is_trimmed(byte: u8) -> bool {
++    matches!(byte, b' ' | b'\t' | b'\r')
++}
++
++/// `input` without the bytes rule 1 drops. Returns `None` when there are none,
++/// which is the common case and saves the copy.
++fn filter_dropped(input: &[u8]) -> Option<Vec<u8>> {
++    let first = input.iter().position(|&b| !is_kept(b))?;
++
++    let mut out = Vec::with_capacity(input.len());
++    out.extend_from_slice(&input[..first]);
++    let mut run_start = None;
++    for (i, &byte) in input.iter().enumerate().skip(first + 1) {
++        if is_kept(byte) {
++            run_start.get_or_insert(i);
++        } else if let Some(start) = run_start.take() {
++            out.extend_from_slice(&input[start..i]);
++        }
++    }
++    if let Some(start) = run_start {
++        out.extend_from_slice(&input[start..]);
++    }
++    Some(out)
++}
++
++#[inline]
++fn hex_value(byte: u8) -> Option<u8> {
++    match byte {
++        b'0'..=b'9' => Some(byte - b'0'),
++        b'a'..=b'f' => Some(byte - b'a' + 10),
++        b'A'..=b'F' => Some(byte - b'A' + 10),
++        _ => None,
++    }
++}
++
++/// Decode one already-trimmed line into `out`.
++///
++/// Returns `false` when the line ended in a soft break (a trailing `=`), which is
++/// the one case that suppresses the CRLF before the next line.
++fn decode_line(line: &[u8], out: &mut Vec<u8>) -> bool {
++    let mut pos = 0;
++    while pos < line.len() {
++        let Some(offset) = memchr(b'=', &line[pos..]) else {
++            out.extend_from_slice(&line[pos..]);
++            return true;
++        };
++
++        let eq = pos + offset;
++        out.extend_from_slice(&line[pos..eq]);
++
++        match line.get(eq + 1) {
++            // `=` is the last byte: a soft break. Nothing is emitted and the next
++            // line joins this one directly.
++            None => return false,
++            Some(&upper) => match line.get(eq + 2) {
++                // `=X` at the end of a line: literal, and the line ends normally.
++                None => {
++                    out.push(b'=');
++                    out.push(upper);
++                    return true;
++                }
++                Some(&lower) => match (hex_value(upper), hex_value(lower)) {
++                    (Some(hi), Some(lo)) => {
++                        out.push(hi << 4 | lo);
++                        pos = eq + 3;
++                    }
++                    // Not a hex octet: three literal bytes, and decoding resumes
++                    // after them -- so `==3D` decodes to `==3D`, not `=` + `=`.
++                    _ => {
++                        out.push(b'=');
++                        out.push(upper);
++                        out.push(lower);
++                        pos = eq + 3;
++                    }
++                },
++            },
++        }
++    }
++    true
++}
++
++/// Decode a quoted-printable body exactly as `quoted_printable`'s Robust mode does.
++pub(crate) fn decode_robust(input: &[u8]) -> Vec<u8> {
++    let filtered = filter_dropped(input);
++    let src: &[u8] = match filtered {
++        Some(ref bytes) => bytes,
++        None => input,
++    };
++
++    // Decoding never grows a line, and the only growth is the CRLF per line
++    // ending, which the input already spends at least one byte on. Two spare
++    // bytes cover the trailing CRLF of rule 6.
++    let mut out = Vec::with_capacity(src.len() + 2);
++
++    // `None` before the first line, mirroring the crate's `add_line_break`: the
++    // CRLF is emitted *before* the next line rather than after the previous one,
++    // so a soft break simply never arms it.
++    let mut pending_crlf = false;
++    let mut pos = 0;
++    while pos < src.len() {
++        let (line_end, next) = match memchr(b'\n', &src[pos..]) {
++            Some(offset) => (pos + offset, pos + offset + 1),
++            None => (src.len(), src.len()),
++        };
++
++        // Rule 2: a CR immediately before the LF is part of the terminator.
++        let mut line = &src[pos..line_end];
++        if line_end < src.len() && line.last() == Some(&b'\r') {
++            line = &line[..line.len() - 1];
++        }
++        // Rule 3.
++        while let Some(&last) = line.last() {
++            if is_trimmed(last) {
++                line = &line[..line.len() - 1];
++            } else {
++                break;
++            }
++        }
++
++        if pending_crlf {
++            out.extend_from_slice(b"\r\n");
++        }
++        pending_crlf = decode_line(line, &mut out);
++
++        pos = next;
++    }
++
++    // Rule 6: a trailing LF always contributes a CRLF, soft break or not.
++    if src.last() == Some(&b'\n') {
++        out.extend_from_slice(b"\r\n");
++    }
++
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::decode_robust;
++
++    /// The decoder this replaces. Every assertion below is against it rather than
++    /// against the RFC: what must not change is what this library shipped.
++    fn oracle(input: &[u8]) -> Vec<u8> {
++        quoted_printable::decode(input, quoted_printable::ParseMode::Robust)
++            .expect("Robust mode never fails")
++    }
++
++    #[track_caller]
++    fn assert_agrees(input: &[u8]) {
++        assert_eq!(
++            decode_robust(input),
++            oracle(input),
++            "decoded differently for {input:?}"
++        );
++    }
++
++    /// Same shape as `bytescan::tests::corpus`: a cheap xorshift over an alphabet
++    /// chosen so every rule is reachable -- escape introducer, hex and non-hex
++    /// digits, the three trimmed bytes, the line terminator, and three bytes the
++    /// filter drops (`\x0b`, `\x0c`, `\x7f`, `\x00`, `\xff`).
++    fn corpus() -> Vec<Vec<u8>> {
++        const ALPHABET: &[u8] = b"=3DafZ \t\r\n\x0b\x0c\x7f\x00\xff";
++        let mut out = Vec::new();
++        let mut state: u32 = 0x9E37_79B9;
++        for len in 0..=96 {
++            for _ in 0..6 {
++                let mut v = Vec::with_capacity(len);
++                for _ in 0..len {
++                    state ^= state << 13;
++                    state ^= state >> 17;
++                    state ^= state << 5;
++                    v.push(ALPHABET[(state as usize) % ALPHABET.len()]);
++                }
++                out.push(v);
++            }
++        }
++        out
++    }
++
++    #[test]
++    fn decode_robust_matches_the_crate() {
++        for input in corpus() {
++            assert_agrees(&input);
++        }
++    }
++
++    /// Every possible two-byte tail after `=`, in the four positions where the
++    /// crate's escape handling branches differently.
++    #[test]
++    fn every_escape_pair_matches_the_crate() {
++        for x in 0u8..=255 {
++            assert_agrees(&[b'=', x]);
++            assert_agrees(&[b'=', x, b'\n']);
++            assert_agrees(&[b'a', b'=', x]);
++            for y in 0u8..=255 {
++                assert_agrees(&[b'=', x, y]);
++                assert_agrees(&[b'=', x, y, b'\n']);
++            }
++        }
++    }
++
++    /// One case per documented rule, named so a failure says which rule broke.
++    #[test]
++    fn each_rule_matches_the_crate() {
++        for input in [
++            &b""[..],
++            b"\n",
++            b"\r\n",
++            b"abc",
++            b"abc\n",
++            // rule 4: soft break, and rule 6 on top of it
++            b"abc=\n",
++            b"a=\nb\n",
++            b"a=\nb",
++            // rule 4: `=X` at end of line is literal and the line still ends
++            b"abc=A\nnext\n",
++            b"abc=\r\n",
++            // rule 4: non-hex octet is three literal bytes, decoding resumes
++            b"==3D",
++            b"=3D=3D",
++            b"=ZZ",
++            b"=3",
++            b"=g0",
++            b"=0g",
++            // lowercase hex is accepted in Robust mode
++            b"=3d=e2=80=99",
++            // rule 3: trailing space/tab/CR are trimmed
++            b"x=  \r\n",
++            b"x   \n",
++            b"x\t\t\n",
++            // rule 2: a bare CR is not a terminator
++            b"a\r\r\n",
++            b"a\rb\n",
++            b"a\rb",
++            // rule 1: dropped bytes do not participate in trimming or splitting
++            b"abc \x80\n",
++            b"abc=\x80\n",
++            b"a\x00b\n",
++            b"\x0b\x0c\x7f",
++            b"=\x803D",
++            // empty lines each produce a CRLF
++            b"a\n\n\nb\n",
++            b"\n\n",
++            // the real fixture's shape: soft-wrapped lines with escapes
++            b"Lorem ipsum dolor sit amet =E2=80=94 consectetur=\r\nadipiscing elit.\r\n",
++        ] {
++            assert_agrees(input);
++        }
++    }
++
++    /// The property the benchmark depends on: the real fixture decodes the same.
++    #[test]
++    fn the_valid_message_fixture_matches_the_crate() {
++        let raw = include_bytes!("../../../tests/data/valid_message.eml");
++        assert_agrees(raw);
++    }
++}

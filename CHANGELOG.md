@@ -27,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   residual, and the rule is pinned by `tests/test_layout_spread.py`. Dispatch-only; no
   change to `src/`, `vendor/`, the shipped wheels or any build flag.
 
+- **The vendored mailparse delta is a CI invariant** (#235). `vendor/mailparse` is
+  upstream 0.16.1 with three functions changed, and upstream declined the change (#217),
+  so the copy is a permanent carry and every mailparse release is a hand-merge into it.
+  Ownership of that copy rested entirely on prose, and the prose had already drifted in
+  three places. `vendor/mailparse/upstream.patch` is now the delta in machine-readable
+  form, and `.github/scripts/check_vendored_mailparse.sh` re-applies it on every CI run --
+  download the published crate, verify its sha256, apply the patch, `diff -r` against the
+  vendored copy -- failing the lint job on any drift. It also asserts the two things the
+  sync recipe is easiest to get wrong: that both root manifests require exactly the
+  vendored version, and that `Cargo.lock` still records `mailparse` with no `source =`
+  line, which is the signature of `[patch.crates-io]` being in effect. Nothing else could
+  see this class of mistake: the vendored suite passes on unpatched upstream, because the
+  patch does not change behaviour, so a half-applied hand-merge would have surfaced only
+  as an unexplained 4-10x regression in the benchmark gate on some unrelated PR. The sdist
+  check now also asserts `bytescan.rs`, `qp.rs` and the patch are shipped, and that a
+  stray `target/` or `Cargo.lock` from running cargo in the vendored crate is not. No Rust
+  source change; the wheel is byte-identical.
+
 ### Changed
 
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in

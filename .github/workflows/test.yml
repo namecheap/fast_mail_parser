@@ -54,14 +54,25 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings -W clippy::cast_possible_truncation
         continue-on-error: true
 
-      # `vendor/mailparse` is upstream 0.16.1 with its boundary search changed (see
-      # vendor/mailparse/PATCH.md). Its own test suite is the check that a hand-merged
-      # upstream release, or an edit to the patch, still parses what upstream parses.
-      # Separate target dir: a `target/` inside the vendored crate would be swept into
-      # the sdist by the include glob.
+      # `vendor/mailparse` is upstream 0.16.1 with three functions changed -- the
+      # MIME boundary search, the base64 body decode and the quoted-printable body
+      # decode -- via two new modules and two added dependencies. See
+      # vendor/mailparse/PATCH.md. Its own test suite is the check that a
+      # hand-merged upstream release, or an edit to the patch, still parses what
+      # upstream parses. Separate target dir: a `target/` inside the vendored crate
+      # would be swept into the sdist by the include glob.
       - name: vendored mailparse tests
         if: always()
         run: cargo test --manifest-path vendor/mailparse/Cargo.toml --target-dir "$RUNNER_TEMP/vendor-target"
+
+      # ...and this is the check that the copy is still *upstream plus the
+      # documented delta*, which the suite above cannot tell you: it passes on
+      # unpatched upstream too, because the patch does not change behaviour. A
+      # half-applied hand-merge would therefore show up only as an unexplained
+      # 4-10x regression in the benchmark gate, on some unrelated PR.
+      - name: vendored mailparse is upstream + upstream.patch
+        if: always()
+        run: bash .github/scripts/check_vendored_mailparse.sh
 
       # Blocking: `mypy --strict fast_mail_parser/` type-checks clean today.
       - name: mypy --strict
@@ -539,8 +550,12 @@ jobs:
           # Asserted rather than assumed: `pyproject.toml` decides what goes in
           # via `sdist-include`, and a build that happens to work from a warm
           # cache would hide a missing file until someone else's cold build.
+          # `vendor/mailparse/src/bytescan.rs` is load-bearing and easy to lose: it
+          # exists only in this copy, so a mistake in the include glob would drop
+          # it and a source build would fall back to the unpatched registry crate.
           for needed in Cargo.toml pyproject.toml src/mail_parser.rs \
-                        src/fast_mail_parser.rs; do
+                        src/fast_mail_parser.rs vendor/mailparse/src/bytescan.rs \
+                        vendor/mailparse/src/qp.rs vendor/mailparse/upstream.patch; do
             if ! tar -tzf "$sdist" | grep -q "/${needed}$"; then
               echo "::error::the sdist is missing ${needed}"
               exit 1
@@ -553,6 +568,17 @@ jobs:
             echo "::error::the sdist contains the fuzz crate, which is excluded"
             exit 1
           fi
+
+          # Nor the leftovers of running cargo inside the vendored crate. The
+          # include glob is `vendor/mailparse/**/*`, so a stray `target/` or
+          # `Cargo.lock` there would be shipped -- tens of megabytes, and a
+          # lockfile that would override the consumer's own resolution.
+          for unwanted in 'vendor/mailparse/target/' 'vendor/mailparse/Cargo.lock'; do
+            if tar -tzf "$sdist" | grep -q "/${unwanted}"; then
+              echo "::error::the sdist contains ${unwanted}, left behind by cargo in the vendored crate"
+              exit 1
+            fi
+          done
           echo "sdist contents check passed"
 
       - name: Install it from source

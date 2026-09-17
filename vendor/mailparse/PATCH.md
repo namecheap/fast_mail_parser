@@ -141,6 +141,33 @@ nothing on the decoding paths. The removal steps for that case:
    `pyproject.toml` and the `vendored mailparse tests` step from the lint job,
 4. run the benchmark gate and read the metadata rows with the number above in mind.
 
+## The patch is a CI invariant
+
+`upstream.patch` is this delta in machine-readable form, and
+`.github/scripts/check_vendored_mailparse.sh` re-applies it on every CI run: it
+downloads the published crate, verifies its sha256, applies the patch and
+`diff -r`s the result against this directory. Any drift fails the lint job with
+the file that drifted.
+
+That check exists because nothing else can see this class of mistake. The
+vendored test suite passes on *unpatched* upstream -- it tests behaviour, and the
+patch does not change behaviour -- so a hand-merge that silently dropped half the
+delta would surface only as an unexplained 4-10x regression in the benchmark
+gate, on whichever unrelated PR happened to run next. It also asserts the two
+things the sync recipe below is easiest to get wrong: that both root manifests
+require exactly this copy's version, and that `Cargo.lock` still records
+`mailparse` with no `source =` line, which is the signature of `[patch]` actually
+being in effect.
+
+Run it locally without the download:
+
+```sh
+MAILPARSE_CRATE_FILE=~/.cargo/registry/cache/*/mailparse-0.16.1.crate \
+  bash .github/scripts/check_vendored_mailparse.sh
+```
+
+Regenerating the patch after an edit here is documented in its own header.
+
 ## Keeping this in sync
 
 Until then, each upstream mailparse release is a hand-merge into this copy:
@@ -154,4 +181,7 @@ Until then, each upstream mailparse release is a hand-merge into this copy:
 3. bump the version in this copy's `Cargo.toml` and the `mailparse = "..."` requirement in
    both root manifests together, since `[patch]` only applies when the patched version
    satisfies the requirement;
-4. run this copy's own suite (the lint job does), then the benchmark gate.
+4. regenerate `upstream.patch` (recipe in its header) and bump `EXPECT_SHA256`
+   in `.github/scripts/check_vendored_mailparse.sh` to the new crate's checksum;
+5. run this copy's own suite and the invariant check (the lint job does both),
+   then the benchmark gate.
