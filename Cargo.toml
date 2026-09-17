@@ -48,8 +48,11 @@ pyo3 = "0.29"
 # CPython >= 3.11, including versions released after this build.
 default = ["pyo3/extension-module", "pyo3/abi3-py311"]
 
-# `vendor/mailparse` is upstream 0.16.1 with one function changed: the MIME
-# boundary search calls `memchr::memmem` instead of scanning byte by byte. See
-# vendor/mailparse/PATCH.md for why, the numbers, and when this section goes.
+# `vendor/mailparse` is upstream 0.16.1 with two functions changed: the MIME
+# boundary search calls `memchr::memmem` instead of scanning byte by byte, and
+# the base64 body decode strips whitespace word-at-a-time and then decodes with
+# `base64-simd`, keeping `data_encoding` as the arbiter of anything the SIMD
+# decoder rejects. See vendor/mailparse/PATCH.md for why, the numbers, and when
+# this section goes.
 [patch.crates-io]
 mailparse = { path = "vendor/mailparse" }

@@ -74,3 +74,43 @@ def test_plain_message_still_parses():
     mail = parse_email(message)
     assert mail.subject == "hello"
     assert any("plain body" in part for part in mail.text_plain)
+
+
+# --- the lenient cases that now reach the data_encoding fallback (#228) -------
+#
+# The SIMD fast path added in #228 is strict RFC 4648: it rejects `=` mid-stream
+# and non-zero trailing bits, both of which this library has always accepted.
+# Those inputs fall through to `BASE64_MIME_PERMISSIVE`, which is the decoder
+# that decided before and still decides. These pin that the fallback is wired up
+# -- without them, a fast path that quietly swallowed these would look green.
+
+
+def _base64_body(payload: bytes) -> bytes:
+    return (
+        b"Subject: ok\r\n"
+        b"Content-Type: text/plain\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\n" + payload + b"\r\n"
+    )
+
+
+def test_midstream_padding_still_decodes():
+    # Two padded base64 runs concatenated into one body. Strict decoders stop at
+    # the first `=`; this one must read straight through, as it always has.
+    mail = parse_email(_base64_body(b"aGVsbG8=d29ybGQ="))
+
+    assert any("helloworld" in part for part in mail.text_plain)
+
+
+def test_nonzero_trailing_bits_still_decode():
+    # `QR==` carries bits past the encoded byte. RFC 4648 lets a decoder reject
+    # that; BASE64_MIME_PERMISSIVE sets check_trailing_bits = false and accepts.
+    mail = parse_email(_base64_body(b"QR=="))
+
+    assert any("A" in part for part in mail.text_plain)
+
+
+def test_missing_padding_still_raises():
+    # Padding is required by both decoders, so this is rejected by the fallback
+    # and must still surface as DecodeError rather than a silently short body.
+    with pytest.raises(DecodeError):
+        parse_email(_base64_body(b"QUJDR"))

@@ -46,6 +46,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **12.83 -> 0.083 us, ~156x**, and `full_read` (parse + read, decode-dominated)
   **0.250 -> 0.243 ms (-2.9%)**. Every other benchmark stayed inside the noise floor.
 
+- **Base64 bodies decode with SIMD** (#228). `decode_base64` in the vendored mailparse
+  stripped whitespace and then ran `data_encoding`'s scalar loop -- four table lookups per
+  three bytes, at scalar peak on every CPU tried, and **53% of a full parse** after the
+  strip was fixed in #214/#218. It now decodes with `base64_simd::STANDARD` (AVX2/SSE4.1
+  with runtime detection on x86-64, NEON on aarch64) and keeps `data_encoding` as the
+  arbiter of everything the SIMD decoder turns down. That fallback is what makes this a
+  pure speed change: `STANDARD` accepts a strict subset on a whitespace-free buffer, so
+  every message that decoded before still decodes, to the same bytes, and every rejection
+  still carries `data_encoding`'s own `DecodeError { position, kind }` and reaches Python
+  as the same `DecodeError` text. The two lenient cases this library has always
+  accepted -- `=` mid-stream and non-zero trailing bits -- take the fallback and are pinned
+  by tests. A differential test over a built corpus and a new `base64_agreement` fuzz
+  target (3.6 M executions clean) hold the agreement up. Measured on an Apple M4 (10 vCPU),
+  two independent interleaved A/Bs pooled to 8 rounds per side, pure-Python controls within
+  1.1%: full `parse_email` **0.254 -> 0.168 ms (-34%)**, `parse_email_tree` 0.246 -> 0.159 ms,
+  `full_read` 0.261 -> 0.172 ms, `parse_many` (8 x 767 KiB) **1.989 -> 1.318 ms (-34%)**.
+  `mode="metadata"` and untouched lazy parses never call this function and are flat.
+
 - **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
   seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
   `parse_email` 12.1 M executions to 5,047 edges, `parse_agreement` 5.5 M to 5,502,

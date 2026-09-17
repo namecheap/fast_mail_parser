@@ -193,11 +193,11 @@ jobs:
       # `rustc_*` attributes that today's nightly rejects, so an old cargo-fuzz
       # fails to build regardless of this repository.
       CARGO_FUZZ_VERSION: "0.13.2"
-      # Per target, and there are two, so the job's fuzzing budget is unchanged
-      # at a minute total: long enough to exercise the seeds and some mutation,
-      # short enough that it never dominates a PR run.
-      FUZZ_SECONDS: "30"
-      FUZZ_TARGETS: "parse_email parse_agreement"
+      # Per target, and there are three, so the job's fuzzing budget stays at a
+      # minute total: long enough to exercise the seeds and some mutation, short
+      # enough that it never dominates a PR run.
+      FUZZ_SECONDS: "20"
+      FUZZ_TARGETS: "parse_email parse_agreement base64_agreement"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master

@@ -23,6 +23,10 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 charset = "0.1.3"
 mailparse = "0.16.1"
+# The oracle the base64_agreement target compares the SIMD fast path against. It
+# is what the vendored decode_base64 used exclusively before #228, and it must
+# stay pinned to the version that crate depends on.
+data-encoding = "2.6.0"
 
 [[bin]]
 name = "parse_email"
@@ -34,6 +38,13 @@ bench = false
 [[bin]]
 name = "parse_agreement"
 path = "fuzz_targets/parse_agreement.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "base64_agreement"
+path = "fuzz_targets/base64_agreement.rs"
 test = false
 doc = false
 bench = false

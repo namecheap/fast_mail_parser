@@ -14,3 +14,10 @@ __pycache__
 # belongs in the tree, and the sdist include glob would sweep them in.
 /vendor/mailparse/target
 /vendor/mailparse/Cargo.lock
+
+# `cargo fuzz` leaves these behind in the fuzz crate; the corpus and any crashers
+# are local run state, and the lockfile is deliberately not pinned (see fuzz/Cargo.toml).
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/Cargo.lock
