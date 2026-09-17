@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
+  `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
+  arm: both checked the depth cap, both recursed over `multipart/*`, both carried a verbatim
+  copy of the `message/rfc822` decode → repair → re-parse block, and both ended in the same
+  six-field node literal. Every per-node rule the tree enforces had to be edited twice, and a
+  fuzz invariant existed to notice when the copies drifted. The node is now generic over its
+  body -- `MimePart = Node<Option<Vec<u8>>>`, `TreeNode = Node<NodeBody>` -- and one traversal
+  is driven by a `LeafPolicy`, of which there are two: `Full`, and the `Retain` enum #239
+  already used to say what a leaf keeps of itself. `grep -c 'if depth >= MAX_MIME_DEPTH'` in
+  the core goes from 3 to 2, and the re-parse of an attacker-supplied embedded message exists
+  in one place rather than two. Two instantiations replace two hand-written recursions, so the
+  linker sees what it saw before; measured flat. No behaviour change, and nothing public moves
+  -- `MimePart.content` is renamed to `.body` inside the core, which the binding reads at one
+  line. The fuzz target's shape invariant now has an always-run twin in `cargo test`.
+
 - **Lazy modes borrow the payload instead of copying every deferred part** (#239). Deferring
   a decode used to copy the part's encoded bytes out of the message, which is the opposite
   of what deferring is for: parsing a 96 MiB single-attachment message in `mode="lazy"` cost

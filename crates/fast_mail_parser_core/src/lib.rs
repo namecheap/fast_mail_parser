@@ -1074,70 +1074,130 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
 /// another, containers dropped. Any flattening loses something -- which
 /// `text/html` corresponds to which `text/plain` sibling, whether a part was
 /// `multipart/alternative` or `multipart/mixed` -- and this keeps it.
+///
+/// Generic over the body because that is the only thing the three modes disagree
+/// about (#237). Everything else a node carries -- its content type, headers,
+/// filename, content id, disposition token and children -- is derived the same
+/// way in all of them, and used to be derived by two copies of one traversal that
+/// a fuzz invariant existed to catch drifting apart. `MimePart` and `TreeNode`
+/// are the two bodies that exist; both names are what callers use.
 #[derive(Debug)]
-pub struct MimePart {
+pub struct Node<B> {
     pub content_type: String,
     pub headers: Vec<(String, Vec<String>)>,
     pub filename: String,
     pub content_id: Option<String>,
     pub disposition: Option<String>,
     pub is_message: bool,
-    /// Transfer-decoded bytes of a leaf. `None` for a `multipart/*` container,
-    /// whose body is just its children with boundaries between them.
-    pub content: Option<Vec<u8>>,
-    pub children: Vec<MimePart>,
+    pub body: B,
+    pub children: Vec<Node<B>>,
 }
 
-impl MimePart {
-    fn build(part: &ParsedMail<'_>, depth: usize) -> Result<Self, MailParseError> {
-        if depth >= MAX_MIME_DEPTH {
-            return Err(MailParseError::Generic(ERR_MIME_DEPTH));
+/// Full mode's tree: `None` is a `multipart/*` container, whose body is just its
+/// children with boundaries between them, and `Some` is a leaf's transfer-decoded
+/// bytes. `None` means container and nothing else -- see `NodeBody` for why the
+/// deferred modes cannot reuse this type.
+pub type MimePart = Node<Option<Vec<u8>>>;
+
+/// The deferred modes' tree, whose bodies are described or retained rather than
+/// decoded.
+pub type TreeNode = Node<NodeBody>;
+
+/// What a mode does with a body, which is all a mode is to this traversal (#237).
+///
+/// The alternative, and what this replaces, is a second copy of the walk: the
+/// depth cap, the `multipart/*` recursion, the `message/rfc822` decode and
+/// re-parse, and the six-field node literal, all written twice and kept in step
+/// by hand. One of those copies was of the depth cap and the re-parse of an
+/// attacker-supplied embedded message, which is not a block to maintain two of.
+///
+/// Taken by value and `Copy`: a policy is a `Retain` or a unit struct, so passing
+/// one costs what passing the old `bool` cost.
+trait LeafPolicy: Copy {
+    /// What a node of this mode carries where another mode carries something else.
+    type Body;
+
+    /// The policy that governs an embedded message's subtree.
+    ///
+    /// A hook rather than a constant because those bytes are not in the buffer
+    /// being parsed: they are a decode of the enclosing body, which is dropped
+    /// when the walk leaves the subtree, so a mode that retains offsets has to
+    /// stop retaining offsets in there (#239).
+    fn inside_embedded(self) -> Self;
+
+    /// A `multipart/*` container.
+    fn container(self) -> Self::Body;
+
+    /// A `message/rfc822` node, whose body is `raw` -- already decoded, because
+    /// decoding it is what gave this node its child.
+    fn embedded(self, part: &ParsedMail<'_>, raw: Vec<u8>) -> Self::Body;
+
+    /// Any other leaf.
+    fn leaf(self, part: &ParsedMail<'_>) -> Result<Self::Body, MailParseError>;
+}
+
+/// Full mode: every leaf decoded during the walk.
+#[derive(Clone, Copy)]
+struct Full;
+
+impl LeafPolicy for Full {
+    type Body = Option<Vec<u8>>;
+
+    /// Nothing to vary: full mode decodes a leaf wherever it sits.
+    fn inside_embedded(self) -> Self {
+        Full
+    }
+
+    fn container(self) -> Self::Body {
+        None
+    }
+
+    fn embedded(self, _part: &ParsedMail<'_>, raw: Vec<u8>) -> Self::Body {
+        // Published rather than dropped and decoded again: full mode would have
+        // decoded this body anyway, and the walk already has it in hand.
+        Some(raw)
+    }
+
+    fn leaf(self, part: &ParsedMail<'_>) -> Result<Self::Body, MailParseError> {
+        Ok(Some(part.get_body_raw()?))
+    }
+}
+
+/// The deferred modes. `Retain` already says what a leaf keeps of itself, which
+/// is exactly what a leaf policy is.
+impl LeafPolicy for Retain<'_> {
+    type Body = NodeBody;
+
+    fn inside_embedded(self) -> Self {
+        match self {
+            Retain::Nothing => Retain::Nothing,
+            Retain::In(_) | Retain::Copy => Retain::Copy,
         }
+    }
 
-        let mime = part.ctype.mimetype.as_str();
-        let disposition = part.get_content_disposition();
+    fn container(self) -> Self::Body {
+        NodeBody::Container
+    }
 
-        let (content, children) = if mime.starts_with("multipart/") {
-            // A container's body is the boundary-delimited concatenation of the
-            // children below it, so reporting it as content would report the same
-            // bytes twice.
-            let children = part
-                .subparts
-                .iter()
-                .map(|child| Self::build(child, depth + 1))
-                .collect::<Result<Vec<_>, _>>()?;
-            (None, children)
-        } else if mime == "message/rfc822" {
-            // An embedded message -- a bounce or a forward, which abuse pipelines
-            // are made of. mailparse hands it over as an opaque leaf; parsing it
-            // is the difference between "there is a message in here" and being
-            // able to read its headers.
-            //
-            // The nesting counts against the same depth cap, so an onion of
-            // forwards cannot recurse further than a multipart tree can.
-            let raw = part.get_body_raw()?;
-            let inner = {
-                let repaired = repair_missing_separator(&raw);
-                let parsed = parse_mail(repaired.as_deref().unwrap_or(raw.as_slice()))?;
-                Self::build(&parsed, depth + 1)?
-            };
-            (Some(raw), vec![inner])
-        } else {
-            (Some(part.get_body_raw()?), Vec::new())
-        };
+    fn embedded(self, part: &ParsedMail<'_>, raw: Vec<u8>) -> Self::Body {
+        NodeBody::Decoded {
+            encoded_size: encoded_size(&part.get_body_encoded()),
+            content: raw,
+        }
+    }
 
-        Ok(MimePart {
-            content_type: mime.to_string(),
-            headers: collect_headers(part),
-            filename: part_filename(&disposition, &part.ctype),
-            content_id: part
-                .get_headers()
-                .get_first_value("Content-ID")
-                .map(|raw| normalize_content_id(&raw)),
-            disposition: disposition_token(part, &disposition.disposition),
-            is_message: mime == "message/rfc822",
-            content,
-            children,
+    fn leaf(self, part: &ParsedMail<'_>) -> Result<Self::Body, MailParseError> {
+        Ok(NodeBody::Undecoded {
+            encoded_size: encoded_size(&part.get_body_encoded()),
+            // Offsets into the buffer being parsed, not a copy of it. For the
+            // root of a single-part message that range is the whole payload,
+            // since mailparse's `raw_bytes` for a root is the message -- see the
+            // note in the binding layer. Metadata mode keeps nothing.
+            raw: match self {
+                Retain::Nothing => None,
+                Retain::In(base) => Some(Retained::of(base, part.raw_bytes)),
+                Retain::Copy => Some(Retained::Owned(part.raw_bytes.to_vec())),
+            },
         })
     }
 }
@@ -1151,7 +1211,11 @@ pub fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseError> {
     // The same repair as the flat path, so the two views cannot disagree about a
     // message whose header block was never terminated (#150).
     let repaired = repair_missing_separator(payload);
-    MimePart::build(&parse_mail(repaired.as_deref().unwrap_or(payload))?, 0)
+    build_node(
+        &parse_mail(repaired.as_deref().unwrap_or(payload))?,
+        0,
+        Full,
+    )
 }
 
 /// What a tree node carries where full mode carries decoded bytes (#202).
@@ -1162,6 +1226,14 @@ pub fn parse_email_tree(payload: &[u8]) -> Result<MimePart, MailParseError> {
 /// same in all three modes and is derived by the same code. Splitting the struct
 /// would have split that derivation too, which is the thing the modes must not
 /// disagree about.
+///
+/// And an enum rather than reusing `MimePart`'s body with a wider meaning.
+/// `MimePart`'s body is `Option<Vec<u8>>` and its `None` *means* "this is a
+/// container"; a mode where `None` could also mean "not decoded yet" would make
+/// the two indistinguishable, which is the silent-wrong-answer shape this crate
+/// has rejected twice already (#150, and metadata mode's absent `text_plain`).
+/// This says which of the three it is, and `Node<B>` is what lets the two bodies
+/// share one traversal without sharing that ambiguity (#237).
 #[derive(Debug)]
 pub enum NodeBody {
     /// A `multipart/*` container. Its body is its children with boundaries
@@ -1208,25 +1280,6 @@ impl NodeBody {
             }
         }
     }
-}
-
-/// One node of the MIME tree with its body undecoded or merely described (#202).
-///
-/// Deliberately not `MimePart` with a wider `content`. `MimePart.content` is
-/// `Option<Vec<u8>>` and its `None` *means* "this is a container"; a mode where
-/// `None` could also mean "not decoded yet" would make the two
-/// indistinguishable, which is the silent-wrong-answer shape this crate has
-/// rejected twice already (#150, and metadata mode's absent `text_plain`).
-#[derive(Debug)]
-pub struct TreeNode {
-    pub content_type: String,
-    pub headers: Vec<(String, Vec<String>)>,
-    pub filename: String,
-    pub content_id: Option<String>,
-    pub disposition: Option<String>,
-    pub is_message: bool,
-    pub body: NodeBody,
-    pub children: Vec<TreeNode>,
 }
 
 /// Parse a message into its MIME tree without decoding the leaves (#202).
@@ -1288,16 +1341,23 @@ pub struct DeferredTree {
     pub repaired: Option<Vec<u8>>,
 }
 
-/// `#[inline(never)]`: it recurses, it returns a large struct, and no hot path
-/// reaches it.
+/// The one MIME-tree traversal, in every mode (#237).
 ///
-/// `retain` says what a leaf of this walk keeps of itself -- see `Retain`.
+/// `#[inline(never)]`: it recurses, it returns a large struct, and no hot path
+/// reaches it. Two instantiations, `Full` and `Retain`, which is what the two
+/// hand-written copies this replaced cost the linker -- the collapse is a
+/// maintenance change and is not meant to move any benchmark.
+///
+/// `policy` decides what a body is and nothing else. Everything below this line
+/// is what every mode agrees about, which is the point: the depth cap, the
+/// recursion over `multipart/*`, the decode-and-re-parse of an embedded message,
+/// and how a node's identity is derived from its headers.
 #[inline(never)]
-fn build_node(
+fn build_node<P: LeafPolicy>(
     part: &ParsedMail<'_>,
     depth: usize,
-    retain: Retain<'_>,
-) -> Result<TreeNode, MailParseError> {
+    policy: P,
+) -> Result<Node<P::Body>, MailParseError> {
     if depth >= MAX_MIME_DEPTH {
         return Err(MailParseError::Generic(ERR_MIME_DEPTH));
     }
@@ -1306,54 +1366,38 @@ fn build_node(
     let disposition = part.get_content_disposition();
 
     let (body, children) = if mime.starts_with("multipart/") {
+        // A container's body is the boundary-delimited concatenation of the
+        // children below it, so reporting it as a body would report the same
+        // bytes twice.
         let children = part
             .subparts
             .iter()
-            .map(|child| build_node(child, depth + 1, retain))
+            .map(|child| build_node(child, depth + 1, policy))
             .collect::<Result<Vec<_>, _>>()?;
-        (NodeBody::Container, children)
+        (policy.container(), children)
     } else if mime == "message/rfc822" {
-        // Decoded here for the reason recorded on `NodeBody::Decoded`: the
-        // embedded message is this body, and it is the child.
+        // An embedded message -- a bounce or a forward, which abuse pipelines are
+        // made of. mailparse hands it over as an opaque leaf; parsing it is the
+        // difference between "there is a message in here" and being able to read
+        // its headers. Every mode does this, including the ones that decode
+        // nothing else, because the body *is* the child.
+        //
+        // The nesting counts against the same depth cap, so an onion of forwards
+        // cannot recurse further than a multipart tree can. That this is now one
+        // copy rather than two is most of why this issue was worth doing: it is
+        // the cap, and a re-parse of attacker-supplied bytes, in one place.
         let raw = part.get_body_raw()?;
         let inner = {
             let repaired = repair_missing_separator(&raw);
             let parsed = parse_mail(repaired.as_deref().unwrap_or(raw.as_slice()))?;
-            // Copies below here, not offsets: `raw` is a decode of this body and
-            // `repaired` a rebuild of that, and both are dropped at the end of
-            // this block while the nodes built from them outlive it. Leaves below
-            // an embedded message therefore keep what they kept before #239 --
-            // the borrow this mode is about is the borrow of the caller's
-            // payload, and these bytes were never in it. Metadata mode still
-            // keeps nothing, here as everywhere.
-            let inside = match retain {
-                Retain::Nothing => Retain::Nothing,
-                Retain::In(_) | Retain::Copy => Retain::Copy,
-            };
-            build_node(&parsed, depth + 1, inside)?
+            build_node(&parsed, depth + 1, policy.inside_embedded())?
         };
-        let body = NodeBody::Decoded {
-            encoded_size: encoded_size(&part.get_body_encoded()),
-            content: raw,
-        };
-        (body, vec![inner])
+        (policy.embedded(part, raw), vec![inner])
     } else {
-        let body = NodeBody::Undecoded {
-            encoded_size: encoded_size(&part.get_body_encoded()),
-            // Offsets into the buffer being parsed, not a copy of it. For the
-            // root of a single-part message that range is the whole payload,
-            // since mailparse's `raw_bytes` for a root is the message -- see the
-            // note in the binding layer. Metadata mode keeps nothing.
-            raw: match retain {
-                Retain::Nothing => None,
-                Retain::In(base) => Some(Retained::of(base, part.raw_bytes)),
-                Retain::Copy => Some(Retained::Owned(part.raw_bytes.to_vec())),
-            },
-        };
-        (body, Vec::new())
+        (policy.leaf(part)?, Vec::new())
     };
 
-    Ok(TreeNode {
+    Ok(Node {
         content_type: mime.to_string(),
         headers: collect_headers(part),
         filename: part_filename(&disposition, &part.ctype),
@@ -1776,6 +1820,83 @@ mod tests {
             decode_part(attachment.raw.slice(repaired)).expect("decodes"),
             b"pdf bytes",
         );
+    }
+
+    /// Every per-node field except the body, in walk order.
+    ///
+    /// Generic over the body for the same reason `Node` is: the claim under test
+    /// is that the modes differ in the body and in nothing else, and a renderer
+    /// that could only read one of them could not state it.
+    fn canonical<B>(node: &Node<B>, out: &mut Vec<String>) {
+        out.push(format!(
+            "{}|{}|{:?}|{:?}|{}|{:?}|{}",
+            node.content_type,
+            node.filename,
+            node.content_id,
+            node.disposition,
+            node.is_message,
+            node.headers,
+            node.children.len(),
+        ));
+        for child in &node.children {
+            canonical(child, out);
+        }
+    }
+
+    #[test]
+    fn every_mode_builds_the_same_tree_around_an_embedded_message() {
+        // The in-tree twin of `parse_agreement`'s invariant 8 (#237). The fuzz
+        // target has asserted this on arbitrary input since #202, but it is the
+        // reason the traversal may be shared at all, so it should also be a test
+        // that runs on every `cargo test` rather than only under a nightly
+        // fuzzer. An embedded message is the fixture because it exercises the one
+        // arm where the modes diverge on more than the leaf: the policy changes
+        // for the subtree.
+        let mut payload = b"Content-Type: message/rfc822\r\n\r\n".to_vec();
+        payload.extend_from_slice(WITH_ATTACHMENT);
+
+        let full = parse_email_tree(&payload).expect("the fixture must parse");
+        let described = parse_tree_deferred(&payload, false).expect("the fixture must parse");
+        let deferred = parse_tree_deferred(&payload, true).expect("the fixture must parse");
+
+        let (mut a, mut b, mut c) = (Vec::new(), Vec::new(), Vec::new());
+        canonical(&full, &mut a);
+        canonical(&described.root, &mut b);
+        canonical(&deferred.root, &mut c);
+
+        assert!(
+            a.len() >= 4,
+            "the fixture must nest deeply enough to be worth comparing, got {a:?}"
+        );
+        assert_eq!(a, b, "the metadata tree's shape disagrees with full mode");
+        assert_eq!(a, c, "the lazy tree's shape disagrees with full mode");
+
+        // And the bodies line up where they are comparable: a node has a body of
+        // its own in every mode or in none, which is the same question as
+        // `encoded_size.is_some()`.
+        let mut bodies = Vec::new();
+        full_bodies(&full, &mut bodies);
+        let mut sizes = Vec::new();
+        node_sizes(&described.root, &mut sizes);
+        assert_eq!(
+            bodies.iter().map(Option::is_some).collect::<Vec<_>>(),
+            sizes.iter().map(Option::is_some).collect::<Vec<_>>(),
+            "a node reports a body in one mode and not the other"
+        );
+    }
+
+    fn full_bodies(node: &MimePart, out: &mut Vec<Option<usize>>) {
+        out.push(node.body.as_ref().map(Vec::len));
+        for child in &node.children {
+            full_bodies(child, out);
+        }
+    }
+
+    fn node_sizes(node: &TreeNode, out: &mut Vec<Option<usize>>) {
+        out.push(node.body.encoded_size());
+        for child in &node.children {
+            node_sizes(child, out);
+        }
     }
 
     #[test]
