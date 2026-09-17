@@ -554,6 +554,145 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
     })
 }
 
+/// The eight envelope fields every flat mode reads, derived once (#234).
+///
+/// Three copies of these eleven statements existed, one per flat entry point,
+/// and they had begun to drift -- `header_addresses` documented ten call sites
+/// when there were fifteen. The envelope is what `strict=True` and the whole
+/// warning channel are about, so three derivations of it were three chances for
+/// two views of one message to disagree, which is the failure the
+/// `parse_agreement` fuzz target was written to catch.
+struct Envelope {
+    headers: Vec<(String, Vec<String>)>,
+    subject: String,
+    date: String,
+    from_: Option<Address>,
+    to: Vec<Address>,
+    cc: Vec<Address>,
+    bcc: Vec<Address>,
+    reply_to: Vec<Address>,
+}
+
+/// Read a message's envelope, appending any repair it notices to `warnings`.
+///
+/// `#[inline]`, and deliberately branch-free: what #100 measured at +47% was
+/// threading a *mode* through the parse, a runtime branch in the hot path taken
+/// for the benefit of the cold one. This has no mode and no branch -- each caller
+/// gets the same straight line of instructions it emitted when it owned a copy,
+/// which is the property that makes sharing it free.
+///
+/// The `Date`-parses check is *not* here. Metadata mode does not make it, on
+/// purpose (see `metadata_from_payload`), and a parameter to say so would be
+/// exactly the branch this avoids -- so it stays one line at the two callers that
+/// want it.
+#[inline]
+fn envelope(mail: &ParsedMail<'_>, warnings: &mut Vec<Warning>) -> Envelope {
+    let headers = collect_headers(mail);
+
+    // Read straight from the parsed headers rather than back out of the map
+    // above, so the dedicated fields do not inherit its representation (#28).
+    // `get_first_value` is the first occurrence, which is the correct choice for
+    // a header that should appear once.
+    let subject = mail
+        .get_headers()
+        .get_first_value("Subject")
+        .unwrap_or_default();
+    let date = mail
+        .get_headers()
+        .get_first_value("Date")
+        .unwrap_or_default();
+
+    // Address headers are parsed from their first occurrence, like Subject and
+    // Date. `From` is a single mailbox in practice, so it is exposed as one
+    // value; the first mailbox is taken if a message declares several.
+    let from_ = header_addresses(mail, "From", warnings).into_iter().next();
+    let to = header_addresses(mail, "To", warnings);
+    let cc = header_addresses(mail, "Cc", warnings);
+    let bcc = header_addresses(mail, "Bcc", warnings);
+    let reply_to = header_addresses(mail, "Reply-To", warnings);
+
+    Envelope {
+        headers,
+        subject,
+        date,
+        from_,
+        to,
+        cc,
+        bcc,
+        reply_to,
+    }
+}
+
+/// What every flat mode decides about a part before it looks at the body (#234).
+///
+/// The *rule*, separate from the identity below it, because the rule applies to
+/// every part and the identity is only ever read for an attachment. Bundling the
+/// two -- which is the obvious shape -- would derive a `Content-ID` and a
+/// disposition token for every `text/plain` body in every message, work no mode
+/// does today.
+struct PartInfo<'p> {
+    mime: &'p str,
+    disposition: ParsedContentDisposition,
+    /// The RFC 2183 answer to body-vs-attachment (#25).
+    is_body: bool,
+}
+
+/// Classify one flattened part, or `None` for a `multipart/*` container.
+///
+/// `multipart/*` nodes are MIME structure, not content: their body is the
+/// boundary-delimited concatenation of children already visited, and emitting
+/// them produced phantom, filename-less `attachments` entries (#22).
+///
+/// RFC 2183 decides body-vs-attachment -- not the media type, and not the mere
+/// presence of a filename (#25):
+///
+///   * `Content-Disposition: attachment` means "not for inline display", so a
+///     `text/plain` part marked that way is a file whose bytes must not be
+///     concatenated into the body.
+///   * anything else that is `text/plain` or `text/html` is body text, even when
+///     it carries a `Content-Type; name` parameter. A `name` alone previously
+///     made the body vanish.
+#[inline]
+fn classify_part<'p>(part: &'p ParsedMail<'_>) -> Option<PartInfo<'p>> {
+    let mime = part.ctype.mimetype.as_str();
+    if mime.starts_with("multipart/") {
+        return None;
+    }
+
+    let disposition = part.get_content_disposition();
+    let is_body = disposition.disposition != DispositionType::Attachment
+        && matches!(mime, "text/plain" | "text/html");
+
+    Some(PartInfo {
+        mime,
+        disposition,
+        is_body,
+    })
+}
+
+/// The three fields that say which part this is, in every mode (#234).
+///
+/// Derived identically by the three flat parsers and by the tree traversal, so it
+/// is one function rather than four near-copies -- the drift this would hide is a
+/// part that answers to a different name depending on which API asked.
+struct PartIdentity {
+    filename: String,
+    content_id: Option<String>,
+    disposition: Option<String>,
+}
+
+#[inline]
+fn part_identity(part: &ParsedMail<'_>, disposition: &ParsedContentDisposition) -> PartIdentity {
+    PartIdentity {
+        filename: part_filename(disposition, &part.ctype),
+        content_id: part
+            .get_headers()
+            .get_first_value("Content-ID")
+            .map(|raw| normalize_content_id(&raw)),
+        disposition: disposition_token(part, &disposition.disposition),
+    }
+}
+
 /// Every value of every header, keyed by name, in first-appearance key order.
 ///
 /// Repeated keys keep all their values: collapsing to one kept only the last,
@@ -679,16 +818,7 @@ pub fn parse_email_metadata(payload: &[u8]) -> Result<MailMetadata, MailParseErr
 #[inline(never)]
 fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError> {
     let mail = parse_mail(payload)?;
-    let headers = collect_headers(&mail);
 
-    let subject = mail
-        .get_headers()
-        .get_first_value("Subject")
-        .unwrap_or_default();
-    let date = mail
-        .get_headers()
-        .get_first_value("Date")
-        .unwrap_or_default();
     // Metadata mode collects warnings and drops them, which is deliberate rather
     // than an omission (#100). The value of `warnings` is the empty list meaning
     // "nothing was repaired", and this mode never reads a body -- so an empty
@@ -699,42 +829,41 @@ fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError>
     // metadata-specific channel, named for what it can actually see, is a
     // separate decision from this one.
     let mut discarded: Vec<Warning> = Vec::new();
-    let from_list = header_addresses(&mail, "From", &mut discarded);
-    let from_ = from_list.into_iter().next();
-    let to = header_addresses(&mail, "To", &mut discarded);
-    let cc = header_addresses(&mail, "Cc", &mut discarded);
-    let bcc = header_addresses(&mail, "Bcc", &mut discarded);
-    let reply_to = header_addresses(&mail, "Reply-To", &mut discarded);
+    let Envelope {
+        headers,
+        subject,
+        date,
+        from_,
+        to,
+        cc,
+        bcc,
+        reply_to,
+    } = envelope(&mail, &mut discarded);
+
+    // No `warn_date` here, unlike the two modes that keep their warnings: this
+    // one would only drop it, and `parse_date_epoch` is a real `dateparse` call
+    // over the header.
 
     let mut attachments = vec![];
 
     for part in Mail::extract_mail_parts(mail, 0)? {
-        let mime = part.ctype.mimetype.as_str();
+        let Some(info) = classify_part(&part) else {
+            continue;
+        };
 
-        // Structure, not content -- same reasoning as the full parse (#22).
-        if mime.starts_with("multipart/") {
+        // A body part is skipped entirely here: reporting it with no content and
+        // no size would say less than nothing.
+        if info.is_body {
             continue;
         }
 
-        let disposition = part.get_content_disposition();
-
-        // The same RFC 2183 rule the full parse applies (#25), so the two modes
-        // agree on what an attachment is. A body part is skipped entirely here:
-        // reporting it with no content and no size would say less than nothing.
-        let is_body = disposition.disposition != DispositionType::Attachment
-            && matches!(mime, "text/plain" | "text/html");
-        if is_body {
-            continue;
-        }
+        let identity = part_identity(&part, &info.disposition);
 
         attachments.push(AttachmentMetadata {
-            mimetype: mime.to_string(),
-            filename: part_filename(&disposition, &part.ctype),
-            content_id: part
-                .get_headers()
-                .get_first_value("Content-ID")
-                .map(|raw| normalize_content_id(&raw)),
-            disposition: disposition_token(&part, &disposition.disposition),
+            mimetype: info.mime.to_string(),
+            filename: identity.filename,
+            content_id: identity.content_id,
+            disposition: identity.disposition,
             encoded_size: encoded_size(&part.get_body_encoded()),
         });
     }
@@ -942,23 +1071,16 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
     let mail = parse_mail(payload)?;
 
     let mut warnings: Vec<Warning> = Vec::new();
-    let headers = collect_headers(&mail);
-
-    let subject = mail
-        .get_headers()
-        .get_first_value("Subject")
-        .unwrap_or_default();
-    let date = mail
-        .get_headers()
-        .get_first_value("Date")
-        .unwrap_or_default();
-
-    let from_list = header_addresses(&mail, "From", &mut warnings);
-    let from_ = from_list.into_iter().next();
-    let to = header_addresses(&mail, "To", &mut warnings);
-    let cc = header_addresses(&mail, "Cc", &mut warnings);
-    let bcc = header_addresses(&mail, "Bcc", &mut warnings);
-    let reply_to = header_addresses(&mail, "Reply-To", &mut warnings);
+    let Envelope {
+        headers,
+        subject,
+        date,
+        from_,
+        to,
+        cc,
+        bcc,
+        reply_to,
+    } = envelope(&mail, &mut warnings);
 
     if !date.is_empty() && parse_date_epoch(&date).is_none() {
         warn_date(&mut warnings, &date);
@@ -969,20 +1091,10 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
     let mut text_html = vec![];
 
     for part in Mail::extract_mail_parts(mail, 0)? {
-        let mime = part.ctype.mimetype.as_str();
-
-        // Structure, not content -- as in every other mode (#22).
-        if mime.starts_with("multipart/") {
+        let Some(info) = classify_part(&part) else {
             continue;
-        }
-
-        let disposition = part.get_content_disposition();
-        let filename = part_filename(&disposition, &part.ctype);
-
-        // The same RFC 2183 rule the full parse applies (#25), so the modes
-        // agree on what an attachment is.
-        let is_body = disposition.disposition != DispositionType::Attachment
-            && matches!(mime, "text/plain" | "text/html");
+        };
+        let mime = info.mime;
 
         // One `get_body_encoded()` per part, threaded to everything below that
         // needs it: the escape check, the encoded size, and the body decode. It
@@ -995,21 +1107,18 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
         // the same warnings even for a part whose content is never decoded.
         let lossy_escape = quoted_printable_invalid_escape(&body);
 
-        if !is_body {
+        if !info.is_body {
             if let Some(at) = lossy_escape {
                 warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
             }
 
-            let content_id = part
-                .get_headers()
-                .get_first_value("Content-ID")
-                .map(|raw| normalize_content_id(&raw));
+            let identity = part_identity(&part, &info.disposition);
 
             attachments.push(LazyAttachment {
                 mimetype: mime.to_string(),
-                filename,
-                content_id,
-                disposition: disposition_token(&part, &disposition.disposition),
+                filename: identity.filename,
+                content_id: identity.content_id,
+                disposition: identity.disposition,
                 encoded_size: encoded_size(&body),
                 // The one copy this mode makes, and what makes it a trade rather
                 // than a free win. It is the encoded part, not the decoded one.
@@ -1363,7 +1472,6 @@ fn build_node<P: LeafPolicy>(
     }
 
     let mime = part.ctype.mimetype.as_str();
-    let disposition = part.get_content_disposition();
 
     let (body, children) = if mime.starts_with("multipart/") {
         // A container's body is the boundary-delimited concatenation of the
@@ -1397,15 +1505,18 @@ fn build_node<P: LeafPolicy>(
         (policy.leaf(part)?, Vec::new())
     };
 
+    // The same three fields the flat modes derive, from the same helper (#234):
+    // a part must not answer to a different name depending on which API asked.
+    // Derived for a container too, which the flat modes never see -- they drop
+    // containers, and the tree is the API that keeps them.
+    let identity = part_identity(part, &part.get_content_disposition());
+
     Ok(Node {
         content_type: mime.to_string(),
         headers: collect_headers(part),
-        filename: part_filename(&disposition, &part.ctype),
-        content_id: part
-            .get_headers()
-            .get_first_value("Content-ID")
-            .map(|raw| normalize_content_id(&raw)),
-        disposition: disposition_token(part, &disposition.disposition),
+        filename: identity.filename,
+        content_id: identity.content_id,
+        disposition: identity.disposition,
         is_message: mime == "message/rfc822",
         body,
         children,
@@ -1503,8 +1614,9 @@ fn parse_addresses(
 
 /// Parse one named address header from a message's first occurrence of it.
 ///
-/// A thin wrapper so its ten call sites stay one short line each: the header
-/// lookup has to happen inside the same expression as the parse, because
+/// A thin wrapper so its call sites -- all five of them, in `envelope` -- stay
+/// one short line each: the header lookup has to happen inside the same
+/// expression as the parse, because
 /// `get_first_header` borrows the temporary `Headers` that `get_headers()`
 /// builds, so the two cannot be split across statements.
 fn header_addresses(
@@ -1584,30 +1696,16 @@ impl<'a> Mail {
         // nothing else.
         let mut warnings: Vec<Warning> = Vec::new();
 
-        let headers = collect_headers(&mail);
-
-        // Read these straight from the parsed headers rather than back out of the
-        // map above, so the dedicated fields do not inherit its representation
-        // (#28). `get_first_value` is the first occurrence, which is the correct
-        // choice for a header that should appear once.
-        let subject = mail
-            .get_headers()
-            .get_first_value("Subject")
-            .unwrap_or_default();
-        let date = mail
-            .get_headers()
-            .get_first_value("Date")
-            .unwrap_or_default();
-
-        // Address headers are parsed from their first occurrence, like Subject
-        // and Date. `From` is a single mailbox in practice, so it is exposed as
-        // one value; the first mailbox is taken if a message declares several.
-        let from_list = header_addresses(&mail, "From", &mut warnings);
-        let from_ = from_list.into_iter().next();
-        let to = header_addresses(&mail, "To", &mut warnings);
-        let cc = header_addresses(&mail, "Cc", &mut warnings);
-        let bcc = header_addresses(&mail, "Bcc", &mut warnings);
-        let reply_to = header_addresses(&mail, "Reply-To", &mut warnings);
+        let Envelope {
+            headers,
+            subject,
+            date,
+            from_,
+            to,
+            cc,
+            bcc,
+            reply_to,
+        } = envelope(&mail, &mut warnings);
 
         // A Date that does not parse loses nothing -- `date` keeps the raw
         // string -- but `date_parsed` goes quietly to `None`, and "quietly" is
@@ -1624,29 +1722,13 @@ impl<'a> Mail {
         let mut text_html = vec![];
 
         for part in Self::extract_mail_parts(mail, 0)? {
-            let mime = part.ctype.mimetype.as_str();
-
-            // `multipart/*` nodes are MIME structure, not content: their body is
-            // the boundary-delimited concatenation of children already visited.
-            // Emitting them produced phantom, filename-less `attachments` entries
-            // (#22), so skip them before decoding anything.
-            if mime.starts_with("multipart/") {
+            // The `multipart/*` skip and the RFC 2183 body-vs-attachment rule,
+            // shared with the other two flat modes so they cannot disagree about
+            // what a part is (#234).
+            let Some(info) = classify_part(&part) else {
                 continue;
-            }
-
-            let disposition = part.get_content_disposition();
-            let filename = part_filename(&disposition, &part.ctype);
-
-            // RFC 2183 decides body-vs-attachment -- not the media type, and not
-            // the mere presence of a filename (#25):
-            //   * `Content-Disposition: attachment` means "not for inline
-            //     display", so a `text/plain` part marked that way is a file whose
-            //     bytes must not be concatenated into the body.
-            //   * anything else that is `text/plain` or `text/html` is body text,
-            //     even when it carries a `Content-Type; name` parameter. A `name`
-            //     alone previously made the body vanish.
-            let is_body = disposition.disposition != DispositionType::Attachment
-                && matches!(mime, "text/plain" | "text/html");
+            };
+            let mime = info.mime;
 
             // Undo the Content-Transfer-Encoding (e.g. base64/quoted-printable)
             // exactly once. `?` propagates a broken transfer encoding instead of
@@ -1663,23 +1745,20 @@ impl<'a> Mail {
             // actually lands at, so `part_path` locates it in the result.
             let lossy_escape = quoted_printable_invalid_escape(&body);
 
-            if !is_body {
+            if !info.is_body {
                 if let Some(at) = lossy_escape {
                     warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
                 }
 
-                let content_id = part
-                    .get_headers()
-                    .get_first_value("Content-ID")
-                    .map(|raw| normalize_content_id(&raw));
+                let identity = part_identity(&part, &info.disposition);
 
                 attachments.push(Attachment {
                     mimetype: mime.to_string(),
                     // Byte-identical to `get_body_raw()`: same match, same arms.
                     content: body_to_vec(&body)?,
-                    filename,
-                    content_id,
-                    disposition: disposition_token(&part, &disposition.disposition),
+                    filename: identity.filename,
+                    content_id: identity.content_id,
+                    disposition: identity.disposition,
                 });
             } else if mime == "text/html" {
                 // For text parts, build the Python-facing string from the bytes
@@ -1783,6 +1862,82 @@ mod tests {
         --b\r\nContent-Type: application/pdf\r\n\
         Content-Disposition: attachment; filename=doc.pdf\r\n\
         Content-Transfer-Encoding: base64\r\n\r\ncGRmIGJ5dGVz\r\n--b--\r\n";
+
+    /// One multipart container and three leaves: a body, the same media type
+    /// marked as an attachment, and a non-text part.
+    const FOUR_PARTS: &[u8] = b"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+        --b\r\nContent-Type: text/plain\r\n\r\nbody text\r\n\
+        --b\r\nContent-Type: text/plain\r\n\
+        Content-Disposition: attachment; filename=note.txt\r\n\r\nattached\r\n\
+        --b\r\nContent-Type: application/pdf\r\n\
+        Content-ID: <cid-1>\r\n\r\npdf\r\n--b--\r\n";
+
+    #[test]
+    fn classify_part_applies_the_rfc_2183_rule_directly() {
+        // The rule had three end-to-end tests, one per flat mode, and no direct
+        // one -- which is backwards for the rule that is the reason those modes
+        // agree. Now that they share it, it gets its own (#234).
+        let mail = parse_mail(FOUR_PARTS).expect("the fixture must parse");
+
+        // Structure, not content (#22): a container classifies as no part at all.
+        assert!(
+            classify_part(&mail).is_none(),
+            "a multipart/* part must not classify as a part"
+        );
+
+        let parts: Vec<PartInfo<'_>> = mail
+            .subparts
+            .iter()
+            .map(|part| classify_part(part).expect("a leaf must classify"))
+            .collect();
+
+        assert_eq!(
+            parts.iter().map(|info| info.mime).collect::<Vec<_>>(),
+            vec!["text/plain", "text/plain", "application/pdf"],
+        );
+        // The middle one is the whole point: same media type as the first, and an
+        // attachment because RFC 2183 says so, not because of its type or a
+        // filename.
+        assert_eq!(
+            parts.iter().map(|info| info.is_body).collect::<Vec<_>>(),
+            vec![true, false, false],
+        );
+    }
+
+    #[test]
+    fn part_identity_reads_the_name_the_part_answers_to() {
+        let mail = parse_mail(FOUR_PARTS).expect("the fixture must parse");
+        let identity: Vec<PartIdentity> = mail
+            .subparts
+            .iter()
+            .map(|part| part_identity(part, &part.get_content_disposition()))
+            .collect();
+
+        assert_eq!(
+            identity
+                .iter()
+                .map(|id| id.filename.as_str())
+                .collect::<Vec<_>>(),
+            vec!["", "note.txt", ""],
+        );
+        // Angle brackets stripped, so a `cid:` URL is a plain lookup (RFC 2392).
+        assert_eq!(
+            identity
+                .iter()
+                .map(|id| id.content_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![None, None, Some("cid-1")],
+        );
+        // `None` where the part declares no Content-Disposition at all, which is
+        // a different statement from "inline".
+        assert_eq!(
+            identity
+                .iter()
+                .map(|id| id.disposition.as_deref())
+                .collect::<Vec<_>>(),
+            vec![None, Some("attachment"), None],
+        );
+    }
 
     #[test]
     fn a_deferred_attachment_is_a_range_and_not_a_copy() {
