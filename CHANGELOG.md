@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A layout A/B, so code placement can be measured instead of argued about** (#240).
+  This crate has been bitten by placement four times: a rustc minor version moved the
+  parse path 15-96% (#120), a package-version bump did the same for a byte-identical
+  instruction stream (#204), and on 2026-09-17 three consecutive PRs failed the gate on
+  `parse_qp_message` by +9.2%, +7.3% and +19.0% for changes that cannot reach
+  quoted-printable decoding -- one of them touched only the thread scheduler. Until now
+  the only remedy was prose telling the reader to re-run and hope for a different runner.
+  `gh workflow run layout-ab.yml -f salts=4 -f rounds=3` now builds the same source K
+  times differing only in a `-C metadata` salt -- what a version bump perturbs -- and
+  measures them interleaved on one runner; `.github/scripts/layout_spread.py` reports the
+  per-benchmark spread across salts, which is that revision's layout sensitivity on that
+  CPU and the figure the gate's 7% threshold should be read against. Passing
+  `-f rustflags=...` measures an alignment candidate as a second group, with a cost table.
+  A benchmark is called layout-sensitive only if its spread clears both the pure-Python
+  control floor and 3% -- below that a four-salt sweep cannot tell placement from the
+  residual, and the rule is pinned by `tests/test_layout_spread.py`. Dispatch-only; no
+  change to `src/`, `vendor/`, the shipped wheels or any build flag.
+
 ### Changed
 
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in
