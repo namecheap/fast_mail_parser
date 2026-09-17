@@ -61,6 +61,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   +0.6% at `threads=1`, 0.0% at default -- so switching the batches to distinct buffers
   moves no published figure. Test-only: the extension is byte-identical.
 
+- **The benchmark gate judges more than one message shape** (#223). Every gated benchmark
+  measured `large_message.eml` -- 767 KiB, 99% base64 attachment -- so the gate judged the
+  decode path and nothing else. That is not hypothetical: #238's header work moved the
+  small serial batch 23% while the gate's own benchmark moved 2%. Three gated benchmarks
+  now cover the shapes it could not see: `parse_small` (the per-call floor on ~0.8 KB --
+  FFI, header map, address and date parse), `parse_many_small_serial` (the same cost x2000,
+  serial, in the milliseconds range), and `parse_rfc2047_headers` (a ~30 KB header block
+  with encoded words throughout, the one path no other gated benchmark touches). Each
+  asserts correctness once outside the timed call, including `warnings == []`, so none of
+  them can be timing a repair. The RFC 2047 input is built in the benchmark module rather
+  than committed to `tests/data/`, where every `.eml` is auto-enrolled in eight correctness
+  suites. Quoted-printable coverage arrived earlier with #229. Test-only: the extension is
+  byte-identical.
+
 ### Changed
 
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in

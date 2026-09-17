@@ -26,6 +26,7 @@ what they measure; they ride along in the interleaved comparison without
 disturbing the gate pair.
 """
 
+import base64
 import email
 import email.policy
 from collections.abc import Callable
@@ -253,6 +254,104 @@ def test__fast_mail_parser___headers_repeat_read(large_message: str, benchmark: 
     )
 
 
+# --- message shapes the gate could not see (#223) -----------------------------
+#
+# Every gated benchmark measured one message: `large_message.eml`, 767 KiB and
+# 99% base64 attachment. So the gate judged the decode path and nothing else, and
+# a change that halved header handling or doubled the per-call floor would have
+# passed it unnoticed -- which is not hypothetical: #238's header work moved the
+# small serial batch 23% while `parse_message` moved 2%.
+#
+# These are gated rather than informational on purpose: coverage of the judged
+# set is the whole point. They use only APIs the comparison base has, so no skip
+# guard is needed.
+
+
+def _rfc2047_heavy_message() -> bytes:
+    """A header-heavy message with encoded words throughout (~30 KB).
+
+    Built here rather than committed under `tests/data/`: every `.eml` there is
+    auto-enrolled in eight correctness suites (the RFC corpus requires a `CASES`
+    entry, packaging invariants require a `BUILDERS` entry, and the parity, lazy,
+    metadata, tree and warning suites all glob the directory). A benchmark input
+    has no business being an oracle. `_small_message()` is the precedent.
+
+    Deterministic, so the benchmark measures the same bytes on every run.
+    """
+    encoded = "=?utf-8?B?" + base64.b64encode("Café ☕ déjà vu ".encode()).decode() + "?="
+    lines = [
+        "From: " + encoded + " <sender@example.com>",
+        "To: " + ", ".join(f"{encoded} <r{i}@example.com>" for i in range(5)),
+        "Subject: " + " ".join([encoded] * 6),
+        "Date: Mon, 01 Jan 2024 12:00:00 +0000",
+        "Message-ID: <bench@fast-mail-parser.test>",
+    ]
+    lines += [
+        f"Received: from mx{i}.example.net by mx{i + 1}.example.net with ESMTP "
+        f"id ABC{i:04d};\r\n\tMon, 01 Jan 2024 12:00:{i % 60:02d} +0000"
+        for i in range(40)
+    ]
+    lines += [
+        f"X-Header-{i}: value-{i} {'=?utf-8?Q?caf=C3=A9?=' if i % 10 == 0 else ''}"
+        for i in range(200)
+    ]
+    lines += ["Content-Type: text/plain; charset=utf-8", "", "body", ""]
+    return "\r\n".join(lines).encode()
+
+
+def test__fast_mail_parser___parse_small(benchmark: Callable):
+    """The per-call floor: FFI, header map, address and date parse on ~0.8 KB.
+
+    The gate's own message is 767 KiB, so nothing in the judged set could see a
+    change to fixed per-call cost. This is the benchmark where that shows.
+    """
+    from fast_mail_parser import parse_email
+
+    payload = _small_message()
+
+    mail = parse_email(payload)
+    assert mail.subject == "small"
+    assert mail.headers, "expected headers"
+    assert mail.warnings == [], "a benchmark input must not be timing a repair"
+
+    benchmark(parse_email, payload)
+
+
+def test__fast_mail_parser___parse_many_small_serial(benchmark: Callable):
+    """The same per-call cost x2000, serial, so no scheduling noise rides along.
+
+    The gated form to prefer over the single-call floor above if that one proves
+    too noisy on the runner: same path, milliseconds instead of microseconds.
+    """
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    assert len(parse_many(batch[:1], threads=1)) == 1
+
+    benchmark(lambda: parse_many(batch, threads=1))
+
+
+def test__fast_mail_parser___parse_rfc2047_headers(benchmark: Callable):
+    """Encoded-word decoding and a large header block -- the one path no other
+    gated benchmark touches.
+
+    `valid_message.eml` covers quoted-printable bodies and a realistic 30-header
+    block; what it has almost none of is RFC 2047. Here the tokenizer runs on
+    every one of ~250 headers and actually decodes on ~30 of them.
+    """
+    from fast_mail_parser import parse_email
+
+    payload = _rfc2047_heavy_message()
+
+    mail = parse_email(payload)
+    assert mail.subject.startswith("Café"), "encoded words must decode"
+    assert len(mail.headers["Received"]) == 40
+    assert mail.warnings == [], "a benchmark input must not be timing a repair"
+
+    benchmark(parse_email, payload)
+
+
 def test__mailparser_lib___full_read(large_message: str, benchmark: Callable):
     assert _mailparser_full(large_message)[0], "expected a subject"
 
@@ -356,23 +455,12 @@ def _small_message() -> bytes:
     ).encode()
 
 
-def test__threaded___parse_many_small_threads1(benchmark: Callable):
-    """The 2000-message batch forced serial (#238).
-
-    The threaded variants of this batch measure the scheduler as much as the
-    parse. With `threads=1` what is left is per-message Rust work, which for a
-    small message is mostly header parsing -- so this is where a change to the
-    header path shows without thread-count noise on top of it.
-    """
-    from fast_mail_parser import parse_many
-
-    batch = [_small_message()] * SMALL_BATCH
-
-    benchmark(lambda: parse_many(batch, threads=1))
-
-
 def test__threaded___parse_many_metadata_small_threads1(benchmark: Callable):
     """The same batch, serial, in metadata mode (#238).
+
+    Its full-mode counterpart is `test__fast_mail_parser___parse_many_small_serial`,
+    which is gated (#223); this one stays informational because metadata mode has
+    no gated benchmark on this batch to be read against.
 
     Metadata mode transfer-decodes nothing, so on a small message this is very
     nearly pure header work -- the narrowest read available on that path.
