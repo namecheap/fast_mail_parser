@@ -24,6 +24,61 @@ use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
 use std::sync::OnceLock;
 
+/// Header pairs in wire order, plus the one Python `dict` they project to.
+///
+/// Six result classes expose `headers`, and each used to rebuild a whole dict per
+/// read: one `PyDict`, a `str` per key, a `list` per key and a `str` per value --
+/// about ninety objects for a typical message, on an attribute Python callers
+/// reasonably treat as stored and read several times (`h.get("From")`,
+/// `h.get("Subject")`, `"X" in h`). The README's own idiom reads it twice.
+///
+/// The cache is a `OnceLock<Py<PyDict>>` for the same reason
+/// `PyLazyAttachment.content` is: every read returns the *same* object, so the
+/// second one allocates nothing, and racing first readers all get what the cell
+/// published rather than each building their own.
+///
+/// It is filled on first access and never in a constructor, so a parse that never
+/// reads `headers` -- `mode="metadata"` sweeping for one field, say -- pays
+/// nothing for this.
+pub(crate) struct Headers {
+    pairs: Vec<(String, Vec<String>)>,
+    dict: OnceLock<Py<PyDict>>,
+}
+
+impl Headers {
+    pub(crate) fn new(pairs: Vec<(String, Vec<String>)>) -> Self {
+        Headers {
+            pairs,
+            dict: OnceLock::new(),
+        }
+    }
+
+    /// The header pairs, for the Rust side; the Python projection is `to_dict`.
+    pub(crate) fn pairs(&self) -> &[(String, Vec<String>)] {
+        &self.pairs
+    }
+
+    /// All values of every header, keyed by name, in the order the names first
+    /// appeared in the message (#157). Built once, then shared.
+    ///
+    /// Built outside `get_or_init`, as the lazy decoders do: `set_item` can raise,
+    /// and a closure that has to produce a value cannot propagate that. A race
+    /// therefore builds two dicts and discards one -- correct either way, since
+    /// `get_or_init` publishes exactly one and every caller returns what it holds.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        if let Some(cached) = self.dict.get() {
+            return Ok(cached.bind(py).clone());
+        }
+
+        let dict = PyDict::new(py);
+        for (name, values) in &self.pairs {
+            dict.set_item(name, values)?;
+        }
+
+        Ok(self.dict.get_or_init(|| dict.unbind()).bind(py).clone())
+    }
+}
+
 create_exception!(fast_mail_parser, ParseError, exceptions::PyException);
 
 // Subtypes of ParseError, so an existing `except ParseError` keeps catching
@@ -255,7 +310,7 @@ pub struct PyMailMetadata {
     pub reply_to: Vec<PyAddress>,
     #[pyo3(get)]
     pub attachments: Vec<PyAttachmentMetadata>,
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
 }
 
 #[pymethods]
@@ -263,11 +318,7 @@ impl PyMailMetadata {
     /// Headers, every value kept, keys in wire order -- as in `PyMail` (#157).
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// The `Date` header as an aware `datetime`, or `None` if unparseable.
@@ -316,7 +367,7 @@ impl PyMailMetadata {
                 .into_iter()
                 .map(PyAttachmentMetadata::from_metadata)
                 .collect(),
-            headers: metadata.headers,
+            headers: Headers::new(metadata.headers),
         }
     }
 }
@@ -335,7 +386,7 @@ pub struct PyMimePart {
     #[pyo3(get)]
     pub content_type: String,
     /// Stored as ordered pairs, exposed through the getter below (#157).
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
     #[pyo3(get)]
     pub filename: String,
     /// The part's `Content-ID` with angle brackets stripped, or `None`.
@@ -362,11 +413,7 @@ impl PyMimePart {
     /// This part's headers, every value kept, keys in wire order.
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// Transfer-decoded bytes of a leaf, or `None` for a `multipart/*` container.
@@ -411,7 +458,7 @@ impl PyMimePart {
 
         Ok(PyMimePart {
             content_type: part.content_type,
-            headers: part.headers,
+            headers: Headers::new(part.headers),
             filename: part.filename,
             content_id: part.content_id,
             disposition: part.disposition,
@@ -440,7 +487,7 @@ impl PyMimePart {
 pub struct PyMimePartMetadata {
     #[pyo3(get)]
     pub content_type: String,
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
     #[pyo3(get)]
     pub filename: String,
     #[pyo3(get)]
@@ -463,11 +510,7 @@ impl PyMimePartMetadata {
     /// This part's headers, every value kept, keys in wire order.
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// The parts nested directly inside this one, in message order.
@@ -502,7 +545,7 @@ impl PyMimePartMetadata {
 pub struct PyLazyMimePart {
     #[pyo3(get)]
     pub content_type: String,
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
     #[pyo3(get)]
     pub filename: String,
     #[pyo3(get)]
@@ -531,11 +574,7 @@ impl PyLazyMimePart {
     /// This part's headers, every value kept, keys in wire order.
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// The parts nested directly inside this one, in message order.
@@ -620,7 +659,7 @@ fn metadata_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyMime
 
     Ok(PyMimePartMetadata {
         content_type: node.content_type,
-        headers: node.headers,
+        headers: Headers::new(node.headers),
         filename: node.filename,
         content_id: node.content_id,
         disposition: node.disposition,
@@ -659,7 +698,7 @@ fn lazy_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyLazyMime
 
     Ok(PyLazyMimePart {
         content_type: node.content_type,
-        headers: node.headers,
+        headers: Headers::new(node.headers),
         filename: node.filename,
         content_id: node.content_id,
         disposition: node.disposition,
@@ -849,7 +888,7 @@ pub struct PyMail {
     pub attachments: Vec<Py<PyAttachment>>,
     /// Stored as ordered pairs, not a map: the key order is the point (#157).
     /// Exposed through the `headers` getter below.
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
     /// Every lossy repair this parse performed, in the order it performed them
     /// (#100).
     ///
@@ -887,11 +926,7 @@ impl PyMail {
     /// produced a different order every time (#157).
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// The message's non-body parts, in message order -- the same objects on
@@ -938,7 +973,7 @@ impl PyMail {
                 .map(PyAddress::from_address)
                 .collect(),
             attachments,
-            headers: mail.headers,
+            headers: Headers::new(mail.headers),
             // Empty in the common case, where `collect` allocates nothing.
             warnings: mail
                 .warnings
@@ -1128,7 +1163,7 @@ pub struct PyLazyMail {
     /// every read of this attribute, or each read would hand out a fresh cache
     /// and nothing would ever be cached.
     pub attachments: Vec<Py<PyLazyAttachment>>,
-    pub headers: Vec<(String, Vec<String>)>,
+    pub(crate) headers: Headers,
 }
 
 #[pymethods]
@@ -1142,11 +1177,7 @@ impl PyLazyMail {
     /// Headers, every value kept, keys in wire order -- as in `PyMail` (#157).
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let dict = PyDict::new(py);
-        for (name, values) in &self.headers {
-            dict.set_item(name, values)?;
-        }
-        Ok(dict)
+        self.headers.to_dict(py)
     }
 
     /// The `Date` header as an aware `datetime`, or `None` if unparseable.
@@ -1196,7 +1227,7 @@ impl PyLazyMail {
                 .map(ParseWarning::from_warning)
                 .collect(),
             attachments,
-            headers: mail.headers,
+            headers: Headers::new(mail.headers),
         })
     }
 }
