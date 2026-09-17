@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.240 -> 0.230 ms. Every bytes-fed benchmark stayed within 0.9%, so this is not a
   code-layout effect (#204).
 
+- **Full-mode attachments and MIME-tree leaves stop copying on every read** (#227).
+  Reading `mail.attachments` deep-cloned every attachment -- `#[pyo3(get)]` on a
+  `Vec<pyclass>` field goes through PyO3's clone path, so each read `memcpy`'d every
+  decoded payload and handed back fresh objects -- and each `.content` read then built
+  another `bytes`. Two full copies per attachment, on the library's own documented
+  `by_cid` idiom. `PyMail.attachments` is now `Vec<Py<PyAttachment>>` behind a
+  `clone_ref` getter, and `PyAttachment.content`/`PyMimePart.content` publish one
+  `bytes` through a `OnceLock` -- the shape lazy mode has had since #97. So
+  `mail.attachments[0] is mail.attachments[0]` and `a.content is a.content` now hold in
+  every mode, including under racing first reads from several threads. Nothing else
+  moves: attribute sets, types, decode timing and where `DecodeError` raises are all
+  unchanged. A caller holding an attachment and its bytes now keeps two copies of the
+  payload alive rather than three. Measured on an Apple M4 (10 vCPU), 10 interleaved
+  rounds, controls within 0.9%: the new `attachment_reread` benchmark -- one
+  `attachments` read plus one `.content` read per attachment, parse excluded --
+  **12.83 -> 0.083 us, ~156x**, and `full_read` (parse + read, decode-dominated)
+  **0.250 -> 0.243 ms (-2.9%)**. Every other benchmark stayed inside the noise floor.
+
 - **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
   seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
   `parse_email` 12.1 M executions to 5,047 edges, `parse_agreement` 5.5 M to 5,502,

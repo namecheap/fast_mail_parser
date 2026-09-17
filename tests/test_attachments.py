@@ -1,3 +1,5 @@
+import threading
+
 from fast_mail_parser import PyMail, parse_email
 
 
@@ -70,3 +72,66 @@ def test__disposition_is_none_when_the_header_is_absent():
     assert png.disposition is None
     assert png.content_id is None
     assert png.content == b"PNG here"
+
+
+def test__repeated_content_reads_return_the_same_object(attachment_message: str):
+    # #227: the getter used to build a fresh `bytes` per read, so this was False
+    # and every read copied the decoded payload again. Lazy mode has guaranteed
+    # this since #97; full mode now matches it.
+    mail = parse_email(attachment_message)
+    attachment = mail.attachments[0]
+
+    first = attachment.content
+
+    assert attachment.content is first
+    assert attachment.content is first
+
+
+def test__the_attachment_list_hands_back_the_same_objects(attachment_message: str):
+    # Reading `attachments` builds a new list, but of the same parts. If it built
+    # new parts -- which is what PyO3's clone path for a `Vec<pyclass>` field did
+    # -- each read would get a fresh cache and nothing above would ever be
+    # cached, so this is what makes that test mean anything.
+    mail = parse_email(attachment_message)
+
+    assert mail.attachments[0] is mail.attachments[0]
+
+    first = mail.attachments[0].content
+    assert mail.attachments[0].content is first
+
+
+def test__concurrent_first_content_reads_share_one_object(large_message: str):
+    # The `OnceLock` publishes once; racing first readers must all come back with
+    # that one object rather than each building their own. Mirrors the lazy
+    # mode's test of the same hazard.
+    mail = parse_email(large_message)
+    attachment = max(mail.attachments, key=lambda a: len(a.content))
+    expected = max(parse_email(large_message).attachments, key=lambda a: len(a.content)).content
+
+    workers = 16
+    start = threading.Barrier(workers)
+    seen: list[bytes] = []
+    failures: list[BaseException] = []
+    lock = threading.Lock()
+
+    def hammer() -> None:
+        try:
+            start.wait()
+            for _ in range(20):
+                content = attachment.content
+                with lock:
+                    seen.append(content)
+        except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
+            with lock:
+                failures.append(exc)
+
+    threads = [threading.Thread(target=hammer) for _ in range(workers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not failures, failures
+    assert len(seen) == workers * 20
+    assert all(content is seen[0] for content in seen), "the cache handed out copies"
+    assert seen[0] == expected

@@ -141,6 +141,27 @@ def test__fast_mail_parser___full_read(large_message: str, benchmark: Callable):
     benchmark(_fast_mail_parser_full, raw)
 
 
+def test__fast_mail_parser___attachment_reread(large_message: str, benchmark: Callable):
+    """Re-reading attachments off an already-parsed message (#227).
+
+    The parse is done once, outside the timed body, so what is left is only what
+    a consumer pays to *get at* the bytes: one `mail.attachments` read and one
+    `.content` read per attachment. That is the library's own documented idiom
+    (README, `by_cid = {a.content_id: a for a in mail.attachments}`), and before
+    #227 it was two full copies of every attachment's decoded payload -- on this
+    fixture, 99% attachment by decoded content, that is most of a megabyte per
+    iteration for work that produces nothing new.
+
+    Not guarded: it uses no argument the base build lacks.
+    """
+    from fast_mail_parser import parse_email
+
+    mail = parse_email(large_message.encode())
+    assert mail.attachments, "expected the large message to carry attachments"
+
+    benchmark(lambda: [a.content for a in mail.attachments])
+
+
 def test__mailparser_lib___full_read(large_message: str, benchmark: Callable):
     assert _mailparser_full(large_message)[0], "expected a subject"
 

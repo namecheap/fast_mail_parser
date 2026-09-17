@@ -36,7 +36,8 @@ class PyMimePart:
 
     ``content`` is the transfer-decoded bytes of a leaf, and ``None`` for a
     ``multipart/*`` container -- whose body is just its children with boundaries
-    between them.
+    between them. Repeated reads of a leaf's ``content`` return the same ``bytes``
+    object (#227), as repeated reads of ``children`` return the same nodes.
 
     ``is_message`` is ``True`` for ``message/rfc822``: the embedded message's own
     root is this part's single child, so a bounce's headers are reachable rather
@@ -299,6 +300,10 @@ class PyAttachment:
     ``"inline"`` or ``"attachment"``), or ``None`` when the part declares no such
     header -- an absent header is reported distinctly from an explicit
     ``inline``.
+
+    Repeated reads of ``content`` return the same ``bytes`` object, and
+    ``PyMail.attachments`` returns the same ``PyAttachment`` objects, so neither
+    copies the payload again (#227).
     """
 
     def __init__(

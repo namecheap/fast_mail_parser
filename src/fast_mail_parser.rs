@@ -350,6 +350,10 @@ pub struct PyMimePart {
     #[pyo3(get)]
     pub is_message: bool,
     pub content: Option<Vec<u8>>,
+    /// The `bytes` handed to Python for `content`, built on first read and then
+    /// shared, so `part.content is part.content` here as it is on the lazy
+    /// types. For a container the cell is simply never filled.
+    content_py: OnceLock<Py<PyBytes>>,
     pub children: Vec<Py<PyMimePart>>,
 }
 
@@ -371,9 +375,12 @@ impl PyMimePart {
     /// returning it would hand back the same bytes twice.
     #[getter]
     fn content<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyBytes>> {
-        self.content
-            .as_ref()
-            .map(|bytes| PyBytes::new(py, bytes.as_slice()))
+        self.content.as_ref().map(|bytes| {
+            self.content_py
+                .get_or_init(|| PyBytes::new(py, bytes.as_slice()).unbind())
+                .bind(py)
+                .clone()
+        })
     }
 
     /// The parts nested directly inside this one, in message order.
@@ -410,6 +417,7 @@ impl PyMimePart {
             disposition: part.disposition,
             is_message: part.is_message,
             content: part.content,
+            content_py: OnceLock::new(),
             children,
         })
     }
@@ -739,11 +747,20 @@ impl PyAddress {
 }
 
 #[pyclass(skip_from_py_object)]
-#[derive(Clone)]
 pub struct PyAttachment {
     #[pyo3(get)]
     pub mimetype: String,
+    /// Decoded by `parse_email`, so a value rather than a deferred decode; the
+    /// lazy type is where that trade is made.
     pub content: Vec<u8>,
+    /// The `bytes` handed to Python, built on first read and then shared, so
+    /// `a.content is a.content` as it is for `PyLazyAttachment`.
+    ///
+    /// Unlike the lazy cell -- which decodes *outside* `get_or_init`, for the
+    /// deadlock reason spelled out there -- this one may initialise inside it:
+    /// the bytes are already decoded, and `PyBytes::new` neither releases the
+    /// GIL nor fails, so there is no reentrancy to fear.
+    content_py: OnceLock<Py<PyBytes>>,
     #[pyo3(get)]
     pub filename: String,
     /// The part's `Content-ID` with angle brackets stripped, or `None`.
@@ -765,7 +782,10 @@ pub struct PyAttachment {
 impl PyAttachment {
     #[getter]
     fn content<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.content.as_slice())
+        self.content_py
+            .get_or_init(|| PyBytes::new(py, self.content.as_slice()).unbind())
+            .bind(py)
+            .clone()
     }
 }
 
@@ -774,6 +794,7 @@ impl PyAttachment {
         PyAttachment {
             mimetype: attachment.mimetype,
             content: attachment.content,
+            content_py: OnceLock::new(),
             filename: attachment.filename,
             content_id: attachment.content_id,
             disposition: attachment.disposition,
@@ -819,8 +840,13 @@ pub struct PyMail {
     /// attachment`. `multipart/*` container nodes are MIME structure and are not
     /// reported. `filename` may still be empty, which is normal for an inline
     /// image referenced only by `Content-ID`.
-    #[pyo3(get)]
-    pub attachments: Vec<PyAttachment>,
+    ///
+    /// Held as Python objects rather than Rust values, for the reason
+    /// `PyLazyMail` gives: `#[pyo3(get)]` on a `Vec<pyclass>` goes through
+    /// PyO3's clone path, so every read of this attribute used to deep-copy
+    /// every attachment's decoded bytes -- and handed back different objects
+    /// each time, which would leave the `content` cache with nothing to cache.
+    pub attachments: Vec<Py<PyAttachment>>,
     /// Stored as ordered pairs, not a map: the key order is the point (#157).
     /// Exposed through the `headers` getter below.
     pub headers: Vec<(String, Vec<String>)>,
@@ -868,6 +894,13 @@ impl PyMail {
         Ok(dict)
     }
 
+    /// The message's non-body parts, in message order -- the same objects on
+    /// every read, as `PyLazyMail.attachments` hands back the same ones.
+    #[getter]
+    fn attachments<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        PyList::new(py, self.attachments.iter().map(|a| a.clone_ref(py)))
+    }
+
     #[getter]
     fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
         let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
@@ -879,8 +912,18 @@ impl PyMail {
 }
 
 impl PyMail {
-    pub(crate) fn from_mail(mail: mail_parser::Mail) -> Self {
-        Self {
+    pub(crate) fn from_mail(py: Python<'_>, mail: mail_parser::Mail) -> PyResult<Self> {
+        // One `Py::new` per attachment, with the GIL held, as lazy mode already
+        // does in `PyLazyMail::from_lazy`. Nothing is copied here: the decoded
+        // `Vec<u8>` moves into the object and only becomes `bytes` when
+        // `content` is first read.
+        let attachments = mail
+            .attachments
+            .into_iter()
+            .map(|attachment| Py::new(py, PyAttachment::from_attachment(attachment)))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        Ok(Self {
             subject: mail.subject,
             text_plain: mail.text_plain,
             text_html: mail.text_html,
@@ -894,11 +937,7 @@ impl PyMail {
                 .into_iter()
                 .map(PyAddress::from_address)
                 .collect(),
-            attachments: mail
-                .attachments
-                .into_iter()
-                .map(PyAttachment::from_attachment)
-                .collect(),
+            attachments,
             headers: mail.headers,
             // Empty in the common case, where `collect` allocates nothing.
             warnings: mail
@@ -906,7 +945,7 @@ impl PyMail {
                 .into_iter()
                 .map(ParseWarning::from_warning)
                 .collect(),
-        }
+        })
     }
 }
 
@@ -1418,7 +1457,7 @@ fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
         .detach(|| mail_parser::parse_email(message.as_ref()))
         .map_err(to_py_err)?;
 
-    Ok(PyMail::from_mail(mail))
+    PyMail::from_mail(py, mail)
 }
 
 /// Parse a batch of messages in one call, in parallel, preserving input order.
@@ -1558,7 +1597,7 @@ fn parse_many_inner(
         // implementation: one notion of "this slot failed", two ways to reach it.
         let outcome = match result {
             Ok(mail) => {
-                let mail = PyMail::from_mail(mail);
+                let mail = PyMail::from_mail(py, mail)?;
                 if strict && !mail.warnings.is_empty() {
                     Err(strict_rejection(&mail.warnings))
                 } else {

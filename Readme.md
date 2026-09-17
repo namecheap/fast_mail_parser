@@ -498,7 +498,14 @@ audit's invariant — no shared mutable state in the parsing core — still hold
 
 `PyLazyAttachment` is a new type rather than a lazier `PyAttachment`: changing what
 an existing attribute costs, and where it raises, is a change to a shipped
-contract. `PyAttachment.content` is exactly what it was.
+contract. `PyAttachment.content` still decodes where it always did — in
+`parse_email` — and still raises `DecodeError` there.
+
+What it no longer does is copy. Since #227 full mode shares its objects the way
+lazy mode does: `mail.attachments` hands back the same `PyAttachment` objects on
+every read, and each one publishes a single `bytes` for `content`. So the
+identity line above holds in **every** mode, not just the lazy one, and the
+documented `by_cid` idiom no longer pays two copies of every payload per lookup.
 
 ### The MIME tree
 
