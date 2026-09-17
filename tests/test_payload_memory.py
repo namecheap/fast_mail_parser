@@ -2,7 +2,8 @@
 
 Every payload used to be copied into Rust-owned memory before any parsing began,
 so a batch cost its own size again in duplicates while the caller still held the
-originals. Payloads that are `bytes` are now borrowed.
+originals. `bytes` stopped being copied in #96 and `str` in #226; both are now
+borrowed straight out of the Python object.
 
 Two things make this measurable at all:
 
@@ -57,6 +58,33 @@ PROBE = textwrap.dedent(
     """
 )
 
+# The `str` twin (#226). Same shape, same allowance: a `str` payload is borrowed
+# through `PyBackedStr`, so rejecting an oversized one must not cost a copy of it
+# either. The literal is pure ASCII, which is the case where CPython has the UTF-8
+# form already and hands over its internal buffer with no encoding step.
+PROBE_STR = textwrap.dedent(
+    """
+    import resource
+    import sys
+
+    from fast_mail_parser import MimeStructureError, parse_email
+
+    limit = 100 * 1024 * 1024
+    payload = "Subject: big\\r\\n\\r\\n" + "x" * (limit + 1)
+
+    before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    try:
+        parse_email(payload)
+    except MimeStructureError:
+        pass
+    else:
+        sys.exit("the oversized payload was not rejected")
+    after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
+    print((after - before) / 1024)
+    """
+)
+
 
 def test__an_oversized_payload_is_not_copied_before_being_rejected(tmp_path):
     # Run it from somewhere other than the repository root. `python -c` puts the
@@ -80,9 +108,28 @@ def test__an_oversized_payload_is_not_copied_before_being_rejected(tmp_path):
     )
 
 
+def test__an_oversized_str_payload_is_not_copied_before_being_rejected(tmp_path):
+    # From `tmp_path` for the same reason as the `bytes` probe above.
+    probe = subprocess.run(
+        [sys.executable, "-c", PROBE_STR],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+    )
+
+    assert probe.returncode == 0, probe.stderr
+    growth = float(probe.stdout.strip())
+
+    assert growth < ALLOWED_GROWTH_MIB, (
+        f"peak memory grew {growth:.1f} MiB while rejecting a {PAYLOAD_MIB} MiB "
+        f"`str` payload that is discarded before parsing; more than "
+        f"{ALLOWED_GROWTH_MIB:.0f} MiB suggests it is being copied first"
+    )
+
+
 def test__bytes_and_str_payloads_agree(valid_message: str):
-    # `str` still gets copied -- the limited API has no UTF-8 buffer to borrow --
-    # so the two paths differ internally and must not differ in result.
+    # Both paths borrow, but through different handles (`PyBackedStr` vs
+    # `PyBackedBytes`), so they differ internally and must not differ in result.
     from fast_mail_parser import parse_many
 
     from_str, from_bytes = parse_many([valid_message, valid_message.encode()])

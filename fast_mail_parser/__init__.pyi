@@ -668,10 +668,10 @@ def parse_many(
     workloads at the caller.
 
     Best suited to **many small messages**: the overhead it removes scales with
-    the message count, while its one cost -- copying each payload before parsing
-    begins -- scales with total bytes. For a few very large messages a Python
-    thread pool over ``parse_email`` is currently faster. See the README for
-    measured figures.
+    the message count. Payloads themselves are not copied -- ``bytes`` and ``str``
+    are both borrowed straight out of the Python object for the duration of the
+    call. For a few very large messages a Python thread pool over ``parse_email``
+    is currently faster. See the README for measured figures.
 
     ``mode`` takes the same three values ``parse_email`` takes and means the same
     things, and picks the slot type through these overloads. It is uniform across

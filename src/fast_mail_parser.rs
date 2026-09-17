@@ -18,7 +18,7 @@ mod mail_parser;
 
 use mailparse::MailParseError;
 use pyo3::prelude::*;
-use pyo3::pybacked::PyBackedBytes;
+use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
@@ -1162,53 +1162,57 @@ impl PyLazyMail {
     }
 }
 
-/// Interpret a Python object as a byte buffer for parsing.
-///
-/// Accepts `bytes` (used as-is) or `str` (decoded as its UTF-8 bytes; ASCII is
-/// unchanged because ASCII == its own UTF-8, and non-ASCII code points round-trip
-/// correctly instead of being truncated to their low byte). Any other type raises
-/// Python `TypeError`.
 /// A caller's payload, ready to be read with the GIL released.
 ///
-/// `bytes` is borrowed rather than copied (#96). Holding a `PyBackedBytes` keeps
-/// the Python object alive and hands out its buffer directly, and reading it
-/// detached is sound because `bytes` is immutable -- nothing can change or free
-/// it underneath us while we hold the reference.
+/// Both variants borrow (#96, #226). Holding a `PyBackedBytes` or a `PyBackedStr`
+/// keeps the Python object alive and hands out its buffer directly, and reading it
+/// detached is sound because `bytes` and `str` are both immutable -- nothing can
+/// change or free the buffer underneath us while we hold the reference.
 ///
 /// The copy this avoids was not a rounding error at batch sizes. `parse_many`
 /// duplicated every payload before parsing any of them, so a batch of ten
 /// thousand one-megabyte messages needed ten gigabytes of copies *in addition to*
 /// the originals the caller still held.
 ///
-/// `str` is a different case and still gets copied. Under the limited API,
-/// obtaining UTF-8 from a `str` means asking CPython to encode it, which
-/// allocates -- there is no buffer to borrow. Callers who care about throughput
-/// should pass `bytes`, which is also what reading a mail file or socket gives
-/// them.
+/// `str` was the last holdout, on the premise that the limited API has no UTF-8
+/// buffer to borrow. That is not true for the ABI this crate builds: `abi3-py311`
+/// sets the `Py_3_10` cfg, under which `PyString::to_str` is the zero-copy
+/// `PyUnicode_AsUTF8AndSize` -- the call this function already made one line before
+/// the copy -- and `PyBackedStr` wraps exactly that borrow in a `Send + Sync`
+/// handle. An ASCII `str` hands over its internal buffer with no encoding step at
+/// all; a non-ASCII one makes CPython build the UTF-8 form once and cache it on the
+/// object, which is the same cost `to_str` already paid.
 enum Payload {
-    Borrowed(PyBackedBytes),
-    Owned(Vec<u8>),
+    Bytes(PyBackedBytes),
+    Str(PyBackedStr),
 }
 
 impl AsRef<[u8]> for Payload {
     fn as_ref(&self) -> &[u8] {
         match self {
-            Payload::Borrowed(bytes) => bytes.as_ref(),
-            Payload::Owned(bytes) => bytes.as_slice(),
+            Payload::Bytes(bytes) => bytes.as_ref(),
+            Payload::Str(text) => text.as_bytes(),
         }
     }
 }
 
+/// Interpret a Python object as a byte buffer for parsing.
+///
+/// Accepts `bytes` (used as-is) or `str` (read as its UTF-8 bytes; ASCII is
+/// unchanged because ASCII == its own UTF-8, and non-ASCII code points round-trip
+/// correctly instead of being truncated to their low byte). Any other type raises
+/// Python `TypeError`, as does a `str` holding a lone surrogate -- it has no UTF-8
+/// form, so there is nothing to borrow and nothing to parse.
 fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
     let obj = payload.bind(py);
 
     if let Ok(bytes) = obj.cast::<PyBytes>() {
-        return Ok(Payload::Borrowed(PyBackedBytes::from(bytes.clone())));
+        return Ok(Payload::Bytes(PyBackedBytes::from(bytes.clone())));
     }
 
     if let Ok(text) = obj.cast::<PyString>() {
-        if let Ok(text) = text.to_str() {
-            return Ok(Payload::Owned(text.as_bytes().to_vec()));
+        if let Ok(text) = PyBackedStr::try_from(text.clone()) {
+            return Ok(Payload::Str(text));
         }
     }
 
@@ -1391,8 +1395,8 @@ fn parse_lazy_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyLazyMail> 
 
     // The GIL is released for the parse, as in every other mode. What the parse
     // retains per attachment is a copy of that part's encoded bytes, so nothing
-    // borrows from the caller's `bytes` once this returns -- which is what lets
-    // the attachments outlive the payload.
+    // borrows from the caller's payload once this returns -- which is what lets
+    // the attachments outlive it.
     let mail = py
         .detach(|| mail_parser::parse_email_lazy(message.as_ref()))
         .map_err(to_py_err)?;
@@ -1534,8 +1538,8 @@ fn parse_many_inner(
 ) -> PyResult<Py<PyList>> {
     // Resolve every payload *before* releasing the GIL: this touches Python
     // objects, which requires the interpreter. What is held afterwards is a
-    // reference to each `bytes` object plus its buffer pointer, not a copy of
-    // its contents, so the batch is no longer duplicated in full (#96).
+    // reference to each payload object plus its buffer pointer, not a copy of
+    // its contents, so the batch is no longer duplicated in full (#96, #226).
     let messages: Vec<Payload> = payloads
         .iter()
         .map(|payload| payload_to_bytes(payload, py))
