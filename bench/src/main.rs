@@ -92,12 +92,14 @@ fn main() {
         "tree-lazy" => Box::new(|| {
             mail_parser::parse_tree_deferred(&payload, true)
                 .expect("the fixture must parse")
+                .root
                 .children
                 .len()
         }),
         "tree-metadata" => Box::new(|| {
             mail_parser::parse_tree_deferred(&payload, false)
                 .expect("the fixture must parse")
+                .root
                 .children
                 .len()
         }),

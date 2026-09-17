@@ -264,9 +264,18 @@ jobs:
 
       - name: Fuzz
         run: |
+          # `-a` turns on debug assertions, which is what makes the deferred
+          # modes' retention checkable at all (#239): a leaf keeps offsets into
+          # the buffer it was parsed from, and `Retained::of` falls back to a copy
+          # when the bytes it is handed are not in that buffer. The fallback is
+          # deliberate -- it cannot read out of bounds -- but it is silent, so
+          # without the assertion a slip in the offsets degrades to the copying
+          # this issue removed and nothing says so. The deep-fuzz workflow stays
+          # on the release build, where more executions per second matter more
+          # than this one invariant.
           for target in $FUZZ_TARGETS; do
             echo "::group::$target"
-            cargo fuzz run "$target" -- \
+            cargo fuzz run -a "$target" -- \
               -max_total_time="$FUZZ_SECONDS" \
               -seed=1 \
               -print_final_stats=1

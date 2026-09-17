@@ -134,9 +134,11 @@ class PyLazyMimePart:
     has nothing to decode, and the second was decoded during the walk because its
     body is the embedded message that gives it children.
 
-    Memory: a leaf retains a copy of itself as it sits in the message. For a
-    single-part message that is the whole payload, because the root is the leaf --
-    so this is for walking a large multipart message, not for small mail in bulk.
+    Memory: a leaf remembers where it sits in the payload rather than copying
+    itself out of it, so the tree costs its structure and not its bytes -- and it
+    keeps that payload alive for as long as any node of it is reachable. The
+    leaves inside a ``message/rfc822`` node are the exception and hold copies,
+    because the bytes they were parsed from were produced by decoding that node.
 
     A separate type rather than a lazy ``PyMimePart.content``, for the reason
     ``PyLazyAttachment`` is one: re-timing an existing attribute, and moving where
@@ -343,6 +345,12 @@ class PyLazyAttachment:
     ``is_decoded`` says whether ``content`` has been decoded yet -- so whether
     reading it is free or is about to cost a decode.
 
+    Memory: the part points into the payload it was parsed from rather than
+    copying itself out of it, and keeps that payload alive for as long as it is
+    reachable. Holding one attachment of a large message holds the message.
+    ``content`` is a decoded copy, so a caller who wants the bytes without the
+    message reads it and drops the attachment.
+
     A separate type rather than a lazy ``PyAttachment.content``: changing what an
     existing attribute costs, and when it raises, is a change to a shipped
     contract, and those batch into one API-v2 window. Adding a type is not.
@@ -532,10 +540,10 @@ def parse_email(payload: str | bytes, *, strict: bool = False) -> PyMail:
 
     ``mode="lazy"`` decodes the bodies as usual and defers each attachment:
     ``PyLazyAttachment.content`` decodes on first access and caches, so an
-    attachment nobody reads is never decoded. Returns a ``PyLazyMail``. It trades
-    memory for decoding -- the encoded bytes of every attachment are retained,
-    and base64 is about 1.33x the size of what it encodes -- so it is for
-    selective extraction, not for reading everything anyway.
+    attachment nobody reads is never decoded. Returns a ``PyLazyMail``. A
+    deferred attachment points into ``payload`` rather than copying itself out of
+    it, so the result keeps ``payload`` alive for as long as any attachment of it
+    is reachable -- selective extraction, not a way to hold a mailbox undecoded.
 
     ``mode="metadata"`` reads the headers and the attachment inventory without
     transfer-decoding anything, and returns a ``PyMailMetadata``. On an
@@ -602,6 +610,7 @@ def parse_email_tree(payload: str | bytes) -> PyMimePart:
     * ``"full"`` (the default) returns a ``PyMimePart`` tree, every leaf decoded.
     * ``"lazy"`` returns a ``PyLazyMimePart`` tree, each leaf decoded on first
       access and cached -- walk a large message and decode the one part you want.
+      A leaf points into ``payload``, so the tree keeps it alive.
     * ``"metadata"`` returns a ``PyMimePartMetadata`` tree, which decodes nothing
       and retains nothing; a leaf reports ``encoded_size`` instead of ``content``.
 
@@ -695,9 +704,10 @@ def parse_many(
       the mode was built for -- headers for a whole mailbox without decoding any
       of it. ``strict=True`` is rejected with ``ValueError``, as on
       ``parse_email``, because the mode never reads the bodies.
-    * ``"lazy"``: each slot is a ``PyLazyMail``. Note that this retains the
-      encoded bytes of every attachment in the batch for as long as the result
-      lives, so it is for pulling a few parts out of a batch rather than for
+    * ``"lazy"``: each slot is a ``PyLazyMail``. Each slot's attachments point
+      into that slot's own payload and keep it alive, so keeping one attachment
+      keeps one message rather than the batch -- but holding every slot holds
+      every payload. It is for pulling a few parts out of a batch rather than for
       holding a large one undecoded.
 
     ``ParseError`` instances still occupy failed slots in every mode, and

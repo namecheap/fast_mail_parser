@@ -4,6 +4,13 @@
 //! sweep does not decode bodies, lazy mode so an untouched attachment is not
 //! copied. Those claims have been prose. This counts them.
 //!
+//! `peak` is the number to read for lazy mode. Since #239 a deferred leaf keeps
+//! offsets into the buffer it was parsed from rather than a copy of itself, so
+//! what a lazy result holds no longer scales with the bodies it deferred -- and
+//! the table is where that stops being a claim. What it cannot show is the
+//! payload the caller still holds, which those offsets now pin; the Python side
+//! measures that, because the pin lives in the binding.
+//!
 //! Exact equality against a committed table, not bounds. A bound absorbs a
 //! regression silently until it crosses the bound; an exact number turns any
 //! change in allocation behaviour into a diff someone has to look at and either
@@ -190,16 +197,36 @@ fn the_modes_allocate_what_they_promise() {
         "an untouched lazy parse must hold less than a full one \
          (lazy {lazy:?}, full {full:?})"
     );
-    // Deliberately asserted only here. Lazy mode retains each part's *encoded*
-    // bytes, and base64 is 4/3 of what it decodes to -- so on a small
-    // attachment-bearing message a lazy tree genuinely holds MORE than a decoded
-    // one (measured: 6696 against 6323 bytes on attachment_message.eml). The
-    // trade only pays once the bodies are large, which is the case the mode was
-    // written for and the only case where this ordering is a promise.
     assert!(
         tree_lazy.peak < tree.peak,
         "on a message with real attachments, a lazy tree must hold less than a \
          decoded one (lazy {tree_lazy:?}, decoded {tree:?})"
+    );
+    // The #239 claim, and the one worth guarding: what a deferred leaf retains is
+    // a range, so a lazy tree's footprint is its structure and not its bodies.
+    // Until #239 this assertion was false by a wide margin -- a lazy tree of this
+    // fixture peaked at 798,111 bytes against the 14,332 it peaks at now -- and
+    // on a small attachment-bearing message a lazy tree held *more* than a fully
+    // decoded one, because base64 is 4/3 of what it decodes to and the mode kept
+    // the encoded side.
+    assert!(
+        tree_lazy.peak < payload.len() / 4,
+        "a lazy tree peaked at {} bytes on a {} byte message; it retains offsets \
+         rather than bytes, so it should be far under a quarter of the input",
+        tree_lazy.peak,
+        payload.len()
+    );
+    // The flat mode's version of the same claim. Weaker on purpose: flat lazy
+    // decodes every body part, so its floor is the bodies, and only the
+    // attachments are deferred. A quarter of a full parse is the margin that
+    // holds for a message whose weight is in its attachments -- which is the
+    // message this mode is for.
+    assert!(
+        lazy.peak * 4 < full.peak,
+        "an untouched lazy parse held {} bytes against a full parse's {}; the \
+         attachments it deferred should not be in either number",
+        lazy.peak,
+        full.peak
     );
     assert!(
         metadata.peak < payload.len() / 4,

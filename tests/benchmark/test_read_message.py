@@ -795,9 +795,10 @@ def test__fast_mail_parser___parse_lazy_untouched(large_message: str, benchmark:
 def test__fast_mail_parser___parse_lazy_all_attachments(large_message: str, benchmark: Callable):
     # The other end of the trade, measured rather than asserted: lazy mode plus
     # reading every attachment does the full parse's work in a worse order --
-    # a copy of each part's encoded bytes, then a re-parse of its headers per
-    # attachment. Whoever is going to decode everything anyway should use the
-    # default mode, and this is the number that says so.
+    # a re-parse of each part's headers before its decode. Since #239 the copy is
+    # gone from that list, so the remaining gap is the re-parse alone. Whoever is
+    # going to decode everything anyway should use the default mode, and this is
+    # the number that says so.
     import pytest
 
     from fast_mail_parser import parse_email
@@ -841,9 +842,11 @@ def test__fast_mail_parser___parse_tree_metadata(large_message: str, benchmark: 
 
 
 def test__fast_mail_parser___parse_tree_lazy_untouched(large_message: str, benchmark: Callable):
-    # The other deferred tree mode with nothing read. It retains a copy of every
-    # leaf where metadata mode retains nothing, so the gap between this and the
-    # benchmark above is the price of being able to decode one part later.
+    # The other deferred tree mode with nothing read. It retains each leaf's
+    # offsets where metadata mode retains nothing at all, so since #239 the gap
+    # between this and the benchmark above is the price of *being able* to decode
+    # one part later rather than the price of copying it: the two modes now
+    # allocate the same amount on the fixtures `bench/tests/allocs.rs` counts.
     import pytest
 
     from fast_mail_parser import parse_email_tree
