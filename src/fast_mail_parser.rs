@@ -915,10 +915,10 @@ impl PyMail {
     /// All values of every header, keyed by name, in the order the names first
     /// appeared in the message.
     ///
-    /// Built on access rather than stored as a dict. Python dicts preserve
-    /// insertion order, so inserting in wire order is what makes the ordering
-    /// observable -- and the previous `HashMap` field, converted per access,
-    /// produced a different order every time (#157).
+    /// Built on first access and then shared, so every read is the same dict
+    /// (#231). Python dicts preserve insertion order, so inserting in wire order
+    /// is what makes the ordering observable -- and the previous `HashMap` field,
+    /// converted per access, produced a different order every time (#157).
     #[getter]
     fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         self.headers.to_dict(py)

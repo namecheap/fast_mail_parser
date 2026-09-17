@@ -250,6 +250,10 @@ The stdlib is a full email *library*; this is a fast **parser**. Not provided:
   Use `email.message.EmailMessage` to construct mail.
 - **A `Message`-compatible object.** The API is deliberately its own shape; there
   is no drop-in adapter.
-- **Header mutation.** `headers` is a plain dict snapshot; changing it changes
-  nothing.
+- **Header mutation.** `headers` is a plain dict and should be treated as
+  read-only. Since #231 it is the *same* dict on every read of a given object,
+  built on first access -- so edits to it are visible on later reads of that
+  object. They still change nothing about the parse: `subject`, `from_` and the
+  rest are unaffected, and re-parsing the payload gives the original headers
+  back. Copy it (`dict(mail.headers)`) if you need one you can edit.
 - **Python ≤ 3.10 or PyPy.** CPython 3.11+ only.
