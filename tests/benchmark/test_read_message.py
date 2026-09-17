@@ -30,6 +30,10 @@ import email
 import email.policy
 from collections.abc import Callable
 
+# Module level, unlike the function-local imports elsewhere in this file: the
+# parametrised benchmarks below need `pytest.param` at decoration time.
+import pytest
+
 
 def test__mail_parser___parse_message(large_message: str, benchmark: Callable):
     from mailparser import MailParser
@@ -286,13 +290,33 @@ def test__fast_mail_parser___parse_many(large_message: str, benchmark: Callable)
 # the batch against one per message, plus Python's own thread and future
 # machinery.
 
+def _distinct(message: bytes, count: int) -> list[bytes]:
+    """`count` separate buffers with identical content (#224).
+
+    `[message] * count` is `count` references to *one* object, and since #96
+    `parse_many` borrows `bytes` rather than copying them -- so every worker
+    would be reading the same cache-hot buffer. A mailbox is `count` distinct
+    buffers, and for the 2000-message batch that is 1.6 MB spread over L2/L3
+    instead of one 800-byte line resident in L1. Aliasing flatters the parallel
+    path in exactly the benchmark that publishes the batch API's headline.
+
+    `bytes(b)` and `b[:]` return the same object for `bytes` in CPython, so the
+    copy has to go through `bytearray`; the assertion is there because a future
+    CPython optimisation that made it a no-op would silently restore the
+    aliasing this exists to avoid.
+    """
+    batch = [bytes(bytearray(message)) for _ in range(count)]
+    assert len({id(payload) for payload in batch}) == count, "batch slots alias"
+    return batch
+
+
 BATCH = 16
 
 
 def test__threaded___parse_many(large_message: str, benchmark: Callable):
     from fast_mail_parser import parse_many
 
-    batch = [large_message.encode()] * BATCH
+    batch = _distinct(large_message.encode(), BATCH)
 
     benchmark(lambda: parse_many(batch))
 
@@ -400,9 +424,113 @@ def test__threaded___parse_many_small_page_threads1(benchmark: Callable):
 def test__threaded___parse_many_small(benchmark: Callable):
     from fast_mail_parser import parse_many
 
-    batch = [_small_message()] * SMALL_BATCH
+    batch = _distinct(_small_message(), SMALL_BATCH)
 
     benchmark(lambda: parse_many(batch))
+
+
+# --- what the batch API's shape actually costs (#224) -------------------------
+#
+# Three questions the suite could not answer. How does `parse_many` scale with
+# `threads` -- i.e. how big is the serial section, the result marshalling that
+# runs under the GIL after the parse? Does the atomic-cursor scheduler earn its
+# keep on the uneven batches it was written for, when every batch measured so far
+# has been homogeneous? And what does a caller pay for aliasing, now that
+# payloads are borrowed rather than copied?
+#
+# All informational: they are here to be read, not to gate. The ids are fixed
+# strings so a benchmark's name does not depend on the machine's core count.
+
+THREAD_POINTS = [
+    pytest.param(1, id="t1"),
+    pytest.param(2, id="t2"),
+    pytest.param(4, id="t4"),
+    pytest.param(None, id="all"),
+]
+
+
+@pytest.mark.parametrize("threads", THREAD_POINTS)
+def test__threaded___parse_many_small_scaling(benchmark: Callable, threads):
+    """T(threads) on 2000 small messages.
+
+    `[t1]` against `[all]` is the serial fraction of the small-message path read
+    off directly -- the per-message marshalling under the GIL, plus the spawn.
+    `[t2]` and `[t4]` say whether it flattens early, which a two-point
+    measurement cannot.
+    """
+    from fast_mail_parser import parse_many
+
+    batch = _distinct(_small_message(), SMALL_BATCH)
+
+    benchmark(lambda: parse_many(batch, threads=threads))
+
+
+def _mixed_batch() -> list[bytes]:
+    """200 messages of wildly different sizes, in a fixed shuffled order.
+
+    The workload the cursor scheduler exists for: `src/mail_parser.rs` justifies
+    the atomic cursor over static chunking because "static chunking would stall a
+    worker that happened to draw several large messages, and real mail batches are
+    very uneven in size". Every other batch here is one size repeated, so nothing
+    measured that claim.
+
+    Seeded, so the draw order is the same on every machine and run. Distinct
+    buffers throughout. `invalid_message.eml` is left out on purpose -- an error
+    slot is realistic, but it changes what is being measured.
+    """
+    import glob
+    import random
+
+    def read(path: str) -> bytes:
+        with open(path, "rb") as fh:
+            return fh.read()
+
+    large = read("tests/data/large_message.eml")
+    medium = read("tests/data/valid_message.eml")
+    tiny = read("tests/data/attachment_message.eml")
+    rfc = [read(path) for path in sorted(glob.glob("tests/data/rfc/*.eml"))]
+
+    batch = (
+        _distinct(large, 4)
+        + _distinct(medium, 16)
+        + _distinct(tiny, 60)
+        + [bytes(bytearray(message)) for message in rfc for _ in range(8)]
+    )
+    random.Random(0).shuffle(batch)
+    return batch
+
+
+@pytest.mark.parametrize("threads", [pytest.param(1, id="t1"), pytest.param(None, id="all")])
+def test__threaded___parse_many_mixed(benchmark: Callable, threads):
+    """An uneven batch, which is what real mail looks like."""
+    from fast_mail_parser import parse_many
+
+    batch = _mixed_batch()
+
+    # Asserted once, outside the timed call: a batch where some slot fails would
+    # be measuring the error path and reporting it as throughput.
+    assert len(parse_many(batch)) == len(batch)
+
+    benchmark(lambda: parse_many(batch, threads=threads))
+
+
+def test__threaded___parse_many_mixed_metadata(benchmark: Callable):
+    """The same uneven batch in metadata mode, which never transfer-decodes.
+
+    Against `test__threaded___parse_many_mixed[all]` this separates the scheduling
+    of an uneven batch from the decoding of it -- the sizes still differ wildly,
+    but the work per slot no longer does.
+    """
+    from fast_mail_parser import parse_many
+
+    batch = _mixed_batch()
+
+    try:
+        parse_many(batch[:1], mode="metadata")
+    except (TypeError, ValueError):
+        pytest.skip('this build predates parse_many(mode="metadata")')
+
+    benchmark(lambda: parse_many(batch, mode="metadata"))
 
 
 def test__threaded___threadpool_parse_email_small(benchmark: Callable):
@@ -594,7 +722,7 @@ def test__threaded___parse_many_metadata_small(benchmark: Callable):
 
     from fast_mail_parser import parse_many
 
-    batch = [_small_message()] * SMALL_BATCH
+    batch = _distinct(_small_message(), SMALL_BATCH)
 
     try:
         parse_many(batch[:1], mode="metadata")

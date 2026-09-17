@@ -45,6 +45,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stray `target/` or `Cargo.lock` from running cargo in the vendored crate is not. No Rust
   source change; the wheel is byte-identical.
 
+- **Benchmarks for what the batch API's shape actually costs** (#224). The suite could not
+  answer three questions about `parse_many`: how it scales with `threads`, whether the
+  atomic-cursor scheduler earns its keep on the uneven batches it was written for, and what
+  aliasing costs now that payloads are borrowed rather than copied. Every batch measured so
+  far was one message repeated. New, all informational:
+  `parse_many_small_scaling[t1|t2|t4|all]` over 2000 small messages, and
+  `parse_many_mixed[t1|all]` plus a metadata row over a seeded 200-message batch built from
+  four fixtures at wildly different sizes. A `_distinct()` helper builds batches from
+  separate buffers, and the default-thread large, small and small-metadata batches now use
+  it. Measured on an Apple M4 (10 vCPU): the small batch scales **3.592 -> 2.396 -> 1.972 ms**
+  at 1/2/4 threads and then *regresses* to 2.062 ms on all ten, so that path is bound by the
+  serial marshalling under the GIL rather than by parsing; the uneven batch scales much
+  better, **3.857 -> 1.407 ms (2.7x)**. Aliasing turned out not to matter on this machine --
+  +0.6% at `threads=1`, 0.0% at default -- so switching the batches to distinct buffers
+  moves no published figure. Test-only: the extension is byte-identical.
+
 ### Changed
 
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in
