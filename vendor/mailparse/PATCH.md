@@ -1,11 +1,12 @@
 # Patched copy of `mailparse` 0.16.1
 
 This directory is [mailparse 0.16.1](https://crates.io/crates/mailparse/0.16.1) as published,
-with **two functions changed** (one via a new module) and one dependency added. It is
+with **two functions changed** (one via a new module) and two dependencies added. It is
 applied through `[patch.crates-io]` in the root `Cargo.toml` (and `fuzz/Cargo.toml`), so
 `cargo` sees the same crate name and version and every other dependency resolves exactly
-as before. `memchr = "2.7.0"` is added to this crate's `[dependencies]` (MIT OR Unlicense,
-no dependencies of its own).
+as before. `memchr = "2.7.0"` (MIT OR Unlicense, no dependencies of its own) and
+`base64-simd = "0.8"` (MIT, pulls `vsimd` and `outref`, both MIT) are added to this
+crate's `[dependencies]`.
 
 ## The changes
 
@@ -46,6 +47,34 @@ Interleaved A/B on an Apple M4, original master to this copy:
 | `parse_email` (full) | 1.094 ms | 0.228 ms |
 | `parse_many` (8 x 767 KiB) | 9.082 ms | 1.834 ms |
 
+## Why a dependency is justified for the decode when it was not for the strip
+
+The rule for this copy is *no degradation*, and for the strip that ruled the dependency
+**out**: a dependency-free word-at-a-time version measured faster than the `memchr` one, so
+there was nothing to buy. The decode is the opposite case. `data_encoding`'s loop is four
+table lookups per three bytes and it is already at scalar peak on both CPUs tried; there is
+no dependency-free variant that is "no slower", because the only lever left is wider lanes.
+`base64-simd` uses AVX2/SSE4.1 with runtime detection on x86-64 and NEON on aarch64.
+
+Measured on an Apple M4, interleaved, 8 rounds per side, pure-Python controls within 1.1%:
+a full `parse_email` **0.254 -> 0.168 ms**, `parse_email_tree` 0.246 -> 0.159 ms,
+`parse_many` (8 x 767 KiB) 1.989 -> 1.318 ms. Metadata and untouched-lazy modes never call
+this function and are flat, as they must be.
+
+Stated plainly: `base64-simd`'s last release is 2022-12 and it is `unsafe`-heavy SIMD.
+`cargo deny` and `cargo audit` are the gates, and RustSec carried no advisory for it,
+`vsimd` or `outref` when this landed. The fallback limits the blast radius of a *rejection*
+bug to a slow path, but not that of a *wrong-bytes* bug -- which is what the differential
+test and the fuzz target are for.
+
+**Do not rewrite the call out of place into an in-place decode.** `decode_inplace` over the
+stripped buffer reuses the strip's allocation and avoids a second one, so it reads strictly
+better. Measured in this crate, built as the extension is built (`lto = true`,
+`codegen-units = 1`), it made the whole parse **9% slower** where the out-of-place form
+makes it **51% faster** -- same machine, same corpus, same decoder, and the two are within
+10% of each other when benchmarked standalone. That is the code-layout sensitivity #204
+describes, alive and well. Measure before changing the shape of this function.
+
 ## Why the two functions use different tools
 
 Upstream declined a version of this change that used `memchr` for both (staktrace/mailparse#142:
@@ -79,7 +108,8 @@ Until then, each upstream mailparse release is a hand-merge into this copy:
 1. `diff -r` the new release against the previous one (both under
    `~/.cargo/registry/src/*/mailparse-<version>/`) and apply that diff here -- not the
    other way round, or the two functions revert;
-2. keep `src/bytescan.rs`, the `mod bytescan;` line, the two call sites and `memchr` in
+2. keep `src/bytescan.rs`, the `mod bytescan;` line, the two call sites, the
+   `decode_base64` fast path with its `mod tests`, and both `memchr` and `base64-simd` in
    `Cargo.toml`;
 3. bump the version in this copy's `Cargo.toml` and the `mailparse = "..."` requirement in
    both root manifests together, since `[patch]` only applies when the patched version

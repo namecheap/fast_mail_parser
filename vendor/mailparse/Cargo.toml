@@ -37,6 +37,9 @@ categories = [
 license = "0BSD"
 repository = "https://github.com/staktrace/mailparse"
 
+[dependencies.base64-simd]
+version = "0.8"
+
 [dependencies.memchr]
 version = "2.7.0"
 
