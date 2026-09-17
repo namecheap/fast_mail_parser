@@ -162,6 +162,50 @@ def test__fast_mail_parser___attachment_reread(large_message: str, benchmark: Ca
     benchmark(lambda: [a.content for a in mail.attachments])
 
 
+def test__fast_mail_parser___parse_qp_message(valid_message: str, benchmark: Callable):
+    """The only fixture whose bodies are quoted-printable (#229).
+
+    89,932 bytes of text/html and 8,122 of text/plain, bare-LF on the wire. Every
+    other benchmark in this file is base64 or 8bit, so this is the one that sees
+    the quoted-printable decoder at all -- which is why the maintainer's profile
+    of a full parse describes base64 mail only, and why the gate could not have
+    noticed this path getting slower.
+    """
+    from fast_mail_parser import parse_email
+
+    payload = valid_message.encode()
+
+    # Asserted once, outside the timed call, so a fast-but-wrong decoder fails
+    # here instead of posting a good time.
+    mail = parse_email(payload)
+    assert mail.text_html and mail.text_plain, "both QP parts must decode"
+    assert "=3D" not in mail.text_html[0], "the HTML part must actually be decoded"
+    assert "\r\n" in mail.text_html[0], "robust decoding canonicalises bare LF to CRLF"
+
+    benchmark(parse_email, payload)
+
+
+def test__fast_mail_parser___parse_qp_message_metadata(valid_message: str, benchmark: Callable):
+    """The non-decoding control on the same fixture (#229).
+
+    Metadata mode never transfer-decodes, so this pays the header and structure
+    cost of `valid_message` and nothing else. The gap between it and the
+    benchmark above is the quoted-printable decode.
+    """
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    payload = valid_message.encode()
+
+    try:
+        parse_email(payload, mode="metadata")
+    except TypeError:
+        pytest.skip("this build predates parse_email(mode=...)")
+
+    benchmark(lambda: parse_email(payload, mode="metadata"))
+
+
 def test__mailparser_lib___full_read(large_message: str, benchmark: Callable):
     assert _mailparser_full(large_message)[0], "expected a subject"
 

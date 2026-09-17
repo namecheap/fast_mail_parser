@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in
+  this library that still ran byte-at-a-time: `decode_quoted_printable` handed the whole
+  body to the `quoted_printable` crate, which copies it char by char into a `String`
+  through a `filter_map`, walks that again with `lines()` and `trim_end()`, then decodes
+  with one bounds-checked `push` per byte into a `Vec` with no capacity. Bodies now go
+  through `vendor/mailparse/src/qp.rs`: one allocation sized to the input, `memchr` for
+  line breaks and escapes, `extend_from_slice` between them -- so a line with no `=` is a
+  single copy. Output is byte-identical; the RFC 2047 encoded-word path still uses the
+  crate. Nothing in the benchmark suite could see this before, because every fixture was
+  base64 or 8bit, so `test__fast_mail_parser___parse_qp_message` is added over the one
+  quoted-printable fixture (89,932 bytes of HTML, 8,122 of text) together with a
+  metadata-mode control on the same message. Measured on an Apple M4 (10 vCPU), 5
+  interleaved rounds, pure-Python controls within 1.4%: **0.218 -> 0.133 ms (-39%)**, with
+  every other benchmark inside the noise floor. `quoted_printable` is now pinned to
+  `=0.5.1`: 0.5.2 changed Robust-mode output for a body ending in a soft break, and the
+  caret requirement let this crate's own tests resolve a different version than the
+  extension links. `Cargo.lock` is unchanged.
+
 - **`str` payloads are borrowed instead of copied** (#226). `parse_email`,
   `parse_email_tree` and every `str` slot of `parse_many` duplicated the whole
   message into a fresh `Vec<u8>` before parsing. `bytes` stopped being copied in

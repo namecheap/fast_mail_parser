@@ -6,10 +6,11 @@ name: Deep fuzz
 #
 # Two things make a weekly run worth more than 30x the PR job:
 #
-# Three targets run in parallel, each with its own corpus: `parse_email` on the
+# Four targets run in parallel, each with its own corpus: `parse_email` on the
 # flat parse, `parse_agreement` checking the metadata and tree APIs against it,
-# and `base64_agreement` checking the SIMD base64 fast path against the decoder
-# it replaced (#228)
+# `base64_agreement` checking the SIMD base64 fast path against the decoder it
+# replaced (#228), and `qp_agreement` doing the same for the run-copying
+# quoted-printable decoder (#229)
 # (#97, #99). The per-target budget is halved so the weekly runner cost is
 # unchanged.
 #
@@ -67,7 +68,7 @@ jobs:
       # does not stop the other from running.
       fail-fast: false
       matrix:
-        target: [parse_email, parse_agreement, base64_agreement]
+        target: [parse_email, parse_agreement, base64_agreement, qp_agreement]
     env:
       RUSTUP_TOOLCHAIN: nightly
       # Keep in step with the short pass in test.yml.

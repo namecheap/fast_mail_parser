@@ -18,6 +18,7 @@ mod dateparse;
 mod header;
 pub mod headers;
 mod msgidparse;
+mod qp;
 
 pub use crate::addrparse::{
     addrparse, addrparse_header, GroupInfo, MailAddr, MailAddrList, SingleInfo,
