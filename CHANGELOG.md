@@ -27,6 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caret requirement let this crate's own tests resolve a different version than the
   extension links. `Cargo.lock` is unchanged.
 
+- **The header table allocates half as much** (#238). `collect_headers` keyed its
+  position map by a decoded `String`, so every header allocated its key twice --
+  once for the map and once for the table. Latin-1 decoding is injective, so the raw
+  key bytes are exactly the same equivalence, case-sensitive grouping included, and
+  both containers are now sized from the header count up front. Alongside,
+  `disposition_token` tested for `Content-Disposition` with `get_first_value`, which
+  normalised a value it dropped on the next line; `get_first_header` answers the same
+  question with the same case-insensitive first-match semantics and no tokenizer.
+  Measured on an Apple M4 (10 vCPU), 5 interleaved rounds, pure-Python controls within
+  1.7%: 2000 x 0.8 KiB serial **4.048 -> 3.839 ms (-5.2%)**, the same batch in metadata
+  mode **3.622 -> 3.442 ms (-5.0%)**, and `mode="metadata"` on the quoted-printable
+  fixture 0.022 -> 0.021 ms. No output change.
+
+
 - **`str` payloads are borrowed instead of copied** (#226). `parse_email`,
   `parse_email_tree` and every `str` slot of `parse_many` duplicated the whole
   message into a fresh `Vec<u8>` before parsing. `bytes` stopped being copied in
