@@ -324,7 +324,10 @@ def test__fast_mail_parser___parse_8bit_text(benchmark: Callable):
     """
     from fast_mail_parser import parse_email
 
-    body = ("Wir müssen die Nachricht lesen. " * 400).encode()
+    # ~128 KB. Sized so the body handling dominates rather than the fixed
+    # per-call cost: at 400 repetitions this ran in 6 us on the CI runner, where
+    # FFI and the header parse are most of it and a 2 us wobble reads as 30%.
+    body = ("Wir müssen die Nachricht lesen. " * 4000).encode()
     payload = (
         b"Subject: eight bit\r\n"
         b"Content-Type: text/plain; charset=utf-8\r\n"
@@ -381,7 +384,10 @@ def test__fast_mail_parser___parse_base64_utf8_text(benchmark: Callable):
 
     from fast_mail_parser import parse_email
 
-    body = ("Wir müssen die Nachricht lesen. " * 400).encode()
+    # ~128 KB, for the reason given on the 8bit benchmark above: at 400
+    # repetitions this was 11 us on the CI runner and its gate verdict swung
+    # 14.5% on a 2 us difference.
+    body = ("Wir müssen die Nachricht lesen. " * 4000).encode()
     payload = (
         b"Subject: base64 text\r\n"
         b"Content-Type: text/plain; charset=utf-8\r\n"
@@ -409,7 +415,7 @@ def test__fast_mail_parser___parse_qp_dense_escapes(benchmark: Callable):
         b"Subject: dense\r\n"
         b"Content-Type: text/plain; charset=utf-8\r\n"
         b"Content-Transfer-Encoding: quoted-printable\r\n\r\n"
-        + b"=C3=A9" * 2000
+        + b"=C3=A9" * 20000
         + b"\r\n"
     )
 

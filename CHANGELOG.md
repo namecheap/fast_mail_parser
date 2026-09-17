@@ -77,21 +77,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A part's body is evaluated once, and text bodies stop being copied twice** (#230).
+- **A part's body is evaluated once, and plaintext bodies stop being copied** (#230).
   `get_body_encoded()` re-reads a part's headers to find its transfer encoding, and the
   full and lazy parsers each called it two or three times per part -- for the
   quoted-printable escape check, for the encoded size, and again inside `get_body_raw`.
-  It is now called once and threaded to all three. Two copies go with it: a
-  7bit/8bit/binary body *is* its raw bytes, so `get_body_raw` was copying it into a `Vec`
-  purely so the charset step could borrow it back, and a base64 or quoted-printable body,
-  once decoded, was lent to `encoding_rs` by reference and copied again by `into_owned()`.
-  Text bodies now decode from the borrowed slice where the encoding is already plaintext,
-  and hand the decoded `Vec` to `String::from_utf8` where it is not -- with BOM-prefixed
-  and invalid-UTF-8 bodies routed to the original path, because `encoding_rs` strips a BOM
-  and replaces bad sequences and `from_utf8` does neither. Output is unchanged throughout;
+  It is now called once and threaded to all three. A 7bit/8bit/binary body *is* its raw
+  bytes, so `get_body_raw` was copying it into a `Vec` purely for the charset step to
+  borrow back; those bodies now decode from the borrowed slice. Output is unchanged and
   attachment bytes are byte-identical. Measured on an Apple M4 (10 vCPU), 5 interleaved
-  rounds, pure-Python controls within 0.5%: 2000 x 0.8 KiB serial **4.054 -> 3.733 ms
-  (-8%)**, a plain 8bit text body **-8%**, the quoted-printable fixture 0.135 -> 0.131 ms.
+  rounds, pure-Python controls within 2.4%: the quoted-printable fixture
+  **0.143 -> 0.131 ms (-9.8%)**, a plain 8bit text body **0.022 -> 0.021 ms (-6.4%)**.
+
 
 ### Added
 
