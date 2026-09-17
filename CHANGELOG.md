@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   API asked. Body parts also stop deriving a filename they never used. No behaviour change, and the
   RFC 2183 rule gets a direct unit test instead of only three end-to-end ones.
 
+  The part *loop* is now shared too, not just the rule: full and lazy mode ran two copies of the
+  same walk -- one `get_body_encoded()` per part, the quoted-printable escape check, the warning
+  indices, and the `text/plain` vs `text/html` dispatch -- differing only in what an attachment is
+  made of. That is now `flat_parts::<A>` over a `PartSink` trait, with one call site per
+  instantiation so no parse body gains a second chance to inline (the property that cost the flat
+  path 28% when it was lost). `warn_charset` goes from four call sites to one and
+  `warn_transfer_decode` from six to two. The two modes are required to report the *identical*
+  warning list -- that is what lets `strict=True` mean one thing in both -- and it was two
+  hand-maintained copies that had to agree; now it is one. `Mail` and `LazyMail` keep their own
+  shapes rather than becoming one generic struct, because `LazyMail` carries the `repaired` buffer
+  that full mode has no use for. Measured flat.
+
 - **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
   `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
   arm: both checked the depth cap, both recursed over `multipart/*`, both carried a verbatim
