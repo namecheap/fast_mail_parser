@@ -314,6 +314,30 @@ def test__fast_mail_parser___parse_small(benchmark: Callable):
     assert mail.headers, "expected headers"
     assert mail.warnings == [], "a benchmark input must not be timing a repair"
 
+def test__fast_mail_parser___parse_8bit_text(benchmark: Callable):
+    """A plain 8bit text body, which is where the removed copy shows (#230).
+
+    7bit/8bit/binary bodies *are* their raw bytes, so `get_body_raw` used to copy
+    them into a `Vec` purely so the charset step could borrow them again. No
+    transfer decoding happens here at all, so this benchmark is almost entirely
+    that copy plus the charset validation.
+    """
+    from fast_mail_parser import parse_email
+
+    # ~128 KB. Sized so the body handling dominates rather than the fixed
+    # per-call cost: at 400 repetitions this ran in 6 us on the CI runner, where
+    # FFI and the header parse are most of it and a 2 us wobble reads as 30%.
+    body = ("Wir müssen die Nachricht lesen. " * 4000).encode()
+    payload = (
+        b"Subject: eight bit\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"Content-Transfer-Encoding: 8bit\r\n\r\n" + body + b"\r\n"
+    )
+
+    mail = parse_email(payload)
+    assert mail.text_plain and "müssen" in mail.text_plain[0]
+    assert mail.warnings == []
+
     benchmark(parse_email, payload)
 
 
@@ -348,6 +372,56 @@ def test__fast_mail_parser___parse_rfc2047_headers(benchmark: Callable):
     assert mail.subject.startswith("Café"), "encoded words must decode"
     assert len(mail.headers["Received"]) == 40
     assert mail.warnings == [], "a benchmark input must not be timing a repair"
+
+def test__fast_mail_parser___parse_base64_utf8_text(benchmark: Callable):
+    """A base64 text body labelled UTF-8, the owned-decode path (#230).
+
+    The transfer decode allocates a `Vec`; handing that to `String::from_utf8`
+    instead of lending it to encoding_rs and copying the result is the second
+    copy this removes.
+    """
+    import base64
+
+    from fast_mail_parser import parse_email
+
+    # ~128 KB, for the reason given on the 8bit benchmark above: at 400
+    # repetitions this was 11 us on the CI runner and its gate verdict swung
+    # 14.5% on a 2 us difference.
+    body = ("Wir müssen die Nachricht lesen. " * 4000).encode()
+    payload = (
+        b"Subject: base64 text\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"Content-Transfer-Encoding: base64\r\n\r\n" + base64.b64encode(body) + b"\r\n"
+    )
+
+    mail = parse_email(payload)
+    assert mail.text_plain and "müssen" in mail.text_plain[0]
+    assert mail.warnings == []
+
+    benchmark(parse_email, payload)
+
+
+def test__fast_mail_parser___parse_qp_dense_escapes(benchmark: Callable):
+    """A quoted-printable body that is mostly escapes (#230).
+
+    The escape scan runs over every quoted-printable body, and its old form was a
+    byte-at-a-time loop. This is its worst case: one `=` every three bytes, so
+    `memchr` has to find nearly all of them and the predicate runs nearly every
+    time -- if the scan were slower anywhere, it would be here.
+    """
+    from fast_mail_parser import parse_email
+
+    payload = (
+        b"Subject: dense\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n"
+        b"Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+        + b"=C3=A9" * 20000
+        + b"\r\n"
+    )
+
+    mail = parse_email(payload)
+    assert mail.text_plain and mail.text_plain[0].startswith("é")
+    assert mail.warnings == []
 
     benchmark(parse_email, payload)
 
