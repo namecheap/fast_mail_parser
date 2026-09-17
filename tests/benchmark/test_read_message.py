@@ -206,6 +206,49 @@ def test__fast_mail_parser___parse_qp_message_metadata(valid_message: str, bench
     benchmark(lambda: parse_email(payload, mode="metadata"))
 
 
+def test__fast_mail_parser___headers_first_read(large_message: str, benchmark: Callable):
+    """Parse in metadata mode and read `headers` once (#231).
+
+    The cost of building the dict has not gone away, it has moved to first
+    access -- so this pays exactly one build either way and is the control that
+    says caching did not make the first read more expensive.
+    """
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    payload = large_message.encode()
+
+    try:
+        parse_email(payload, mode="metadata")
+    except TypeError:
+        pytest.skip("this build predates parse_email(mode=...)")
+
+    benchmark(lambda: parse_email(payload, mode="metadata").headers)
+
+
+def test__fast_mail_parser___headers_repeat_read(large_message: str, benchmark: Callable):
+    """Three header lookups on an already-parsed message (#231).
+
+    The parse is outside the timed call, so this is purely what a caller pays to
+    *read* headers -- the README's own idiom, `h.get("From")` then
+    `h.get("Subject")` then a `Received` sweep. Before #231 each of those rebuilt
+    the whole dict; now they are three dict lookups on one shared object.
+    """
+    from fast_mail_parser import parse_email
+
+    mail = parse_email(large_message.encode())
+    assert mail.headers, "expected the large message to expose headers"
+
+    benchmark(
+        lambda: (
+            mail.headers.get("From"),
+            mail.headers.get("Subject"),
+            mail.headers.get("Received"),
+        )
+    )
+
+
 def test__mailparser_lib___full_read(large_message: str, benchmark: Callable):
     assert _mailparser_full(large_message)[0], "expected a subject"
 

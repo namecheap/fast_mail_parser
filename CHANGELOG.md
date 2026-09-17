@@ -40,6 +40,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode **3.622 -> 3.442 ms (-5.0%)**, and `mode="metadata"` on the quoted-printable
   fixture 0.022 -> 0.021 ms. No output change.
 
+- **`headers` is built once per object and shared, and every result class is `frozen`**
+  (#231). Six classes expose `headers`, and each rebuilt a whole Python `dict` on every
+  read -- one `PyDict`, a `str` per key, a `list` per key, a `str` per value, about ninety
+  objects for a typical message -- on an attribute callers reasonably treat as stored and
+  read several times. The README's own idiom reads it twice. All six now share one
+  `Headers` type holding a `OnceLock<Py<PyDict>>`: the first read builds the dict, every
+  later read returns that same object, and a parse that never touches `headers` builds
+  nothing. Separately, the eleven `#[pyclass]`es are now `frozen` -- none has a
+  `&mut self` method or a setter, so PyO3 was running an atomic compare-exchange borrow
+  flag on every getter call to guard mutation that cannot happen. Measured on an Apple M4
+  (10 vCPU), 5 interleaved rounds, pure-Python controls within 2.0%: three header lookups
+  on a parsed message **2.416 -> 0.073 us, 33x**, and `attachment_reread` 0.083 -> 0.042 us
+  from `frozen` alone. Parsing benchmarks are unaffected -- nothing here touches the decode
+  loops.
+
+  **Observable change:** `mail.headers is mail.headers` is now `True`, so edits to the
+  returned dict persist across later reads *of that object*. The parse behind it does not
+  move -- `subject`, `from_` and the rest are unaffected, and re-parsing gives the original
+  headers back. `docs/migrating.md` said `headers` was "a plain dict snapshot"; it now says
+  to treat it as read-only and to copy it if you need one you can edit.
 
 - **`str` payloads are borrowed instead of copied** (#226). `parse_email`,
   `parse_email_tree` and every `str` slot of `parse_many` duplicated the whole

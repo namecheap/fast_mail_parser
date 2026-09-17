@@ -45,7 +45,8 @@ class PyMimePart:
     multipart tree.
 
     ``headers`` keeps every value of every header, keys in the order the names
-    first appeared -- the same semantics as ``PyMail.headers``.
+    first appeared -- the same semantics as ``PyMail.headers``, including being
+    the same dict object on every read.
     """
 
     def __init__(
@@ -440,7 +441,10 @@ class PyMail:
     order, so repeated keys such as ``Received`` or ``DKIM-Signature`` are
     preserved. Single-valued headers are one-element lists:
     ``headers["From"] == ["a@example.com"]``. The keys are in the order the names
-    first appeared in the message, stably across parses.
+    first appeared in the message, stably across parses. It is built on first
+    access and then shared, so ``mail.headers is mail.headers`` and repeated reads
+    cost nothing (#231); treat it as read-only, and copy it if you need to edit
+    one -- see ``docs/migrating.md``.
 
     Body parts and attachments are disjoint. A part is body text -- reaching
     ``text_plain`` or ``text_html`` -- when it is ``text/plain`` or ``text/html``
