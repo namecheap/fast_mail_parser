@@ -170,7 +170,7 @@ message size and so barely registers on small ones. They compose.
 ### Reading these numbers
 
 **Ratios move with the hardware; treat them as a magnitude, not a constant.**
-Before mailparse's two byte-at-a-time loops moved to `memchr` (see the
+Before mailparse's two byte-at-a-time loops were replaced (see the
 [changelog](https://github.com/namecheap/fast_mail_parser/blob/master/CHANGELOG.md)),
 the cross-library table read 6.44x and 8.59x on one runner and 8.50x and 10.01x on
 a faster one. An Apple M4 now gives 20.8x and 28.3x against this run's 25.1x and
