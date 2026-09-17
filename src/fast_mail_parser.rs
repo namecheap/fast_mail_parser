@@ -1590,8 +1590,31 @@ fn resolve_workers(threads: Option<usize>) -> PyResult<Option<NonZeroUsize>> {
         Some(0) => Err(exceptions::PyValueError::new_err(
             "threads must be at least 1; pass threads=None for the default",
         )),
-        other => Ok(other.and_then(NonZeroUsize::new)),
+        Some(other) => Ok(NonZeroUsize::new(other)),
+        None => Ok(Some(default_workers())),
     }
+}
+
+/// The machine's parallelism, probed once per process.
+///
+/// `std::thread::available_parallelism` is not memoised: on Linux it reads
+/// `/proc/self/cgroup`, `/proc/self/mountinfo` and the cgroup `cpu.max` files on
+/// every call, which is several file opens per `parse_many` -- on the platform
+/// the CI gate and production both run on, and for a value that does not move.
+///
+/// The cache lives here, in the binding layer, and not in `mail_parser`: that
+/// module's docs rule out `static`s, `OnceLock` and `thread_local` so its
+/// free-threading audit stays valid, and the core keeps its own
+/// `available_parallelism` fallback for the fuzz targets that include it by path.
+/// This layer already caches on Python objects the same way.
+///
+/// The trade-off, stated: a cgroup CPU quota changed after the first
+/// `parse_many` of the process is not observed. Pass `threads=` to override.
+fn default_workers() -> NonZeroUsize {
+    static DEFAULT_WORKERS: OnceLock<NonZeroUsize> = OnceLock::new();
+
+    *DEFAULT_WORKERS
+        .get_or_init(|| std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
 }
 
 fn parse_many_inner(

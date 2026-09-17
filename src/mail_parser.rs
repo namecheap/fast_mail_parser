@@ -56,6 +56,16 @@ const MAX_INPUT_BYTES: usize = 100 * 1024 * 1024;
 // and crash the host process. Real messages nest only a handful of levels deep.
 const MAX_MIME_DEPTH: usize = 256;
 
+// Below this many input bytes per worker, starting the worker costs more than it
+// saves. The README's own cost model puts a parse at roughly 1.1 us per KB, and
+// creating plus joining an OS thread is 15-40 us (stack mmap, clone, scheduler
+// wake), which puts break-even somewhere near 30 KB. 64 KiB leaves margin for
+// slower encodings and slower spawns. A batch with less work than this runs on
+// the calling thread, which is the shape a mail pipeline produces most often --
+// an IMAP fetch page, a queue poll -- and the shape that used to spawn one
+// thread per message to parse about a microsecond each.
+const MIN_BYTES_PER_WORKER: usize = 64 * 1024;
+
 // The two cap failures are the only errors this module originates itself;
 // everything else comes from mailparse. They are named so the binding layer can
 // classify them by identity rather than by re-typing the literals (see
@@ -361,8 +371,14 @@ where
     let available = threads
         .or_else(|| thread::available_parallelism().ok())
         .map_or(1, NonZeroUsize::get);
-    // Never more workers than there is work for them to do.
-    let workers = available.min(payloads.len()).max(1);
+    // Never more workers than there is work for them to do -- counted both ways.
+    // By message, because a worker with no index to claim is a spawn and a join
+    // for nothing; and by bytes, because sixteen one-kilobyte messages are
+    // sixteen indices and about sixteen microseconds of parsing, which is less
+    // than one thread costs to create.
+    let total_bytes: usize = payloads.iter().map(|payload| payload.as_ref().len()).sum();
+    let by_bytes = (total_bytes / MIN_BYTES_PER_WORKER).max(1);
+    let workers = available.min(payloads.len()).min(by_bytes).max(1);
 
     if workers == 1 {
         return payloads
@@ -372,37 +388,44 @@ where
     }
 
     let cursor = AtomicUsize::new(0);
-    let collected: Vec<Vec<(usize, Result<T, MailParseError>)>> = thread::scope(|scope| {
-        let handles: Vec<_> = (0..workers)
-            .map(|_| {
-                scope.spawn(|| {
-                    // Each worker claims indices until the batch is exhausted and
-                    // keeps its own results, so no synchronisation is needed on
-                    // the output and no `unsafe` is involved.
-                    let mut mine = Vec::new();
-                    loop {
-                        let index = cursor.fetch_add(1, Ordering::Relaxed);
-                        if index >= payloads.len() {
-                            break;
-                        }
-                        mine.push((index, parse(payloads[index].as_ref())));
-                    }
-                    mine
-                })
-            })
-            .collect();
+    // Each worker claims indices until the batch is exhausted and keeps its own
+    // results, so no synchronisation is needed on the output and no `unsafe` is
+    // involved.
+    let claim = || {
+        let mut mine = Vec::new();
+        loop {
+            let index = cursor.fetch_add(1, Ordering::Relaxed);
+            if index >= payloads.len() {
+                break;
+            }
+            mine.push((index, parse(payloads[index].as_ref())));
+        }
+        mine
+    };
 
-        handles
-            .into_iter()
-            // A worker only panics if the parser does, which is a bug rather
-            // than a malformed-input case. Resuming the unwind keeps the
-            // behaviour identical to the single-message path, where PyO3 turns a
-            // panic into a Python exception instead of losing it.
-            .map(|handle| match handle.join() {
-                Ok(results) => results,
-                Err(payload) => std::panic::resume_unwind(payload),
-            })
-            .collect()
+    let collected: Vec<Vec<(usize, Result<T, MailParseError>)>> = thread::scope(|scope| {
+        // `workers - 1` spawned, because the calling thread runs the same loop
+        // rather than blocking on joins. It is already here and already off the
+        // GIL, so making it wait was one spawn and one join per call for nothing
+        // -- half the thread cost when `workers == 2`.
+        let handles: Vec<_> = (1..workers).map(|_| scope.spawn(claim)).collect();
+
+        let mut collected = vec![claim()];
+        collected.extend(
+            handles
+                .into_iter()
+                // A worker only panics if the parser does, which is a bug rather
+                // than a malformed-input case. Resuming the unwind keeps the
+                // behaviour identical to the single-message path, where PyO3 turns a
+                // panic into a Python exception instead of losing it. A panic on
+                // the calling thread unwinds out of `thread::scope`, which joins
+                // the spawned workers first, and lands in the same place.
+                .map(|handle| match handle.join() {
+                    Ok(results) => results,
+                    Err(payload) => std::panic::resume_unwind(payload),
+                }),
+        );
+        collected
     });
 
     // Restore input order. Slots are filled exactly once, so no gaps.
