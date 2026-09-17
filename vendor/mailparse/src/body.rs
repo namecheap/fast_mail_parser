@@ -190,11 +190,12 @@ fn decode_base64(body: &[u8]) -> Result<Vec<u8>, MailParseError> {
     Ok(data_encoding::BASE64_MIME_PERMISSIVE.decode(&cleaned)?)
 }
 
+/// Decode a quoted-printable body with the run-copying decoder in `crate::qp`,
+/// which returns byte-identical output to `quoted_printable::decode(.., Robust)`
+/// without its three passes over the body. The crate is still what `header.rs`
+/// uses for RFC 2047 encoded words. See PATCH.md.
 fn decode_quoted_printable(body: &[u8]) -> Result<Vec<u8>, MailParseError> {
-    Ok(quoted_printable::decode(
-        body,
-        quoted_printable::ParseMode::Robust,
-    )?)
+    Ok(crate::qp::decode_robust(body))
 }
 
 fn get_body_as_string(body: &[u8], ctype: &ParsedContentType) -> Result<String, MailParseError> {

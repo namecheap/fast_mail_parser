@@ -27,6 +27,10 @@ mailparse = "0.16.1"
 # is what the vendored decode_base64 used exclusively before #228, and it must
 # stay pinned to the version that crate depends on.
 data-encoding = "2.6.0"
+# The oracle qp_agreement compares the vendored decoder against. Pinned exactly,
+# for the reason vendor/mailparse/Cargo.toml gives: 0.5.2 changed Robust-mode
+# output for a trailing soft break, and the extension links 0.5.1.
+quoted_printable = "=0.5.1"
 
 [[bin]]
 name = "parse_email"
@@ -45,6 +49,13 @@ bench = false
 [[bin]]
 name = "base64_agreement"
 path = "fuzz_targets/base64_agreement.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "qp_agreement"
+path = "fuzz_targets/qp_agreement.rs"
 test = false
 doc = false
 bench = false
