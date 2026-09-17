@@ -41,6 +41,16 @@ MIN_SENSITIVE_PCT = 3.0
 # the two instruments classify the same benchmarks the same way.
 INFORMATIONAL_PREFIX = "test__threaded___"
 
+# Below this, a percentage is arithmetic on noise. `attachment_reread` and
+# `headers_repeat_read` run in tens of nanoseconds -- they exist to show that a
+# cached read costs nothing, which is the point of them -- and at that scale the
+# timer's own granularity is a large fraction of the measurement. The first run
+# of this script reported them at 14% and 15% "spread" and named them
+# layout-sensitive, which was quantisation, not placement. A build decision was
+# about to be read off that table, so they are now excluded from the
+# classification and labelled instead of silently dropped.
+MIN_SENSITIVE_SECONDS = 1e-6
+
 
 def side_of(path):
     """`plain-2-3.json` -> `2`. The salt index, not the round."""
@@ -141,6 +151,8 @@ def main():
                 tag = "control"
             elif name.startswith(INFORMATIONAL_PREFIX):
                 tag = "informational"
+            elif max(per_salt.values()) < MIN_SENSITIVE_SECONDS:
+                tag = "too fast to classify"
             elif spread > floors[label] and spread > MIN_SENSITIVE_PCT:
                 tag = "**layout-sensitive**"
             else:
@@ -158,6 +170,7 @@ def main():
             for name, per_salt in benches.items()
             if not is_control(name)
             and not name.startswith(INFORMATIONAL_PREFIX)
+            and max(per_salt.values()) >= MIN_SENSITIVE_SECONDS
             and spread_pct(per_salt) > floors[label]
             and spread_pct(per_salt) > MIN_SENSITIVE_PCT
         ]
