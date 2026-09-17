@@ -355,12 +355,34 @@ the `memchr` two-search one.
 **What remains true.** The gate has a false-positive mode its noise floor cannot
 see: the controls are pure Python and do not care how the extension was laid out,
 so they stay flat while every treatment benchmark moves together, tightly and
-repeatably. The two dominant instances are gone, but the base64 decode proper
-(`data_encoding`) and charset conversion are also loops whose placement the
-linker decides, and nobody has measured how sensitive they are. So: **re-run a large failure before acting on
-it.** A real regression reproduces on different hardware; a layout-versus-CPU
-artifact does not. The gate prints the CPU it measured on for exactly this
-comparison.
+repeatably. The two dominant instances are gone, but the decode loops and charset conversion
+are also placed by the linker, and the effect did not go with them. On
+2026-09-17 three consecutive PRs failed the gate on `parse_qp_message` -- +9.2%,
++7.3% and +19.0% -- for changes that cannot reach quoted-printable decoding at
+all; one of them touched only the `parse_many` thread scheduler, and on every one
+of those runs the same message in `mode="metadata"`, which runs the headers and
+skips the decode, got *faster*. Two `#[inline(never)]` attempts moved the number
+to +7.5% and then to +12.9%. So: **re-run a large failure before acting on it**,
+and do not patch placement by guesswork -- three binaries was enough to show it
+does not converge.
+
+To measure it rather than argue about it, dispatch the layout A/B:
+
+```sh
+gh workflow run layout-ab.yml -f salts=4 -f rounds=3
+```
+
+It builds the same source four times, differing only in a `-C metadata` salt --
+the same thing a version bump perturbs (#204) -- and measures all four
+interleaved on one runner. The per-benchmark spread across salts is this
+revision's layout sensitivity on that CPU, and it is what the gate's 7% threshold
+should be read against: a benchmark whose spread is 9% cannot produce a
+meaningful 9% verdict. Pass `-f rustflags='-C llvm-args=-align-all-nofallthru-blocks=6'`
+to measure an alignment candidate as a second group against it. See
+`.github/scripts/layout_spread.py` for the classification rule.
+
+A real regression reproduces on different hardware; a layout-versus-CPU artifact
+does not. The gate prints the CPU it measured on for exactly this comparison.
 
 ## Linting
 

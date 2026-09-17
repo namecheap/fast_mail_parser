@@ -1,0 +1,192 @@
+name: Layout A/B
+
+# Measures how much of a benchmark's number is code *placement* rather than code.
+#
+# This crate is unusually sensitive to it. A rustc minor version alone moved the
+# parse path 15-96% (#120); a package-version bump did the same (#204) for a
+# binary whose x86-64 instruction stream was byte-identical -- 88 instructions,
+# only label hashes differed -- because the crate hash feeds symbol names, which
+# feed link order, which decides whether a hot loop straddles a 64-byte boundary
+# and falls out of Zen's micro-op cache. An Apple M4 measured those same two
+# builds at +/-0.2%, so a maintainer on Apple silicon cannot reproduce the effect
+# at all, and QEMU has no micro-op-cache model to reproduce it with.
+#
+# The PR gate's only remedy for a suspicious verdict has been prose: re-run, and
+# hope the next runner draw is a different CPU. That is not a measurement. The
+# hardware is not what is missing -- the runners already are x86 Zen -- the
+# controlled experiment is.
+#
+# So: build the SAME source K times, differing only in a layout salt, and measure
+# all K interleaved on one runner. The spread across salts is that revision's
+# layout sensitivity on that CPU, and it is the number the gate's 7% threshold
+# should be read against. Run it again with `rustflags` set to an alignment
+# candidate and the two groups say whether the tail can be removed from shipped
+# x86_64 wheels, or whether that idea should be recorded as tried and rejected.
+#
+#   gh workflow run layout-ab.yml -f salts=4 -f rounds=3
+#   gh workflow run layout-ab.yml -f salts=4 -f rounds=3 \
+#     -f rustflags='-C llvm-args=-align-all-nofallthru-blocks=6'
+#
+# Dispatch-only, and deliberately so: 8 sides x 3 rounds is 30-50 runner-minutes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      salts:
+        description: "How many differently-salted builds per group (>= 2)"
+        default: "4"
+      rounds:
+        description: "Interleaved measurement rounds over all sides"
+        default: "3"
+      rustflags:
+        description: "Extra RUSTFLAGS for a second, `aligned` group (empty = plain only)"
+        default: ""
+      pytest-args:
+        description: "Extra pytest args, e.g. -k 'fast_mail_parser or mail_parser___parse_message'"
+        default: ""
+      python-version:
+        description: "CPython to build and measure with"
+        default: "3.12"
+
+permissions:
+  contents: read
+
+jobs:
+  layout:
+    name: ${{ inputs.salts }} salts${{ inputs.rustflags && ' + aligned' || '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+
+      - name: Build every side
+        env:
+          SALTS: ${{ inputs.salts }}
+          EXTRA_RUSTFLAGS: ${{ inputs.rustflags }}
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade pip
+
+          if [ "$SALTS" -lt 2 ]; then
+            echo "::error::salts must be at least 2; one side has nothing to spread against"
+            exit 1
+          fi
+
+          groups="plain"
+          [ -n "$EXTRA_RUSTFLAGS" ] && groups="plain aligned"
+
+          {
+            echo "### Sides"
+            echo
+            echo "- rustc: \`$(rustc --version)\`"
+            echo
+            echo "| side | RUSTFLAGS | extension sha256 | bytes |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          : > /tmp/hashes
+          for group in $groups; do
+            extra=""
+            [ "$group" = "aligned" ] && extra="$EXTRA_RUSTFLAGS "
+            for k in $(seq 0 $((SALTS - 1))); do
+              # `-C metadata` is hashed into the crate's StableCrateId, which is
+              # exactly what a version bump changes (#204) -- symbol names, link
+              # order, and so the addresses of the hot loops. Unlike the version
+              # sed this keeps the wheel version and filename identical and needs
+              # no `git checkout Cargo.toml` afterwards.
+              #
+              # k=0 of the plain group is the unsalted-equivalent build: the same
+              # flags the PR gate uses, so the gate's number sits inside this
+              # group's spread rather than beside it.
+              #
+              # NOTE: RUSTFLAGS in the environment REPLACES `[target.*] rustflags`
+              # from .cargo/config.toml. There are no linux-gnu entries there
+              # today, so nothing is being dropped -- but if any are added, they
+              # must be repeated here or this measures a different build than CI.
+              flags="${extra}-C metadata=layout${k}"
+              echo "::group::build $group-$k ($flags)"
+              RUSTFLAGS="$flags" \
+              CARGO_TARGET_DIR="$RUNNER_TEMP/target-$group-$k" \
+                python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-$group-$k"
+              echo "::endgroup::"
+
+              whl=$(ls "$RUNNER_TEMP/w-$group-$k"/*.whl)
+              # Hash the extension, not the wheel: a wheel is a zip and its
+              # metadata can differ between byte-identical builds, which would
+              # make the guard below pass when it should fail.
+              unzip -p "$whl" '*.so' > "$RUNNER_TEMP/so-$group-$k"
+              sha=$(sha256sum "$RUNNER_TEMP/so-$group-$k" | cut -d' ' -f1)
+              size=$(stat -c%s "$RUNNER_TEMP/so-$group-$k")
+              echo "| \`$group-$k\` | \`$flags\` | \`${sha:0:16}\` | $size |" >> "$GITHUB_STEP_SUMMARY"
+              echo "$sha $group-$k" >> /tmp/hashes
+            done
+          done
+
+          # A salt that produced identical bytes perturbed nothing, and the run
+          # would report a reassuring 0% spread that means only that.
+          if [ "$(cut -d' ' -f1 /tmp/hashes | sort -u | wc -l)" -ne "$(wc -l < /tmp/hashes)" ]; then
+            echo "::error::two sides produced an identical extension -- the salt did nothing and the spread would be meaningless"
+            sort /tmp/hashes
+            exit 1
+          fi
+          echo "groups=$groups" >> "$GITHUB_ENV"
+
+      - name: Install every side
+        env:
+          SALTS: ${{ inputs.salts }}
+        run: |
+          set -euo pipefail
+          for group in $groups; do
+            for k in $(seq 0 $((SALTS - 1))); do
+              python -m venv "$RUNNER_TEMP/venv-$group-$k"
+              "$RUNNER_TEMP/venv-$group-$k/bin/pip" install -q --upgrade pip
+              whl=$(ls "$RUNNER_TEMP/w-$group-$k"/*.whl)
+              # `[test]` on the wheel path takes the pinned test extra from the
+              # wheel's own metadata, so no venv rebuilds the extension.
+              "$RUNNER_TEMP/venv-$group-$k/bin/pip" install -q --no-cache-dir "${whl}[test]"
+            done
+          done
+
+      - name: Measure, interleaved across all sides
+        env:
+          SALTS: ${{ inputs.salts }}
+          ROUNDS: ${{ inputs.rounds }}
+          PYTEST_ARGS: ${{ inputs.pytest-args }}
+        run: |
+          set -euo pipefail
+          # Interleaved across every side per round, not group by group: thermal
+          # drift and any runner noise then land on all sides alike, which is the
+          # whole reason this is one job rather than K runs.
+          for round in $(seq 1 "$ROUNDS"); do
+            for group in $groups; do
+              for k in $(seq 0 $((SALTS - 1))); do
+                echo "::group::round $round — $group-$k"
+                # shellcheck disable=SC2086
+                "$RUNNER_TEMP/venv-$group-$k/bin/pytest" -q tests/benchmark \
+                  --benchmark-min-rounds=25 \
+                  --benchmark-json="$group-$k-$round.json" $PYTEST_ARGS
+                echo "::endgroup::"
+              done
+            done
+          done
+
+      - name: Report the spread
+        run: |
+          set -euo pipefail
+          args=""
+          for group in $groups; do
+            args="$args --group $group $group-*.json"
+          done
+          # shellcheck disable=SC2086
+          python .github/scripts/layout_spread.py $args
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: layout-ab-reports
+          path: "*-[0-9]-[0-9].json"
+          if-no-files-found: warn
