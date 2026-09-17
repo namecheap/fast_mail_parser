@@ -372,6 +372,16 @@ To measure it rather than argue about it, dispatch the layout A/B:
 gh workflow run layout-ab.yml -f salts=4 -f rounds=3
 ```
 
+Measured on 2026-09-17 across four dispatches: pure placement moves the parse
+benchmarks by up to **7.5%** on an Intel Xeon 6973P-C and **7.1%** on an EPYC
+9V74, with `parse_qp_message` and `parse_message` sensitive on every CPU tried.
+The gate's threshold is 7%, so a verdict at or below that figure on those
+benchmarks is not evidence about the code. Trialling
+`-C llvm-args=-align-all-nofallthru-blocks=6` as a second group cut
+`parse_message`'s spread to 0.8-1.2% and `parse_qp_message`'s to 0.7-1.8% on two
+Xeon Platinum parts, at a 2-3% cost to quoted-printable decoding and no
+consistent effect on the lazy or metadata paths; it is not adopted.
+
 It builds the same source four times, differing only in a `-C metadata` salt --
 the same thing a version bump perturbs (#204) -- and measures all four
 interleaved on one runner. The per-benchmark spread across salts is this

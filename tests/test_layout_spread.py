@@ -194,6 +194,37 @@ def test__informational_benchmarks_are_never_classified_sensitive(tmp_path: Path
     assert "layout-sensitive" not in row
 
 
+def test__a_benchmark_too_fast_to_time_is_not_classified(tmp_path: Path):
+    # Real case, from the first dispatch of this workflow: `attachment_reread`
+    # runs in tens of nanoseconds and reported a 14% "spread" that was the timer's
+    # granularity, not placement. At that scale the percentage is arithmetic on
+    # noise, and a build decision was about to be read off the table.
+    sides = [
+        {TREATMENT: 0.00000007, CONTROL: 0.01},
+        {TREATMENT: 0.00000008, CONTROL: 0.01},  # +14%, but 10 ns apart
+    ]
+    output = _run("--group", "plain", *_write_group(tmp_path, "plain", sides))
+
+    row = _row(output, TREATMENT)
+    assert "too fast to classify" in row
+    assert "layout-sensitive" not in row
+    assert "placement is not what the gate's verdicts are made of" in output
+
+
+def test__a_benchmark_just_over_the_floor_is_still_classified(tmp_path: Path):
+    # The floor must exclude only what it is meant to: a microsecond-scale
+    # benchmark with a real spread is still a finding.
+    sides = [
+        {TREATMENT: 0.0000020, CONTROL: 0.01},
+        {TREATMENT: 0.0000024, CONTROL: 0.01},  # +20%
+    ]
+    output = _run("--group", "plain", *_write_group(tmp_path, "plain", sides))
+
+    row = _row(output, TREATMENT)
+    assert "layout-sensitive" in row
+    assert "too fast to classify" not in row
+
+
 def test__a_misnamed_report_is_refused(tmp_path: Path):
     path = tmp_path / "plain.json"
     _report(path, {TREATMENT: 0.001, CONTROL: 0.01})
