@@ -371,6 +371,57 @@ to +7.5% and then to +12.9%. So: **re-run a large failure before acting on it**,
 and do not patch placement by guesswork -- three binaries was enough to show it
 does not converge.
 
+### Measuring the core directly
+
+The pytest benchmarks are the oracle for what the wheel costs a user, and a poor
+instrument for asking *where* that cost is: every number carries the FFI
+crossing, the GIL and the construction of Python objects. `bench/` measures the
+core in Rust instead.
+
+```sh
+cd bench
+cargo run --release -- ../tests/data/large_message.eml full
+cargo run --release -- ../tests/data/large_message.eml strip --rounds 200
+cargo run --release -- ../tests/data/large_message.eml b64-simd
+cargo run --release -- ../tests/data/large_message.eml b64-scalar
+```
+
+`strip` and `b64-*` isolate the two halves of the base64 path, which nothing else
+can. `b64-simd` against `b64-scalar` is what #228 bought, on its own rather than
+diluted through a whole parse: **1.66x** on an M4 (82.6 us against 136.8 us).
+Those numbers are only comparable because `bench/Cargo.lock` is pinned to the
+same dependency versions the wheel ships -- the lint job checks it, and the first
+version of this crate resolved `data-encoding 2.11.1` against the shipped 2.6.0
+and reported 1.86x.
+
+`cargo test --release` in `bench/` counts allocations per mode with a global
+allocator, and asserts the claims the modes are documented to make. It is the
+reason those claims can be quoted: on `large_message.eml` (785 KiB), a full parse
+peaks at **1,060,757 bytes** and metadata mode at **11,929** -- 89x lower, because
+it copies no part bodies. Run it with `-- --nocapture` for the whole table.
+
+One result worth knowing before optimising for it: a *lazy* tree holds more than
+a decoded one on a small attachment-bearing message (6,696 against 6,323 bytes on
+`attachment_message.eml`), because lazy retains the **encoded** bytes and base64
+is 4/3 of what it decodes to. The trade only pays once the bodies are large.
+
+### Profiling the shipped codegen
+
+```sh
+maturin develop --profile profiling
+# or, with no manifest change at all:
+CARGO_PROFILE_RELEASE_DEBUG=line-tables-only CARGO_PROFILE_RELEASE_STRIP=none \
+  maturin develop --release
+```
+
+Same codegen as release, plus line tables, so `samply` or `perf` attributes time
+to a line rather than a stripped symbol. Neither changes what `pip install` or
+`publish.yml` builds.
+
+A profiling build is a **different binary** from the release one -- line tables
+change section sizes and therefore layout, and this crate is measurably sensitive
+to layout. Use it to find out *where* the time goes, never how much.
+
 To measure it rather than argue about it, dispatch the layout A/B:
 
 ```sh

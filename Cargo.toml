@@ -39,8 +39,10 @@ members = ["crates/fast_mail_parser_core"]
 # Both are nested under this directory, and cargo adopts any path dependency
 # inside a workspace as a member unless excluded. `fuzz` needs nightly and keeps
 # its own lockfile; `vendor/mailparse` keeps its own test run under a separate
-# --target-dir, because a `target/` inside it would be swept into the sdist.
-exclude = ["fuzz", "vendor/mailparse"]
+# --target-dir, because a `target/` inside it would be swept into the sdist; and
+# `bench` keeps a lockfile pinned to the versions the wheel ships, which a
+# workspace lockfile would override (see .github/scripts/check_bench_lockfile.py).
+exclude = ["fuzz", "vendor/mailparse", "bench"]
 
 [dependencies]
 # The parsing core. `charset` and `mailparse` live in its manifest now, so their
@@ -61,5 +63,20 @@ default = ["pyo3/extension-module", "pyo3/abi3-py311"]
 # decoder rejects), and quoted-printable bodies decode through `src/qp.rs`
 # rather than the `quoted_printable` crate's three passes. See
 # vendor/mailparse/PATCH.md for why, the numbers, and when this section goes.
+# Same codegen as release, plus line tables, so `samply` and `perf` can attribute
+# time to a line instead of to a stripped symbol:
+#
+#   maturin develop --profile profiling
+#
+# It is a DIFFERENT binary from the release one -- line tables change section
+# sizes and therefore code layout, and this crate is measurably sensitive to
+# layout (#240 measured up to 7.5% from placement alone). So it is for finding
+# out *where* the time goes, never for measuring how much. The interleaved pytest
+# gate remains the timing oracle for the wheel.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"
+
 [patch.crates-io]
 mailparse = { path = "vendor/mailparse" }

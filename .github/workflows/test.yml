@@ -77,6 +77,21 @@ jobs:
         if: always()
         run: cargo test -p fast_mail_parser_core
 
+      # The bench crate measures the core directly -- timings the pytest suite
+      # cannot isolate, and allocation counts nothing else records. Its tests are
+      # the ones that turn the modes' memory claims into assertions, so they are
+      # blocking. Separate target dir for the same reason as the vendored crate.
+      - name: bench crate
+        if: always()
+        run: |
+          cargo fmt --manifest-path bench/Cargo.toml -- --check
+          cargo clippy --manifest-path bench/Cargo.toml --all-targets \
+            --target-dir "$RUNNER_TEMP/bench-target" -- -D warnings
+          cargo test --manifest-path bench/Cargo.toml --release \
+            --target-dir "$RUNNER_TEMP/bench-target"
+          # Its numbers only mean anything if it resolves what the wheel ships.
+          python .github/scripts/check_bench_lockfile.py
+
       - name: vendored mailparse is upstream + upstream.patch
         if: always()
         run: bash .github/scripts/check_vendored_mailparse.sh

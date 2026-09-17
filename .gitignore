@@ -21,3 +21,6 @@ __pycache__
 /fuzz/corpus
 /fuzz/artifacts
 /fuzz/Cargo.lock
+
+# `cargo` in the bench crate; its lockfile IS committed (see bench/Cargo.toml).
+/bench/target
