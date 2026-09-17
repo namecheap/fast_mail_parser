@@ -45,6 +45,10 @@ module-name = "fast_mail_parser.fast_mail_parser"
 # not `[patch.crates-io]` ones.
 include = [
     { path = "src/*", format = "sdist" },
+    # The parsing core is a path dependency (#236). maturin follows
+    # `[dependencies]` path entries into the sdist on its own, but listing it
+    # makes the requirement explicit and survives a refactor of that behaviour.
+    { path = "crates/fast_mail_parser_core/**/*", format = "sdist" },
     { path = "vendor/mailparse/**/*", format = "sdist" },
 ]
 # The fuzzing harness is a development tool; it has no place in a wheel or an

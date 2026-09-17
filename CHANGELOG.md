@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The parsing core is a crate, and has Rust tests for the first time** (#236). It was a
+  `#[path]`-included file: the binding declared it as a module, and both fuzz targets
+  reached across the tree to include the same source again under different cfg. Nothing
+  could depend on it and nothing could test it directly, so a library whose reason to
+  exist is parsing had zero Rust tests for the parsing -- every assertion had to go through
+  Python. It is now `crates/fast_mail_parser_core`, a workspace member with `charset` and
+  `mailparse` declared in its manifest alone, and the fuzz harness links it instead of
+  copying it. Seven tests come with it, covering what is awkward to reach from Python: the
+  input-size cap (no 100 MB object crosses the FFI boundary to test it here), the
+  warning machinery's ordering, per-slot `parse_many` semantics, and metadata mode agreeing
+  with the full parse on the envelope. `cargo tree -p fast_mail_parser_core` now *enforces*
+  the no-PyO3 property the module docs used to merely claim. No behaviour change; the
+  extension is functionally identical.
+
 ### Added
 
 - **A layout A/B, so code placement can be measured instead of argued about** (#240).

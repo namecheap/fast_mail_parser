@@ -1,6 +1,6 @@
 """Body-decode error tests for parse_email (issue #24).
 
-Previously `src/mail_parser.rs` decoded part bodies with
+Previously `crates/fast_mail_parser_core/src/lib.rs` decoded part bodies with
 `get_body_raw().unwrap_or_default()` / `get_body().unwrap_or_default()`, which
 silently turned a failed transfer-encoding decode (e.g. invalid base64) into an
 empty body. That hid corruption from the caller.

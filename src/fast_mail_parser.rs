@@ -14,9 +14,12 @@
 //! core stays portable and unit-testable, while everything PyO3-specific lives
 //! here.
 
-mod mail_parser;
+// The parsing core is its own crate now (#236), so it can be tested directly
+// and cannot accidentally acquire a PyO3 dependency. Aliased to the old module
+// name so every call site below reads unchanged.
+use fast_mail_parser_core as mail_parser;
 
-use mailparse::MailParseError;
+use fast_mail_parser_core::MailParseError;
 use pyo3::prelude::*;
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};

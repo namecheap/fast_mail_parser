@@ -6,7 +6,7 @@ When a parsed message lacks a ``Subject`` or ``Date`` header, the parser does
 NOT raise and does NOT return ``None``. Instead each missing field is reported
 as the empty string ``""``.
 
-This mirrors the Rust implementation in ``src/mail_parser.rs``, which reads::
+This mirrors the Rust implementation in ``crates/fast_mail_parser_core/src/lib.rs``, which reads::
 
     headers.get("Subject").map(String::from).unwrap_or_default()
     headers.get("Date").map(String::from).unwrap_or_default()

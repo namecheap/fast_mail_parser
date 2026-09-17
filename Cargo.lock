@@ -53,9 +53,16 @@ dependencies = [
 name = "fast_mail_parser"
 version = "0.9.0"
 dependencies = [
+ "fast_mail_parser_core",
+ "pyo3",
+]
+
+[[package]]
+name = "fast_mail_parser_core"
+version = "0.9.0"
+dependencies = [
  "charset",
  "mailparse",
- "pyo3",
 ]
 
 [[package]]

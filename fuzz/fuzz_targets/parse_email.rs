@@ -18,9 +18,8 @@
 
 #![no_main]
 
-// The core is included by path rather than linked: see fuzz/Cargo.toml.
-#[path = "../../src/mail_parser.rs"]
-mod mail_parser;
+// The same core crate the extension links; see fuzz/Cargo.toml.
+use fast_mail_parser_core as mail_parser;
 
 use libfuzzer_sys::fuzz_target;
 

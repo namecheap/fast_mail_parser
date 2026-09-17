@@ -22,7 +22,10 @@ import fast_mail_parser
 from fast_mail_parser import parse_email
 
 README = pathlib.Path(__file__).resolve().parent.parent / "Readme.md"
-SOURCE = pathlib.Path(__file__).resolve().parent.parent / "src" / "mail_parser.rs"
+SOURCE = (
+    pathlib.Path(__file__).resolve().parent.parent
+    / "crates" / "fast_mail_parser_core" / "src" / "lib.rs"
+)
 
 MESSAGE = (
     b"From: sender@example.com\r\n"

@@ -53,7 +53,7 @@ def malformed() -> bytes:
 # message came back looking populated with its plain-text alternative silently
 # gone.
 #
-# `repair_missing_separator` in src/mail_parser.rs now restores the separator the
+# `repair_missing_separator` in the parsing core now restores the separator the
 # sender omitted, by the stdlib's rule: a non-continuation line in the header
 # block that cannot be a header field ends the header block, and the body starts
 # there. The tests below assert the recovery, the last three against the stdlib
