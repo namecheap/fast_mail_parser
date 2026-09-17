@@ -61,6 +61,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   headers back. `docs/migrating.md` said `headers` was "a plain dict snapshot"; it now says
   to treat it as read-only and to copy it if you need one you can edit.
 
+- **`parse_many` sizes its workers by bytes, and the calling thread is one of them**
+  (#232). Workers were capped on message count alone, so a sixteen-message fetch page --
+  the shape a mail pipeline produces most often -- spawned a thread per message to parse
+  about a microsecond each. Creating and joining an OS thread costs 15-40 us against a
+  parse of roughly 1.1 us per KB, so `parse_many(page)` was **2.2x slower** than
+  `parse_many(page, threads=1)`: the opposite of what the README promised. Workers are now
+  also capped at one per 64 KiB of input, so a batch with less work than that runs inline;
+  the calling thread runs the claim loop instead of blocking on joins, one fewer spawn per
+  call; and the default parallelism is probed once per process instead of re-reading
+  `/proc/self/cgroup` and the cgroup `cpu.max` files on every call. `threads=` remains an
+  upper bound and is never raised by the gate. Results, ordering, per-slot errors,
+  `raise_on_error`, `strict` and `mode=` are unchanged. Measured on an Apple M4 (10 vCPU),
+  5 interleaved rounds, pure-Python controls within 0.5%: a 16 x 0.8 KB page
+  **0.070 -> 0.032 ms (2.2x)**, while the same page at `threads=1` stayed flat at 0.028 ms,
+  which is what says the saving is scheduling and not parsing. The 16 x 767 KiB batch is
+  unaffected (-0.5%).
+
 - **`str` payloads are borrowed instead of copied** (#226). `parse_email`,
   `parse_email_tree` and every `str` slot of `parse_many` duplicated the whole
   message into a fresh `Vec<u8>` before parsing. `bytes` stopped being copied in

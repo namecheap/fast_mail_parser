@@ -367,6 +367,36 @@ def test__threaded___parse_many_metadata_small_threads1(benchmark: Callable):
     benchmark(lambda: parse_many(batch, threads=1, mode="metadata"))
 
 
+# An IMAP fetch page or a queue poll: a handful of small messages, which is the
+# shape a mail pipeline produces most often and the one with no benchmark before
+# #232. Well under MIN_BYTES_PER_WORKER, so with the default thread count this
+# batch now parses on the calling thread instead of spawning one worker per
+# message to parse about a microsecond each.
+SMALL_PAGE = 16
+
+
+def test__threaded___parse_many_small_page(benchmark: Callable):
+    """`parse_many` on a 16-message page with the default thread count (#232)."""
+    from fast_mail_parser import parse_many
+
+    payloads = [_small_message() for _ in range(SMALL_PAGE)]
+
+    benchmark(lambda: parse_many(payloads))
+
+
+def test__threaded___parse_many_small_page_threads1(benchmark: Callable):
+    """The same page forced serial, as the reference for the one above.
+
+    Before #232 the default-threads version was the slower of the two -- the
+    scheduler cost more than the parsing it scheduled. They should now agree.
+    """
+    from fast_mail_parser import parse_many
+
+    payloads = [_small_message() for _ in range(SMALL_PAGE)]
+
+    benchmark(lambda: parse_many(payloads, threads=1))
+
+
 def test__threaded___parse_many_small(benchmark: Callable):
     from fast_mail_parser import parse_many
 

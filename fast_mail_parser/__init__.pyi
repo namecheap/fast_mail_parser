@@ -669,7 +669,11 @@ def parse_many(
     makes one a raise for ``parse_email`` -- combined with
     ``raise_on_error=True`` it fails the batch on the first repair.
 
-    ``threads`` caps the worker count; the default is the machine's parallelism.
+    ``threads`` caps the worker count; the default is *at most* the machine's
+    parallelism. Small batches use fewer: below roughly 64 KiB of input per worker
+    a thread costs more to start than the parsing it would do, so a batch with
+    less than that in total parses on the calling thread. ``threads=`` is an upper
+    bound, never a target -- the byte gate may lower it and never raises it.
     ``threads=0`` raises ``ValueError`` -- pass ``None`` for the default. The GIL
     is released for the whole batch rather than per message.
 

@@ -478,3 +478,68 @@ def test__a_lazy_batch_defers_every_attachment(attachment_message: str):
     assert isinstance(attachments[0].content, bytes)
     assert attachments[0].is_decoded
     assert not any(a.is_decoded for a in attachments[1:])
+
+
+# --- worker sizing (#232) ----------------------------------------------------
+#
+# Workers are capped by bytes as well as by message count, and the calling thread
+# now runs the claim loop itself. Neither is observable from Python -- there is no
+# API that reports the worker count -- so what these pin is the only thing that
+# matters to a caller: the scheduler may pick any number of workers it likes, and
+# the results must not depend on which.
+
+
+def _subjects(results) -> list:
+    return [getattr(mail, "subject", None) for mail in results]
+
+
+@pytest.mark.parametrize("mode", ["full", "metadata", "lazy"])
+def test__a_small_batch_with_default_threads_matches_threads_one(mode: str):
+    # 16 tiny messages is far under MIN_BYTES_PER_WORKER, so with the default
+    # thread count this batch now parses inline on the calling thread. It must
+    # give exactly what the explicitly serial path gives.
+    payloads = [_message(f"small {i}") for i in range(16)]
+    assert sum(len(p) for p in payloads) < 64 * 1024, "fixture must stay under the gate"
+
+    default = parse_many(payloads, mode=mode)
+    serial = parse_many(payloads, threads=1, mode=mode)
+
+    assert _subjects(default) == _subjects(serial)
+    assert _subjects(default) == [f"small {i}" for i in range(16)]
+
+
+@pytest.mark.parametrize("mode", ["full", "metadata", "lazy"])
+def test__a_large_batch_with_default_threads_still_matches_threads_one(mode: str):
+    # Above the byte gate on any core count, so this keeps the genuinely parallel
+    # path covered rather than letting the gate quietly serialise the whole suite.
+    payloads = [_message(f"large {i}") * 20 for i in range(400)]
+    assert sum(len(p) for p in payloads) > 64 * 1024
+
+    default = parse_many(payloads, mode=mode)
+    serial = parse_many(payloads, threads=1, mode=mode)
+
+    assert _subjects(default) == _subjects(serial)
+    assert len(default) == 400
+
+
+def test__threads_is_an_upper_bound_not_a_target():
+    # `threads=` caps the workers; the byte gate may lower it further, and for a
+    # batch this small it will. The contract is about results, not worker count.
+    payloads = [_message(f"capped {i}") for i in range(8)]
+
+    results = parse_many(payloads, threads=64)
+
+    assert _subjects(results) == [f"capped {i}" for i in range(8)]
+
+
+def test__a_single_message_batch_still_parses():
+    # `workers` bottoms out at 1 through two `.min()`s and a `.max(1)`; a batch of
+    # one is where an off-by-one there would show.
+    assert _subjects(parse_many([_message("only")])) == ["only"]
+
+
+def test__empty_and_tiny_batches_do_not_divide_by_zero():
+    # total_bytes / MIN_BYTES_PER_WORKER is integer division; `.max(1)` is what
+    # keeps a sub-64-KiB batch from asking for zero workers.
+    assert parse_many([]) == []
+    assert _subjects(parse_many([_message("x")] * 2)) == ["x", "x"]

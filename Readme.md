@@ -345,6 +345,13 @@ So **`parse_many` is the right default for a mail pipeline**, where messages are
 usually a few KB, and it costs nothing at any size — the last row is a wash, not
 a penalty.
 
+That holds for small batches too, but only since #232. Workers are sized by
+bytes as well as by message count: below roughly 64 KiB of input in total the
+batch parses on the calling thread rather than spawning a thread per message.
+Before that, a 16-message fetch page with the default thread count was **2.2x
+slower** than the same page with `threads=1`, because creating and joining the
+threads cost more than the parsing they were created for.
+
 That was not true before 0.8.0. `parse_many` used to copy every payload before
 parsing began, which made it **1.5x slower** for large messages and put a real
 trade-off here; the copy is gone
