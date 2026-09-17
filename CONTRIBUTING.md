@@ -422,6 +422,40 @@ A profiling build is a **different binary** from the release one -- line tables
 change section sizes and therefore layout, and this crate is measurably sensitive
 to layout. Use it to find out *where* the time goes, never how much.
 
+### Is PGO worth it?
+
+Unanswered deliberately, and there is a workflow to answer it:
+
+```sh
+gh workflow run pgo-ab.yml -f rounds=5 -f tolerance=5
+```
+
+It builds three wheels from one source and one toolchain -- plain, instrumented,
+and optimised with the profile that instrumented build produced by running the
+whole test suite plus one pass of the benchmark bodies -- then measures plain
+against PGO interleaved in a single job, in both orientations so a win announces
+itself as loudly as a loss.
+
+**The decision rule matters more than the number.** PGO's mechanism is
+rearranging code, and rearranging code is exactly what moves this crate's
+benchmarks for no reason at all -- see the layout A/B below, which measured up to
+7.5%. So a PGO win counts only if it clears `tolerance`, **exceeds the layout
+spread for the same revision**, and reproduces on a run with a different
+`Measured on` CPU line. Anything short of that is recorded here as
+measured-and-not-adopted, which is a result: it stops the next person re-running
+it.
+
+Adopting it would raise a question the workflow does not answer. The PR gate
+builds without PGO, so its verdicts would stop describing the artefact users
+install; that parity problem belongs in the adoption issue, not the trial.
+
+A trap for local trials on macOS: `.cargo/config.toml` sets `rustflags` for the
+apple targets, and a `RUSTFLAGS` environment variable **replaces** it rather than
+appending. Exporting `RUSTFLAGS=-Cprofile-generate=...` therefore drops
+`-C link-arg=-undefined dynamic_lookup`, and the link fails in a way that looks
+nothing like the cause. Add the link args back by hand, or trial it on the linux
+runner, where the target has no such entry.
+
 To measure it rather than argue about it, dispatch the layout A/B:
 
 ```sh

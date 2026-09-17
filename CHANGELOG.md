@@ -45,6 +45,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A dispatch-only PGO A/B** (#241). Profile-guided optimisation is easy to adopt on
+  faith -- the compiler gets a real profile and the numbers usually move the right way --
+  and this crate is a bad place for faith: code placement alone moves its benchmarks up to
+  7.5% on the runners (#240, measured), and PGO's mechanism *is* rearranging code. So a 4%
+  "win" here is indistinguishable from a lucky layout draw unless it is measured against
+  that floor. `gh workflow run pgo-ab.yml` builds three wheels from one source and one
+  toolchain -- plain, instrumented, and optimised with the profile that instrumented build
+  produced from the whole test suite plus one pass of the benchmark bodies -- and measures
+  plain against PGO interleaved on a single runner, in both orientations so a win
+  announces itself as loudly as a loss. It fails the job if training wrote no `.profraw`,
+  or if PGO produced a byte-identical extension, since both would report a reassuring 0%
+  for the wrong reason. The decision rule is recorded in `CONTRIBUTING.md`: adopt only if
+  the win clears the tolerance, exceeds the layout spread for the same revision, and
+  reproduces on a second CPU. Nothing about the shipped wheels changes.
+
 - **A layout A/B, so code placement can be measured instead of argued about** (#240).
   This crate has been bitten by placement four times: a rustc minor version moved the
   parse path 15-96% (#120), a package-version bump did the same for a byte-identical

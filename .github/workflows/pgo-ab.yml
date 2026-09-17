@@ -1,0 +1,201 @@
+name: PGO A/B
+
+# Does profile-guided optimisation earn its place in the shipped wheels?
+#
+# PGO is the kind of change that is easy to adopt on faith: the compiler gets a
+# profile, the profile is real, the numbers usually go the right way. This crate
+# is a bad place for faith. Code placement alone moves its benchmarks up to 7.5%
+# on the runners (#240, measured), and PGO's whole mechanism is *rearranging
+# code* -- so a 4% "win" here is indistinguishable from a lucky layout draw
+# unless it is measured against that floor and reproduced on a second CPU.
+#
+# So this builds three wheels from one source and one toolchain -- plain,
+# instrumented, and optimised with the profile the instrumented build produced --
+# and measures plain against PGO interleaved in a single job. Same discipline as
+# toolchain-ab.yml and layout-ab.yml: one runner, alternating rounds, the
+# pure-Python benchmarks along as a noise floor.
+#
+#   gh workflow run pgo-ab.yml -f rounds=5 -f tolerance=5
+#
+# **Decision rule.** Adopt-candidate only if the PGO side wins by more than
+# `tolerance` on the decoding benchmarks AND the win reproduces on a run with a
+# different `Measured on` CPU line AND it exceeds the layout spread that
+# layout-ab.yml reports for the same revision. Anything else is recorded in
+# CONTRIBUTING.md as measured-and-not-adopted, which is a result, not a failure:
+# it stops the next person re-running this.
+#
+# Adopting would also raise a question this workflow does not answer: the PR gate
+# builds without PGO, so a gate verdict would no longer describe the artefact
+# users install. That parity problem belongs in the adoption issue.
+#
+# Local trials on macOS: `.cargo/config.toml` sets `rustflags` for the apple
+# targets, and a `RUSTFLAGS` environment variable *replaces* rather than appends
+# to it -- so exporting RUSTFLAGS for a profile-generate build silently drops
+# `-C link-arg=-undefined dynamic_lookup` and the link fails confusingly. Add the
+# link args back by hand, or trial it here where the target has no such entry.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tolerance:
+        description: "Delta (percent) a PGO gain must exceed, and a PGO loss must not"
+        default: "5"
+      rounds:
+        description: "Interleaved measurement rounds per side"
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  pgo:
+    name: PGO vs plain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Toolchain
+        run: |
+          python -m pip install -q --upgrade pip
+          # `llvm-tools` for llvm-profdata of *this* toolchain: a profraw written
+          # by one LLVM version is not readable by another's profdata, and the
+          # system llvm-profdata on the runner is not the one rustc used.
+          rustup component add llvm-tools
+          profdata="$(rustc --print sysroot)/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-profdata"
+          if [ ! -x "$profdata" ]; then
+            echo "::error::llvm-profdata not found at $profdata"
+            exit 1
+          fi
+          echo "profdata=$profdata" >> "$GITHUB_ENV"
+          {
+            echo "### Toolchain"
+            echo
+            echo "- rustc: \`$(rustc --version)\`"
+            echo "- llvm-profdata: \`$("$profdata" --version | tr '\n' ' ')\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build plain (as shipped)
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-plain"
+
+      - name: Build instrumented
+        env:
+          RUSTFLAGS: -Cprofile-generate=${{ runner.temp }}/pgo-data
+          # A separate target dir per build is load-bearing: without it cargo
+          # reuses artefacts and a later "different" build is the same binary,
+          # which reports a reassuring 0% and means nothing.
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-instr
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-instr"
+
+      - name: Train
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/venv-instr"
+          "$RUNNER_TEMP/venv-instr/bin/pip" install -q --upgrade pip
+          whl=$(ls "$RUNNER_TEMP"/w-instr/*.whl)
+          "$RUNNER_TEMP/venv-instr/bin/pip" install -q --no-cache-dir "${whl}[test]"
+
+          # The whole suite, so malformed inputs and every mode are represented,
+          # then one pass of the benchmark bodies so the hot path is weighted the
+          # way production weights it rather than the way the tests do.
+          "$RUNNER_TEMP/venv-instr/bin/pytest" -q tests --ignore=tests/benchmark
+          "$RUNNER_TEMP/venv-instr/bin/pytest" -q tests/benchmark --benchmark-disable
+
+          # An empty profile silently produces a PGO build identical to plain,
+          # and a run that reports 0% for the wrong reason.
+          count=$(ls "$RUNNER_TEMP/pgo-data"/*.profraw 2>/dev/null | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::training wrote no .profraw -- the instrumented wheel was not exercised"
+            exit 1
+          fi
+          echo "- profraw files: $count" >> "$GITHUB_STEP_SUMMARY"
+          "$profdata" merge -o "$RUNNER_TEMP/merged.profdata" "$RUNNER_TEMP/pgo-data"
+
+      - name: Build PGO-optimised
+        env:
+          # `-pgo-warn-missing-function` surfaces functions the profile does not
+          # cover instead of silently leaving them cold.
+          RUSTFLAGS: >-
+            -Cprofile-use=${{ runner.temp }}/merged.profdata
+            -Cllvm-args=-pgo-warn-missing-function
+          CARGO_TARGET_DIR: ${{ runner.temp }}/target-pgo
+        run: python -m pip wheel . --no-deps -w "$RUNNER_TEMP/w-pgo"
+
+      - name: Check the two builds actually differ
+        run: |
+          set -euo pipefail
+          plain_whl=$(ls "$RUNNER_TEMP"/w-plain/*.whl)
+          pgo_whl=$(ls "$RUNNER_TEMP"/w-pgo/*.whl)
+          # Hash the extension, not the wheel: a wheel is a zip and its metadata
+          # can differ between byte-identical builds, which would make this guard
+          # pass when it should fail.
+          plain_hash=$(unzip -p "$plain_whl" '*.so' | sha256sum | cut -d' ' -f1)
+          pgo_hash=$(unzip -p "$pgo_whl" '*.so' | sha256sum | cut -d' ' -f1)
+          {
+            echo "- plain extension: \`${plain_hash:0:16}\`"
+            echo "- pgo extension:   \`${pgo_hash:0:16}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$plain_hash" = "$pgo_hash" ]; then
+            echo "::error::PGO produced an identical extension -- the profile was not applied"
+            exit 1
+          fi
+          echo "plain_whl=$plain_whl" >> "$GITHUB_ENV"
+          echo "pgo_whl=$pgo_whl" >> "$GITHUB_ENV"
+
+      - name: Install both builds
+        run: |
+          set -euo pipefail
+          for side in plain pgo; do
+            python -m venv "$RUNNER_TEMP/venv-$side"
+            "$RUNNER_TEMP/venv-$side/bin/pip" install -q --upgrade pip
+          done
+          "$RUNNER_TEMP/venv-plain/bin/pip" install -q --no-cache-dir "${plain_whl}[test]"
+          "$RUNNER_TEMP/venv-pgo/bin/pip" install -q --no-cache-dir "${pgo_whl}[test]"
+
+      - name: Measure, interleaved
+        run: |
+          set -euo pipefail
+          for round in $(seq 1 "${{ inputs.rounds }}"); do
+            for side in plain pgo; do
+              echo "::group::round $round — $side"
+              "$RUNNER_TEMP/venv-$side/bin/pytest" -q tests/benchmark \
+                --benchmark-min-rounds=25 \
+                --benchmark-json="$side-$round.json"
+              echo "::endgroup::"
+            done
+          done
+
+      - name: Is PGO slower than plain?
+        env:
+          AB_THRESHOLD_PCT: ${{ inputs.tolerance }}
+        run: |
+          python .github/scripts/ab_median.py \
+            --a-label pgo --b-label plain \
+            --informational test__threaded___ \
+            --a pgo-*.json --b plain-*.json
+
+      # Red here is the ADOPT signal, not a failure: `ab_median.py` flags a
+      # significant difference in whichever direction it is asked about, so
+      # running it the other way round is how a PGO *win* announces itself.
+      - name: Is PGO faster than plain? (a red result here is the adopt signal)
+        continue-on-error: true
+        env:
+          AB_THRESHOLD_PCT: ${{ inputs.tolerance }}
+        run: |
+          python .github/scripts/ab_median.py \
+            --a-label plain --b-label pgo \
+            --informational test__threaded___ \
+            --a plain-*.json --b pgo-*.json
+
+      - name: Upload the reports and the profile
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pgo-ab-reports
+          path: |
+            *-[0-9].json
+            ${{ runner.temp }}/merged.profdata
+          if-no-files-found: warn
