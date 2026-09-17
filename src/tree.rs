@@ -269,6 +269,8 @@ impl PyLazyMimePart {
     /// Decode this part and publish the result, exactly as `PyLazyAttachment`
     /// does -- see the long note there for why a race duplicates work rather than
     /// needing a lock, and why the GIL is released for the decode.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn decode<'py>(&self, py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
         decode_into(py, &self.content, raw)
     }

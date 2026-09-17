@@ -151,6 +151,8 @@ impl PyLazyAttachment {
     ///
     /// `#[cold]` and out of line: it runs at most once per attachment, and the
     /// hot path through the getter above is the cached one.
+    #[cold]
+    #[inline(never)]
     pub(crate) fn decode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         decode_into(py, &self.content, self.raw.bytes())
     }
