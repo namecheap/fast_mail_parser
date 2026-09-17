@@ -18,11 +18,13 @@
 
 use std::sync::OnceLock;
 
-use pyo3::PyClass;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDateTime, PyList, PyTzInfo};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyTzInfo};
+use pyo3::PyClass;
 
-use crate::{ParseWarning, mail_parser, strict_rejection, to_py_err};
+use crate::errors::{strict_rejection, to_py_err};
+use crate::flat::{ParseWarning, PyAddress};
+use crate::mail_parser;
 
 /// The `Date` header as an aware UTC `datetime`, or `None` if it will not parse.
 ///
@@ -123,4 +125,62 @@ pub(crate) fn push_slot(
             items.append(err.value(py))
         }
     }
+}
+
+/// Header pairs in wire order, plus the one Python `dict` they project to.
+///
+/// Six result classes expose `headers`, and each used to rebuild a whole dict per
+/// read: one `PyDict`, a `str` per key, a `list` per key and a `str` per value --
+/// about ninety objects for a typical message, on an attribute Python callers
+/// reasonably treat as stored and read several times (`h.get("From")`,
+/// `h.get("Subject")`, `"X" in h`). The README's own idiom reads it twice.
+///
+/// The cache is a `OnceLock<Py<PyDict>>` for the same reason
+/// `PyLazyAttachment.content` is: every read returns the *same* object, so the
+/// second one allocates nothing, and racing first readers all get what the cell
+/// published rather than each building their own.
+///
+/// It is filled on first access and never in a constructor, so a parse that never
+/// reads `headers` -- `mode="metadata"` sweeping for one field, say -- pays
+/// nothing for this.
+pub(crate) struct Headers {
+    pairs: Vec<(String, Vec<String>)>,
+    dict: OnceLock<Py<PyDict>>,
+}
+
+impl Headers {
+    pub(crate) fn new(pairs: Vec<(String, Vec<String>)>) -> Self {
+        Headers {
+            pairs,
+            dict: OnceLock::new(),
+        }
+    }
+
+    /// All values of every header, keyed by name, in the order the names first
+    /// appeared in the message (#157). Built once, then shared.
+    ///
+    /// Built outside `get_or_init`, as the lazy decoders do: `set_item` can raise,
+    /// and a closure that has to produce a value cannot propagate that. A race
+    /// therefore builds two dicts and discards one -- correct either way, since
+    /// `get_or_init` publishes exactly one and every caller returns what it holds.
+    pub(crate) fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        if let Some(cached) = self.dict.get() {
+            return Ok(cached.bind(py).clone());
+        }
+
+        let dict = PyDict::new(py);
+        for (name, values) in &self.pairs {
+            dict.set_item(name, values)?;
+        }
+
+        Ok(self.dict.get_or_init(|| dict.unbind()).bind(py).clone())
+    }
+}
+
+/// Convert an address list for the Python layer.
+///
+/// Also keeps the conversions below off rustfmt's `chain_width`, which is 60 and
+/// which `metadata.to.into_iter().map(...).collect()` exceeds by two characters.
+pub(crate) fn addresses(list: Vec<mail_parser::Address>) -> Vec<PyAddress> {
+    list.into_iter().map(PyAddress::from_address).collect()
 }
