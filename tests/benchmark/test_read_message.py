@@ -289,6 +289,41 @@ def _small_message() -> bytes:
     ).encode()
 
 
+def test__threaded___parse_many_small_threads1(benchmark: Callable):
+    """The 2000-message batch forced serial (#238).
+
+    The threaded variants of this batch measure the scheduler as much as the
+    parse. With `threads=1` what is left is per-message Rust work, which for a
+    small message is mostly header parsing -- so this is where a change to the
+    header path shows without thread-count noise on top of it.
+    """
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    benchmark(lambda: parse_many(batch, threads=1))
+
+
+def test__threaded___parse_many_metadata_small_threads1(benchmark: Callable):
+    """The same batch, serial, in metadata mode (#238).
+
+    Metadata mode transfer-decodes nothing, so on a small message this is very
+    nearly pure header work -- the narrowest read available on that path.
+    """
+    import pytest
+
+    from fast_mail_parser import parse_many
+
+    batch = [_small_message()] * SMALL_BATCH
+
+    try:
+        parse_many(batch[:1], mode="metadata")
+    except TypeError:
+        pytest.skip('this build predates parse_many(mode="metadata")')
+
+    benchmark(lambda: parse_many(batch, threads=1, mode="metadata"))
+
+
 def test__threaded___parse_many_small(benchmark: Callable):
     from fast_mail_parser import parse_many
 

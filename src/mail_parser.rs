@@ -471,7 +471,11 @@ fn normalize_content_id(raw: &str) -> String {
 /// `Content-Disposition: inline`, so presence is confirmed against the raw
 /// headers before reporting a token.
 fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<String> {
-    part.get_headers().get_first_value("Content-Disposition")?;
+    // Presence only -- the token itself comes from `kind`. `get_first_header` has
+    // the same case-insensitive first-match semantics as `get_first_value` and
+    // stops there, where `get_first_value` went on to normalise the value into a
+    // `String` that was dropped on the next line.
+    part.get_headers().get_first_header("Content-Disposition")?;
     Some(match kind {
         DispositionType::Inline => "inline".to_owned(),
         DispositionType::Attachment => "attachment".to_owned(),
@@ -499,16 +503,21 @@ fn disposition_token(part: &ParsedMail<'_>, kind: &DispositionType) -> Option<St
 /// Shared by the flat view and the tree so the two cannot disagree about what a
 /// message's headers are.
 fn collect_headers(part: &ParsedMail<'_>) -> Vec<(String, Vec<String>)> {
-    let mut headers: Vec<(String, Vec<String>)> = Vec::new();
-    let mut positions: HashMap<String, usize> = HashMap::new();
+    let count = part.headers.len();
+    let mut headers: Vec<(String, Vec<String>)> = Vec::with_capacity(count);
+    // Keyed by the raw key bytes rather than by the decoded `String`. Latin-1
+    // decoding is injective, so byte equality is exactly the `String` equality
+    // this map had -- and keys stay case-sensitive, so `Received` and `received`
+    // remain separate entries as before. It saves the second owned key per
+    // header: `get_key()` allocated once for the map and once for the table.
+    let mut positions: HashMap<&[u8], usize> = HashMap::with_capacity(count);
 
     for header in part.get_headers() {
-        let key = header.get_key();
-        match positions.get(&key).copied() {
+        match positions.get(header.get_key_raw()).copied() {
             Some(position) => headers[position].1.push(header.get_value()),
             None => {
-                positions.insert(key.clone(), headers.len());
-                headers.push((key, vec![header.get_value()]));
+                positions.insert(header.get_key_raw(), headers.len());
+                headers.push((header.get_key(), vec![header.get_value()]));
             }
         }
     }
