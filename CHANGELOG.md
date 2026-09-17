@@ -77,6 +77,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A part's body is evaluated once, and text bodies stop being copied twice** (#230).
+  `get_body_encoded()` re-reads a part's headers to find its transfer encoding, and the
+  full and lazy parsers each called it two or three times per part -- for the
+  quoted-printable escape check, for the encoded size, and again inside `get_body_raw`.
+  It is now called once and threaded to all three. Two copies go with it: a
+  7bit/8bit/binary body *is* its raw bytes, so `get_body_raw` was copying it into a `Vec`
+  purely so the charset step could borrow it back, and a base64 or quoted-printable body,
+  once decoded, was lent to `encoding_rs` by reference and copied again by `into_owned()`.
+  Text bodies now decode from the borrowed slice where the encoding is already plaintext,
+  and hand the decoded `Vec` to `String::from_utf8` where it is not -- with BOM-prefixed
+  and invalid-UTF-8 bodies routed to the original path, because `encoding_rs` strips a BOM
+  and replaces bad sequences and `from_utf8` does neither. Output is unchanged throughout;
+  attachment bytes are byte-identical. Measured on an Apple M4 (10 vCPU), 5 interleaved
+  rounds, pure-Python controls within 0.5%: 2000 x 0.8 KiB serial **4.054 -> 3.733 ms
+  (-8%)**, a plain 8bit text body **-8%**, the quoted-printable fixture 0.135 -> 0.131 ms.
+
+### Added
+
+- **The benchmark gate judges more than one message shape** (#223). Every gated benchmark
+  measured `large_message.eml` -- 767 KiB, 99% base64 attachment -- so the gate judged the
+  decode path and nothing else. That is not hypothetical: #238's header work moved the
+  small serial batch 23% while the gate's own benchmark moved 2%. Three gated benchmarks
+  now cover the shapes it could not see: `parse_small` (the per-call floor on ~0.8 KB --
+  FFI, header map, address and date parse), `parse_many_small_serial` (the same cost x2000,
+  serial, in the milliseconds range), and `parse_rfc2047_headers` (a ~30 KB header block
+  with encoded words throughout, the one path no other gated benchmark touches). Each
+  asserts correctness once outside the timed call, including `warnings == []`, so none of
+  them can be timing a repair. The RFC 2047 input is built in the benchmark module rather
+  than committed to `tests/data/`, where every `.eml` is auto-enrolled in eight correctness
+  suites. Quoted-printable coverage arrived earlier with #229. Test-only: the extension is
+  byte-identical.
+
+### Changed
+
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in
   this library that still ran byte-at-a-time: `decode_quoted_printable` handed the whole
   body to the `quoted_printable` crate, which copies it char by char into a `String`
