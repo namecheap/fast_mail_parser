@@ -17,12 +17,15 @@
 // The parsing core is its own crate now (#236), so it can be tested directly
 // and cannot accidentally acquire a PyO3 dependency. Aliased to the old module
 // name so every call site below reads unchanged.
+mod convert;
+
+use convert::{children_list, date_parsed, decode_into, push_slot, strict_gate};
 use fast_mail_parser_core as mail_parser;
 
 use fast_mail_parser_core::MailParseError;
 use pyo3::prelude::*;
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
-use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
+use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
 use std::sync::{Arc, OnceLock};
@@ -325,11 +328,7 @@ impl PyMailMetadata {
     /// metadata mode is for.
     #[getter]
     fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
-        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
-            return Ok(None);
-        };
-        let utc = PyTzInfo::utc(py)?;
-        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+        date_parsed(py, &self.date)
     }
 
     fn __repr__(&self) -> String {
@@ -431,7 +430,7 @@ impl PyMimePart {
     /// The parts nested directly inside this one, in message order.
     #[getter]
     fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
-        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+        children_list(py, &self.children)
     }
 
     fn __repr__(&self) -> String {
@@ -514,7 +513,7 @@ impl PyMimePartMetadata {
     /// The parts nested directly inside this one, in message order.
     #[getter]
     fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
-        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+        children_list(py, &self.children)
     }
 
     fn __repr__(&self) -> String {
@@ -579,7 +578,7 @@ impl PyLazyMimePart {
     /// The parts nested directly inside this one, in message order.
     #[getter]
     fn children<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
-        PyList::new(py, self.children.iter().map(|child| child.clone_ref(py)))
+        children_list(py, &self.children)
     }
 
     /// Transfer-decoded bytes of a leaf, decoded on first access and cached, or
@@ -630,15 +629,8 @@ impl PyLazyMimePart {
     /// Decode this part and publish the result, exactly as `PyLazyAttachment`
     /// does -- see the long note there for why a race duplicates work rather than
     /// needing a lock, and why the GIL is released for the decode.
-    #[cold]
-    #[inline(never)]
     fn decode<'py>(&self, py: Python<'py>, raw: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
-        let decoded = py
-            .detach(|| mail_parser::decode_part(raw))
-            .map_err(to_py_err)?;
-        let bytes = PyBytes::new(py, decoded.as_slice()).unbind();
-
-        Ok(self.content.get_or_init(|| bytes).bind(py).clone())
+        decode_into(py, &self.content, raw)
     }
 }
 
@@ -943,11 +935,7 @@ impl PyMail {
 
     #[getter]
     fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
-        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
-            return Ok(None);
-        };
-        let utc = PyTzInfo::utc(py)?;
-        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+        date_parsed(py, &self.date)
     }
 }
 
@@ -1130,16 +1118,8 @@ impl PyLazyAttachment {
     ///
     /// `#[cold]` and out of line: it runs at most once per attachment, and the
     /// hot path through the getter above is the cached one.
-    #[cold]
-    #[inline(never)]
     fn decode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let raw = self.raw.bytes();
-        let decoded = py
-            .detach(|| mail_parser::decode_part(raw))
-            .map_err(to_py_err)?;
-        let bytes = PyBytes::new(py, decoded.as_slice()).unbind();
-
-        Ok(self.content.get_or_init(|| bytes).bind(py).clone())
+        decode_into(py, &self.content, self.raw.bytes())
     }
 }
 
@@ -1197,11 +1177,7 @@ impl PyLazyMail {
     /// The `Date` header as an aware `datetime`, or `None` if unparseable.
     #[getter]
     fn date_parsed<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDateTime>>> {
-        let Some(epoch) = mail_parser::parse_date_epoch(&self.date) else {
-            return Ok(None);
-        };
-        let utc = PyTzInfo::utc(py)?;
-        PyDateTime::from_timestamp(py, epoch as f64, Some(&utc)).map(Some)
+        date_parsed(py, &self.date)
     }
 
     fn __repr__(&self) -> String {
@@ -1505,15 +1481,11 @@ fn parse_email_strict_mode(py: Python<'_>, payload: Py<PyAny>, mode: &str) -> Py
     catch_panics(|| {
         if lazy {
             let mail = parse_lazy_inner(py, payload)?;
-            if !mail.warnings.is_empty() {
-                return Err(strict_rejection(&mail.warnings));
-            }
+            strict_gate(true, &mail.warnings)?;
             return Ok(Py::new(py, mail)?.into_any());
         }
         let mail = parse_email_inner(py, payload)?;
-        if !mail.warnings.is_empty() {
-            return Err(strict_rejection(&mail.warnings));
-        }
+        strict_gate(true, &mail.warnings)?;
         Ok(Py::new(py, mail)?.into_any())
     })
 }
@@ -1750,24 +1722,14 @@ fn parse_many_inner(
         let outcome = match result {
             Ok(mail) => {
                 let mail = PyMail::from_mail(py, mail)?;
-                if strict && !mail.warnings.is_empty() {
-                    Err(strict_rejection(&mail.warnings))
-                } else {
-                    Ok(mail)
+                match strict_gate(strict, &mail.warnings) {
+                    Ok(()) => Ok(Py::new(py, mail)?.into_any()),
+                    Err(err) => Err(err),
                 }
             }
             Err(error) => Err(to_py_err(error)),
         };
-        match outcome {
-            Ok(mail) => items.append(Py::new(py, mail)?)?,
-            Err(err) => {
-                if raise_on_error {
-                    return Err(err);
-                }
-                // The exception object itself, not a raise.
-                items.append(err.value(py))?;
-            }
-        }
+        push_slot(py, &items, outcome, raise_on_error)?;
     }
     Ok(items.unbind())
 }
@@ -1801,20 +1763,16 @@ fn parse_many_metadata(
         mail_parser::parse_many_as(&messages, workers, mail_parser::parse_email_metadata)
     });
 
+    // No strict arm: this mode never reads a body, so it has no warning list to
+    // judge and `strict=True` was rejected at the boundary. The slot semantics are
+    // the same ones, though, which is why it goes through the same helper.
     let items = PyList::empty(py);
     for result in parsed {
-        match result {
-            Ok(metadata) => {
-                items.append(Py::new(py, PyMailMetadata::from_metadata(metadata))?)?;
-            }
-            Err(error) => {
-                let err = to_py_err(error);
-                if raise_on_error {
-                    return Err(err);
-                }
-                items.append(err.value(py))?;
-            }
-        }
+        let outcome = match result {
+            Ok(metadata) => Ok(Py::new(py, PyMailMetadata::from_metadata(metadata))?.into_any()),
+            Err(error) => Err(to_py_err(error)),
+        };
+        push_slot(py, &items, outcome, raise_on_error)?;
     }
     Ok(items.unbind())
 }
@@ -1860,23 +1818,14 @@ fn parse_many_lazy(
         let outcome = match result {
             Ok(mail) => {
                 let mail = PyLazyMail::from_lazy(py, mail, message)?;
-                if strict && !mail.warnings.is_empty() {
-                    Err(strict_rejection(&mail.warnings))
-                } else {
-                    Ok(mail)
+                match strict_gate(strict, &mail.warnings) {
+                    Ok(()) => Ok(Py::new(py, mail)?.into_any()),
+                    Err(err) => Err(err),
                 }
             }
             Err(error) => Err(to_py_err(error)),
         };
-        match outcome {
-            Ok(mail) => items.append(Py::new(py, mail)?)?,
-            Err(err) => {
-                if raise_on_error {
-                    return Err(err);
-                }
-                items.append(err.value(py))?;
-            }
-        }
+        push_slot(py, &items, outcome, raise_on_error)?;
     }
     Ok(items.unbind())
 }
