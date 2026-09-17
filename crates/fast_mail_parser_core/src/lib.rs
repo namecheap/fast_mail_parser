@@ -693,6 +693,160 @@ fn part_identity(part: &ParsedMail<'_>, disposition: &ParsedContentDisposition) 
     }
 }
 
+/// How a mode turns one non-body part into its own attachment type (#234).
+///
+/// The other half of what the three flat parsers had in common. `classify_part`
+/// shared the rule; this shares the loop the rule is applied in -- the
+/// `get_body_encoded` that every part needs exactly once, the quoted-printable
+/// escape check, the warning indices, and the `text/plain` vs `text/html`
+/// dispatch. Full and lazy mode must produce the *same warning list* for the same
+/// message, which is what lets `strict=True` mean one thing in both; that was two
+/// copies kept in step by hand and a fuzz invariant to notice when they stopped
+/// being.
+///
+/// `payload` is the buffer being parsed. Full mode has no use for it -- it
+/// decodes into owned bytes -- and lazy mode needs it to record where a part sits
+/// (#239). One unused parameter in one implementation is cheaper than a second
+/// associated type with a lifetime.
+trait PartSink: Sized {
+    fn from_part(
+        part: &ParsedMail<'_>,
+        info: &PartInfo<'_>,
+        body: &Body<'_>,
+        payload: &[u8],
+    ) -> Result<Self, MailParseError>;
+}
+
+impl PartSink for Attachment {
+    fn from_part(
+        part: &ParsedMail<'_>,
+        info: &PartInfo<'_>,
+        body: &Body<'_>,
+        _payload: &[u8],
+    ) -> Result<Self, MailParseError> {
+        let identity = part_identity(part, &info.disposition);
+        Ok(Attachment {
+            mimetype: info.mime.to_string(),
+            // Byte-identical to `get_body_raw()`: same match, same arms. The `?`
+            // is the documented difference between the modes -- full mode fails
+            // the whole parse on a broken transfer encoding and the deferred
+            // modes do not, because only this one decodes here.
+            content: body_to_vec(body)?,
+            filename: identity.filename,
+            content_id: identity.content_id,
+            disposition: identity.disposition,
+        })
+    }
+}
+
+impl PartSink for LazyAttachment {
+    fn from_part(
+        part: &ParsedMail<'_>,
+        info: &PartInfo<'_>,
+        body: &Body<'_>,
+        payload: &[u8],
+    ) -> Result<Self, MailParseError> {
+        let identity = part_identity(part, &info.disposition);
+        Ok(LazyAttachment {
+            mimetype: info.mime.to_string(),
+            filename: identity.filename,
+            content_id: identity.content_id,
+            disposition: identity.disposition,
+            encoded_size: encoded_size(body),
+            // A range, not a copy: the bytes are already in the buffer being
+            // parsed, and copying them is what lazy mode exists to avoid (#239).
+            raw: Retained::of(payload, part.raw_bytes),
+        })
+    }
+}
+
+/// What the flat part loop produces, whatever an attachment is in that mode.
+struct FlatParts<A> {
+    attachments: Vec<A>,
+    text_plain: Vec<String>,
+    text_html: Vec<String>,
+}
+
+/// Walk a message's parts once, sorting them into bodies and attachments.
+///
+/// Deliberately *not* paired with a shared `FlatMail<A>` struct, which is what
+/// this issue originally sketched. `LazyMail` grew a `repaired` field in #239 that
+/// `Mail` has no use for, so one struct for both would give full mode a field
+/// that is always `None` -- and the loop, not the struct, is where the
+/// duplication that can go wrong lives. `Mail` and `LazyMail` keep their shapes,
+/// so the binding layer and the fuzz targets need no edits at all.
+///
+/// Not marked `#[inline(never)]`: each instantiation has exactly one call site,
+/// which is the property recorded on `Mail::from_payload` -- a second call site
+/// is a second chance to inline the whole parse body, and duplicating it there
+/// cost the flat path 28%.
+fn flat_parts<A: PartSink>(
+    mail: ParsedMail<'_>,
+    payload: &[u8],
+    warnings: &mut Vec<Warning>,
+) -> Result<FlatParts<A>, MailParseError> {
+    let mut attachments = Vec::new();
+    let mut text_plain = Vec::new();
+    let mut text_html = Vec::new();
+
+    for part in Mail::extract_mail_parts(mail, 0)? {
+        let Some(info) = classify_part(&part) else {
+            continue;
+        };
+
+        // One `get_body_encoded()` per part, threaded to everything below that
+        // needs it: the escape check, the encoded size, and the body decode. It
+        // re-reads the part's headers to find the transfer encoding, so calling
+        // it three times meant three lookups for one answer.
+        let body = part.get_body_encoded();
+
+        // Reads the *encoded* bytes and decodes nothing, so this check is as
+        // available to a mode that defers the decode as to one that does it --
+        // which is why the two modes report the same warnings even for a part
+        // whose content is never decoded. Reported below with the index the part
+        // actually lands at, so `part_path` locates it in the result.
+        let lossy_escape = quoted_printable_invalid_escape(&body);
+
+        if !info.is_body {
+            if let Some(at) = lossy_escape {
+                warn_transfer_decode(warnings, "attachments", attachments.len(), at);
+            }
+            attachments.push(A::from_part(&part, &info, &body, payload)?);
+            continue;
+        }
+
+        // Bodies are decoded the same way in every mode that reads them,
+        // including the error a broken transfer encoding raises. For text parts
+        // the string is built from the bytes just decoded rather than by calling
+        // `get_body()`, which would re-run the identical transfer decode;
+        // `decode_charset` performs only the charset step, so the result matches
+        // mailparse's `get_body` output byte-for-byte.
+        let (text, fell_back) = decode_body(&body, &part.ctype)?;
+
+        // Only `text/plain` and `text/html` reach here: `is_body` is false for
+        // every other media type.
+        let (field, into) = if info.mime == "text/html" {
+            ("text_html", &mut text_html)
+        } else {
+            ("text_plain", &mut text_plain)
+        };
+
+        if fell_back {
+            warn_charset(warnings, field, into.len(), &part.ctype.charset);
+        }
+        if let Some(at) = lossy_escape {
+            warn_transfer_decode(warnings, field, into.len(), at);
+        }
+        into.push(text);
+    }
+
+    Ok(FlatParts {
+        attachments,
+        text_plain,
+        text_html,
+    })
+}
+
 /// Every value of every header, keyed by name, in first-appearance key order.
 ///
 /// Repeated keys keep all their values: collapsing to one kept only the last,
@@ -1086,77 +1240,11 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
         warn_date(&mut warnings, &date);
     }
 
-    let mut attachments = vec![];
-    let mut text_plain = vec![];
-    let mut text_html = vec![];
-
-    for part in Mail::extract_mail_parts(mail, 0)? {
-        let Some(info) = classify_part(&part) else {
-            continue;
-        };
-        let mime = info.mime;
-
-        // One `get_body_encoded()` per part, threaded to everything below that
-        // needs it: the escape check, the encoded size, and the body decode. It
-        // re-reads the part's headers to find the transfer encoding, so calling
-        // it three times meant three lookups for one answer.
-        let body = part.get_body_encoded();
-
-        // Reads the *encoded* bytes and decodes nothing, so this check is as
-        // available here as in full mode -- which is why the two modes report
-        // the same warnings even for a part whose content is never decoded.
-        let lossy_escape = quoted_printable_invalid_escape(&body);
-
-        if !info.is_body {
-            if let Some(at) = lossy_escape {
-                warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
-            }
-
-            let identity = part_identity(&part, &info.disposition);
-
-            attachments.push(LazyAttachment {
-                mimetype: mime.to_string(),
-                filename: identity.filename,
-                content_id: identity.content_id,
-                disposition: identity.disposition,
-                encoded_size: encoded_size(&body),
-                // The one copy this mode makes, and what makes it a trade rather
-                // than a free win. It is the encoded part, not the decoded one.
-                // A range, not a copy: the bytes are already in the buffer
-                // being parsed, and copying them is what lazy mode exists to
-                // avoid.
-                raw: Retained::of(payload, part.raw_bytes),
-            });
-            continue;
-        }
-
-        // Bodies are decoded exactly as the full parse decodes them, including
-        // the error a broken transfer encoding raises: this mode defers the
-        // attachments and nothing else.
-        let (text, fell_back) = decode_body(&body, &part.ctype)?;
-
-        if mime == "text/html" {
-            if fell_back {
-                let index = text_html.len();
-                warn_charset(&mut warnings, "text_html", index, &part.ctype.charset);
-            }
-            if let Some(at) = lossy_escape {
-                warn_transfer_decode(&mut warnings, "text_html", text_html.len(), at);
-            }
-            text_html.push(text);
-        } else {
-            // Only `text/plain` reaches here: `is_body` is false for every other
-            // media type.
-            if fell_back {
-                let index = text_plain.len();
-                warn_charset(&mut warnings, "text_plain", index, &part.ctype.charset);
-            }
-            if let Some(at) = lossy_escape {
-                warn_transfer_decode(&mut warnings, "text_plain", text_plain.len(), at);
-            }
-            text_plain.push(text);
-        }
-    }
+    let FlatParts {
+        attachments,
+        text_plain,
+        text_html,
+    } = flat_parts::<LazyAttachment>(mail, payload, &mut warnings)?;
 
     Ok(LazyMail {
         // Filled by the caller, which is the only place that knows whether a
@@ -1717,78 +1805,11 @@ impl<'a> Mail {
             warn_date(&mut warnings, &date);
         }
 
-        let mut attachments = vec![];
-        let mut text_plain = vec![];
-        let mut text_html = vec![];
-
-        for part in Self::extract_mail_parts(mail, 0)? {
-            // The `multipart/*` skip and the RFC 2183 body-vs-attachment rule,
-            // shared with the other two flat modes so they cannot disagree about
-            // what a part is (#234).
-            let Some(info) = classify_part(&part) else {
-                continue;
-            };
-            let mime = info.mime;
-
-            // Undo the Content-Transfer-Encoding (e.g. base64/quoted-printable)
-            // exactly once. `?` propagates a broken transfer encoding instead of
-            // swallowing it with `unwrap_or_default()`, which would silently turn
-            // corruption into an empty body; the PyO3 layer surfaces the error to
-            // Python as `ParseError`.
-            // One `get_body_encoded()` per part, threaded to everything below
-            // that needs it. It re-reads the part's headers to find the transfer
-            // encoding, so calling it once for the escape check and again for the
-            // decode meant two lookups for one answer.
-            let body = part.get_body_encoded();
-
-            // Checked once per part, reported below with the index the part
-            // actually lands at, so `part_path` locates it in the result.
-            let lossy_escape = quoted_printable_invalid_escape(&body);
-
-            if !info.is_body {
-                if let Some(at) = lossy_escape {
-                    warn_transfer_decode(&mut warnings, "attachments", attachments.len(), at);
-                }
-
-                let identity = part_identity(&part, &info.disposition);
-
-                attachments.push(Attachment {
-                    mimetype: mime.to_string(),
-                    // Byte-identical to `get_body_raw()`: same match, same arms.
-                    content: body_to_vec(&body)?,
-                    filename: identity.filename,
-                    content_id: identity.content_id,
-                    disposition: identity.disposition,
-                });
-            } else if mime == "text/html" {
-                // For text parts, build the Python-facing string from the bytes
-                // just decoded rather than calling `get_body()`, which would re-run
-                // the identical transfer decode. `decode_charset` performs only the
-                // charset step, so the result matches mailparse's `get_body` output
-                // byte-for-byte (see `decode_charset`).
-                let (text, fell_back) = decode_body(&body, &part.ctype)?;
-                if fell_back {
-                    let index = text_html.len();
-                    warn_charset(&mut warnings, "text_html", index, &part.ctype.charset);
-                }
-                if let Some(at) = lossy_escape {
-                    warn_transfer_decode(&mut warnings, "text_html", text_html.len(), at);
-                }
-                text_html.push(text);
-            } else {
-                // Only `text/plain` reaches here: `is_body` is false for every
-                // other media type.
-                let (text, fell_back) = decode_body(&body, &part.ctype)?;
-                if fell_back {
-                    let index = text_plain.len();
-                    warn_charset(&mut warnings, "text_plain", index, &part.ctype.charset);
-                }
-                if let Some(at) = lossy_escape {
-                    warn_transfer_decode(&mut warnings, "text_plain", text_plain.len(), at);
-                }
-                text_plain.push(text);
-            }
-        }
+        let FlatParts {
+            attachments,
+            text_plain,
+            text_html,
+        } = flat_parts::<Attachment>(mail, payload, &mut warnings)?;
 
         Ok(Self {
             subject,

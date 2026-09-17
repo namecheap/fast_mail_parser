@@ -614,3 +614,78 @@ def test__base64_is_not_scanned_for_quoted_printable_escapes():
 
     assert mail.warnings == []
     assert mail.text_plain == ["hello"]
+
+
+# --- ordering and per-channel indices, across modes ----------------------------
+
+# One message that trips every warning kind, twice over for two of the three
+# channels, so the list has an order and the indices have to count per channel
+# rather than per part. Added with #234 step 2, where full and lazy mode stopped
+# owning a copy of the part loop each and started sharing one: the thing a shared
+# loop can quietly break is not *whether* a repair is reported but where it says
+# it happened, and in what order.
+MANY_WARNINGS = (
+    b"Subject: many warnings\r\n"
+    b"Date: not a date at all\r\n"
+    b"From: <<<broken\r\n"
+    b'Content-Type: multipart/mixed; boundary="b"\r\n'
+    b"\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/plain; charset=definitely-not-a-charset\r\n\r\n"
+    b"first plain body\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/html; charset=utf-8\r\n"
+    b"Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+    b"<p>bad escape =ZZ here</p>\r\n"
+    b"--b\r\n"
+    b"Content-Type: application/pdf\r\n"
+    b"Content-Disposition: attachment; filename=a.pdf\r\n"
+    b"Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+    b"also =QQ bad\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/plain; charset=another-bogus-one\r\n\r\n"
+    b"second plain body\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/html; charset=yet-another-bogus\r\n\r\n"
+    b"<p>second html</p>\r\n"
+    b"--b--\r\n"
+)
+
+EXPECTED_WARNINGS = [
+    # Envelope first, in header order, before any part is visited.
+    ("address-unparseable", ""),
+    ("date-unparseable", ""),
+    # Then the parts, in visit order, each naming the slot its content landed in.
+    ("charset-fallback", "text_plain[0]"),
+    ("transfer-decode-lossy", "text_html[0]"),
+    ("transfer-decode-lossy", "attachments[0]"),
+    ("charset-fallback", "text_plain[1]"),
+    ("charset-fallback", "text_html[1]"),
+]
+
+
+@pytest.mark.parametrize("mode", ["full", "lazy"])
+def test__warning_order_and_indices_are_the_same_in_every_mode(mode: str):
+    mail = parse_email(MANY_WARNINGS) if mode == "full" else parse_email(
+        MANY_WARNINGS, mode="lazy"
+    )
+
+    assert [(w.kind, w.part_path) for w in mail.warnings] == EXPECTED_WARNINGS
+
+    # The indices are only meaningful if they point at something: `text_html[1]`
+    # has to be the second HTML body, not the fifth part.
+    assert mail.text_plain == ["first plain body", "second plain body"]
+    assert mail.text_html == ["<p>bad escape =ZZ here</p>", "<p>second html</p>"]
+    assert [a.filename for a in mail.attachments] == ["a.pdf"]
+
+
+def test__full_and_lazy_report_the_identical_warning_list():
+    # Not just the same kinds and paths -- the same detail strings, because
+    # `strict=True` raises with the first warning's text and must raise the same
+    # exception in both modes.
+    full = parse_email(MANY_WARNINGS)
+    lazy = parse_email(MANY_WARNINGS, mode="lazy")
+
+    assert [(w.kind, w.part_path, w.detail) for w in full.warnings] == [
+        (w.kind, w.part_path, w.detail) for w in lazy.warnings
+    ]
