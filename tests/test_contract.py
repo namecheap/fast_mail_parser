@@ -221,6 +221,15 @@ def test__non_ascii_str_decodes_as_utf8():
     assert from_str.headers == from_bytes.headers
 
 
+def test__str_with_lone_surrogate_raises_type_error():
+    # A lone surrogate has no UTF-8 form, so there is no buffer to read and
+    # nothing to parse. Pinned here (#226) because the borrow rewrite moved the
+    # failure from `PyString::to_str` to `PyBackedStr::try_from`: same point in
+    # the same fall-through, and this asserts the caller cannot tell.
+    with pytest.raises(TypeError):
+        parse_email("Subject: x\r\n\r\n\udcff")
+
+
 # --- error contract ---------------------------------------------------------
 
 

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`str` payloads are borrowed instead of copied** (#226). `parse_email`,
+  `parse_email_tree` and every `str` slot of `parse_many` duplicated the whole
+  message into a fresh `Vec<u8>` before parsing. `bytes` stopped being copied in
+  #96; `str` was left behind on the premise that the limited API has no UTF-8
+  buffer to borrow, which is not true for the ABI this crate builds -- `abi3-py311`
+  sets the `Py_3_10` cfg, under which `PyString::to_str` is the zero-copy
+  `PyUnicode_AsUTF8AndSize` the code already called one line before the copy.
+  `Payload` now holds a `PyBackedStr` for `str` exactly as it holds a
+  `PyBackedBytes` for `bytes`, and has no owned variant left. No API change: `str`
+  and `bytes` still produce identical results, non-text input still raises
+  `TypeError`, and so does a `str` holding a lone surrogate (now pinned by a test
+  that also passes against 0.9.0). Measured on an Apple M4 (10 vCPU), 5 interleaved
+  rounds, controls within 1.6%: the new `mode="metadata"` benchmark fed a `str`
+  **0.038 -> 0.030 ms (-21%)**, which is the `bytes` path's own 0.030 ms to three
+  decimals -- the marshalling cost is gone rather than reduced -- and the str-fed
+  gate benchmark `parse_message` **0.243 -> 0.232 ms (-4.5%)**, `parse_message_strict`
+  0.240 -> 0.230 ms. Every bytes-fed benchmark stayed within 0.9%, so this is not a
+  code-layout effect (#204).
+
 - **Fuzzing: the initial 24 CPU-hour campaign ran, found nothing, and its corpus now
   seeds the deep run** (#102). Two targets, 8,640 s x 5 workers each on an Apple M4:
   `parse_email` 12.1 M executions to 5,047 edges, `parse_agreement` 5.5 M to 5,502,

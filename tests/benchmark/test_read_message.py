@@ -280,6 +280,31 @@ def test__fast_mail_parser___parse_metadata(large_message: str, benchmark: Calla
     benchmark(lambda: parse_email(payload, mode="metadata"))
 
 
+def test__fast_mail_parser___parse_metadata_str(large_message: str, benchmark: Callable):
+    """`mode="metadata"` fed a `str` rather than `bytes` (#226).
+
+    The benchmark above and this one do identical parsing work on identical bytes;
+    the only difference is how the payload crosses the boundary. Metadata mode is
+    the mode that makes the marshalling visible -- the parse itself is ~0.030 ms on
+    an M4, the same order as a 785 KiB copy -- so the gap between this pair is the
+    cost of accepting a `str`, read off in one round on one machine.
+
+    Guarded like its sibling, for the same reason: the gate measures this
+    revision's benchmarks against the BASE revision's build (#168), so a base
+    predating `mode=` must skip here rather than raise.
+    """
+    import pytest
+
+    from fast_mail_parser import parse_email
+
+    try:
+        parse_email(large_message, mode="metadata")
+    except TypeError:
+        pytest.skip("this build predates parse_email(mode=...)")
+
+    benchmark(lambda: parse_email(large_message, mode="metadata"))
+
+
 def test__fast_mail_parser___parse_lazy_untouched(large_message: str, benchmark: Callable):
     # #97's lazy mode with nothing read: the parse decodes the bodies and defers
     # every attachment, so on this fixture -- 99% attachment by decoded content --
