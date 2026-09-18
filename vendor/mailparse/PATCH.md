@@ -50,6 +50,25 @@ what the code it replaces returned.
    encoded-word path in `src/header.rs` still uses the crate -- header-sized inputs, and
    different semantics (`_` -> space, trailing-whitespace restore).
 
+   Two things in it are shaped by measurement rather than taste, and both were found by
+   comparing against the crate this replaced on a body that is *mostly* escapes -- the
+   shape the original rewrite never had a benchmark for, and on which it decoded 42%
+   slower than the code it replaced:
+
+   - `decode_line` looks at the byte under the cursor before reaching for `memchr`. After
+     an escape the next byte is very often another `=`, because every non-ASCII character
+     encodes as two or three consecutive escapes, and calling `memchr` to be told the
+     match is at offset 0 pays its SIMD setup for nothing. On the dense shape that call
+     happened 40,000 times. With the check, decoding is faster than the crate on that
+     shape *and* ~20% faster on ordinary mail.
+   - `is_kept` is written as arithmetic (`b - 0x20 < 0x5F`, `b - 9 < 2`, `b == 0x0D`)
+     rather than a `matches!` pattern, so that `first_dropped`'s chunk reduction has no
+     branches and LLVM can vectorise it. `position` cannot be vectorised -- it has to stop
+     at the first hit -- so the rule-1 pre-scan walks 32-byte chunks reduced with `|=` and
+     only falls back to a byte-wise scan inside the chunk that failed. On 120 KB with no
+     dropped bytes, which is nearly every real body, that scan went from 63 us to 5.5 us.
+     `is_kept_is_the_same_set` checks all 256 bytes against the original spelling.
+
 `diff -r` against the registry copy shows exactly `src/bytescan.rs`, `src/qp.rs`,
 `src/lib.rs` (two `mod` lines and one function), `src/body.rs` (two functions and a
 `mod tests`), `Cargo.toml` and this file.
