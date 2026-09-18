@@ -13,7 +13,7 @@ discuss what you would like to change.
 ## Prerequisites
 
 - **Rust** — the toolchain is pinned in
-  [`rust-toolchain.toml`](rust-toolchain.toml) to **1.98.0**; if you use
+  [`rust-toolchain.toml`](rust-toolchain.toml) to **1.98.1**; if you use
   `rustup`, the correct version is selected automatically in this directory.
   The pin is deliberate: the benchmark gate builds both sides with the same
   compiler, so a compiler change is the one regression it cannot see — bump the
@@ -310,7 +310,7 @@ Two things to know before changing anything in `src/`:
 **This crate is unusually sensitive to codegen.** A rustc minor version alone
 moved the parse path 15-96% (#120), which is why `rust-toolchain.toml` pins one.
 That case has since been traced to two loops and fixed -- see below -- and the
-pin has moved on to 1.98.0, but the lesson stands: do not assume a change is
+pin has moved on past it, but the lesson stands: do not assume a change is
 free because it looks free.
 
 **Cold code can slow the hot path.** `catch_panics` is generic, so every entry

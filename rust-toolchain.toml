@@ -23,6 +23,9 @@
 # With those loops replaced (vendor/mailparse, PRs #213 and #214) the same A/B
 # reads 1.98.0 within +/-0.5% of 1.97.1 on the CPU that showed the worst of it,
 # so the pin moved to 1.98.0 on 2026-08-27. See CONTRIBUTING.md, Performance.
+# 1.98.1 measured within +/-1.9% of 1.98.0 on an EPYC 7763 -- inside the 1.8%
+# control noise floor, verdict "no significant difference" -- so the pin moved
+# to 1.98.1 on 2026-09-18.
 #
 # Precedence, verified in CI: this file beats dtolnay/rust-toolchain's
 # `toolchain:` input, and an explicit RUSTUP_TOOLCHAIN env var beats this file.
@@ -32,4 +35,4 @@
 # job intentionally opt out via RUSTUP_TOOLCHAIN, since a tool's needs are not
 # the library's build.
 [toolchain]
-channel = "1.98.0"
+channel = "1.98.1"

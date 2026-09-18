@@ -30,7 +30,7 @@ on:
     inputs:
       baseline:
         description: "Toolchain to compare against (the current pin)"
-        default: "1.98.0"
+        default: "1.98.1"
       candidate:
         description: "Toolchain to evaluate (a version, or `stable`)"
         default: "stable"
