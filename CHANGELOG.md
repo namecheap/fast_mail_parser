@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Internal: the binding layer is split into modules, with shared getters and batch-slot
+  helpers** (#233). The crate root was the 2000-line binding file and had one module boundary in
+  it, so a change to one mode could not be reviewed without loading the other seventeen hundred
+  lines. It is now the module list and the `#[pymodule]`, over `errors`, `payload`, `convert`,
+  `metadata`, `flat`, `lazy`, `tree` and `api`. Alongside it, the copies inside the binding are
+  gone: `date_parsed` had three, `children` three, the decode-and-cache body two, the strict gate
+  four and the `parse_many` result loop three. The strict rejection's message and what
+  `raise_on_error=False` puts in a failed slot are part of the API, and four copies of those were
+  four chances for them to stop agreeing. Code was moved, not edited; every `#[inline(never)]`,
+  `#[cold]` and `#[inline(always)]` stayed on the item it was on (21, 5 and 1, unchanged). No
+  behaviour or performance change: measured flat, worst real movement +1.2% against a 2.2% noise
+  floor.
+
 - **One envelope reader and one part classifier across the flat parsers** (#234). `Mail::from_payload`,
   `lazy_from_payload` and `metadata_from_payload` each carried their own copy of the eleven-statement
   envelope extraction (header map, Subject, Date, From/To/Cc/Bcc/Reply-To) and of the per-part
@@ -23,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same helper the flat modes do, so a part cannot answer to a different name depending on which
   API asked. Body parts also stop deriving a filename they never used. No behaviour change, and the
   RFC 2183 rule gets a direct unit test instead of only three end-to-end ones.
+
+  The part *loop* is now shared too, not just the rule: full and lazy mode ran two copies of the
+  same walk -- one `get_body_encoded()` per part, the quoted-printable escape check, the warning
+  indices, and the `text/plain` vs `text/html` dispatch -- differing only in what an attachment is
+  made of. That is now `flat_parts::<A>` over a `PartSink` trait, with one call site per
+  instantiation so no parse body gains a second chance to inline (the property that cost the flat
+  path 28% when it was lost). `warn_charset` goes from four call sites to one and
+  `warn_transfer_decode` from six to two. The two modes are required to report the *identical*
+  warning list -- that is what lets `strict=True` mean one thing in both -- and it was two
+  hand-maintained copies that had to agree; now it is one. `Mail` and `LazyMail` keep their own
+  shapes rather than becoming one generic struct, because `LazyMail` carries the `repaired` buffer
+  that full mode has no use for. Measured flat.
 
 - **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
   `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
