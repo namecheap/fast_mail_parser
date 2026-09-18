@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Lazy modes borrow the payload instead of copying every deferred part** (#239). Deferring
+  a decode used to copy the part's encoded bytes out of the message, which is the opposite
+  of what deferring is for: parsing a 96 MiB single-attachment message in `mode="lazy"` cost
+  96 MiB *on top of* the payload the caller still held, and base64 is 1.33x what it encodes,
+  so a retained part could cost more than the decoded bytes it avoided producing. A deferred
+  part now keeps its offsets in the buffer it was parsed from, and the result keeps that
+  buffer alive. Measured on a 96 MiB message with one unread attachment: peak RSS 192.3 MiB
+  before, 96.2 MiB after. Counted in the core, on the attachment-heavy fixture: a lazy tree
+  peaked at 798,111 bytes and now peaks at 14,332 -- the same as a metadata tree, because a
+  range is not a copy -- and a flat lazy parse dropped from 790,993 to 23,398.
+
+  **This changes the memory contract, and is the reason to read this entry.** A `PyLazyMail`
+  attachment or a `PyLazyMimePart` leaf pins the payload it was parsed from for as long as it
+  is reachable, so keeping one attachment out of a mailbox keeps that whole message rather
+  than just the part. The pin is per message even in `parse_many`, so one slot never holds
+  another's payload. A caller who wants the bytes without the message reads `content`, which
+  is a decoded copy, and drops the attachment. Nothing about the values changes: every mode
+  returns what it returned, including for a message whose header block had to be repaired
+  (#150), where the offsets index the rebuilt copy that now travels with the result.
+
+  One exception, invisible from Python: the leaves *inside* a `message/rfc822` node still hold
+  copies. Their bytes were produced by decoding that node's body, so they are in no caller
+  buffer to point into.
+
 - **The parsing core is a crate, and has Rust tests for the first time** (#236). It was a
   `#[path]`-included file: the binding declared it as a module, and both fuzz targets
   reached across the tree to include the same source again under different cfg. Nothing

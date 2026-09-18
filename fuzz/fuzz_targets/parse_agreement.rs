@@ -28,11 +28,12 @@
 //!    flat parse's headers -- the root is the same message, so they cannot differ
 //!    without one derivation having drifted from the other.
 //! 7. **A deferred decode equals the full parse's content.** This is the load-
-//!    bearing one for lazy mode: it retains a copy of each part exactly as it sits
-//!    in the message and decodes that copy on demand, which reproduces the full
-//!    parse's bytes only if mailparse's `raw_bytes` really is that part and
-//!    nothing else. Arbitrary input is the right place to test a claim about a
-//!    parser's slicing. The envelope, the bodies and the whole warning list must
+//!    bearing one for lazy mode: it retains each part's *offsets* in the buffer it
+//!    was parsed from (#239) and decodes those bytes on demand, which reproduces
+//!    the full parse's bytes only if mailparse's `raw_bytes` really is that part
+//!    and the offsets really are its offsets. Arbitrary input is the right place
+//!    to test a claim about a parser's slicing, and doubly so now that the claim
+//!    is arithmetic: a range that is off by one still decodes, to something else. The envelope, the bodies and the whole warning list must
 //!    agree too -- the last of those is what lets `strict=True` mean the same
 //!    thing in both modes.
 //! 8. **A tree is the same tree in all three modes** (#202). `mode=` on
@@ -145,8 +146,14 @@ fn full_bodies(part: &mail_parser::MimePart, out: &mut Vec<Option<Vec<u8>>>) {
 /// A leaf that cannot decode from its retained bytes returns an `Err`, which is a
 /// failure of the retention rather than of the message -- the full parse decoded
 /// the same part.
+///
+/// `base` is the buffer a leaf's offsets index (#239): the input, or the repaired
+/// rebuild the tree carries when the header block had to be resynced. Resolving
+/// the range here is what makes this check cover the offsets themselves -- a
+/// range that is off by a byte decodes to something else, or fails to decode.
 fn deferred_bodies(
     node: &mail_parser::TreeNode,
+    base: &[u8],
     out: &mut Vec<Option<Vec<u8>>>,
 ) -> Result<(), ()> {
     match &node.body {
@@ -154,11 +161,13 @@ fn deferred_bodies(
         mail_parser::NodeBody::Decoded { content, .. } => out.push(Some(content.clone())),
         mail_parser::NodeBody::Undecoded { raw, .. } => {
             let raw = raw.as_ref().ok_or(())?;
-            out.push(Some(mail_parser::decode_part(raw).map_err(|_| ())?));
+            out.push(Some(
+                mail_parser::decode_part(raw.slice(base)).map_err(|_| ())?,
+            ));
         }
     }
     for child in &node.children {
-        deferred_bodies(child, out)?;
+        deferred_bodies(child, base, out)?;
     }
     Ok(())
 }
@@ -273,6 +282,11 @@ fuzz_target!(|data: &[u8]| {
             "attachment count disagrees"
         );
 
+        // What the attachments' offsets index: the input, unless the header block
+        // had to be repaired, in which case the parse ran over the rebuild and
+        // the result carries it (#239).
+        let lazy_base = lazy.repaired.as_deref().unwrap_or(data);
+
         for (decoded, deferred) in full.attachments.iter().zip(&lazy.attachments) {
             assert_eq!(decoded.mimetype, deferred.mimetype, "mimetype disagrees");
             assert_eq!(decoded.filename, deferred.filename, "filename disagrees");
@@ -289,7 +303,7 @@ fuzz_target!(|data: &[u8]| {
             // what the full parse decoded from it. A part the full parse decoded
             // must also decode from its retained bytes -- if it cannot, the
             // retained slice is not the part.
-            let content = mail_parser::decode_part(&deferred.raw).expect(
+            let content = mail_parser::decode_part(deferred.raw.slice(lazy_base)).expect(
                 "a part the full parse decoded failed to decode from its \
                  retained bytes",
             );
@@ -358,12 +372,12 @@ fuzz_target!(|data: &[u8]| {
         let shape = canonical_full(full);
         assert_eq!(
             shape,
-            canonical_node(&described),
+            canonical_node(&described.root),
             "the metadata tree's shape disagrees with full mode"
         );
         assert_eq!(
             shape,
-            canonical_node(&deferred),
+            canonical_node(&deferred.root),
             "the lazy tree's shape disagrees with full mode"
         );
 
@@ -371,9 +385,9 @@ fuzz_target!(|data: &[u8]| {
         // must be one answer across the two deferred modes -- `encoded_size is
         // None` is the same question as `content is None`.
         let mut sizes = Vec::new();
-        node_sizes(&described, &mut sizes);
+        node_sizes(&described.root, &mut sizes);
         let mut deferred_sizes = Vec::new();
-        node_sizes(&deferred, &mut deferred_sizes);
+        node_sizes(&deferred.root, &mut deferred_sizes);
         assert_eq!(
             sizes, deferred_sizes,
             "the two deferred modes disagree about encoded sizes"
@@ -406,7 +420,11 @@ fuzz_target!(|data: &[u8]| {
         // The claim the lazy tree rests on, and the one flat lazy mode cannot
         // reach: a retained *root* re-parses to the part it was taken from.
         let mut produced = Vec::new();
-        deferred_bodies(&deferred, &mut produced)
+        deferred_bodies(
+            &deferred.root,
+            deferred.repaired.as_deref().unwrap_or(data),
+            &mut produced,
+        )
             .expect("a node the full parse decoded failed to decode from its retained bytes");
         assert_eq!(
             expected, produced,

@@ -773,6 +773,87 @@ fn metadata_from_payload(payload: &[u8]) -> Result<MailMetadata, MailParseError>
 /// encodes, so a retained part costs *more* than the decoded bytes it avoids
 /// producing -- right for finding the one PDF in a mailbox, wrong for decoding
 /// everything anyway.
+/// Where a deferred leaf's encoded bytes live.
+///
+/// Lazy mode used to copy every deferred part out of the message -- which is the
+/// opposite of what deferring is for. On a mailbox sweep looking for one PDF,
+/// the copies *are* the cost. The bytes are already in the buffer the caller
+/// handed us, so a range into that buffer is enough, provided the buffer outlives
+/// the result. That is the contract change: a `LazyMail` now pins its payload.
+///
+/// `Owned` is the exception rather than the rule, and there are exactly two of
+/// them: a leaf inside a decoded `message/rfc822` body, whose bytes were produced
+/// by decoding and are in no caller buffer, and a message whose header block had
+/// to be repaired (#150), where the parse ran over a rebuilt copy. The repaired
+/// copy is returned alongside the result so a range can still index it.
+#[derive(Debug)]
+pub enum Retained {
+    /// A sub-range of the buffer the message was parsed from.
+    Range(std::ops::Range<usize>),
+    /// An owned copy, for bytes that are in no caller buffer.
+    Owned(Vec<u8>),
+}
+
+impl Retained {
+    /// Retain `part`: as offsets when it is a subslice of `base`, as a copy when
+    /// it is not.
+    ///
+    /// mailparse's `raw_bytes` is a subslice of the buffer given to `parse_mail`
+    /// -- it is produced by slicing and never by copying -- so the range arm is
+    /// the one that is taken for every part of a message parsed in one piece.
+    /// The copy arm exists for the parts that genuinely are not in that buffer:
+    /// a leaf below a `message/rfc822` node, whose enclosing bytes had to be
+    /// transfer-decoded into a fresh `Vec` before the message inside could be
+    /// parsed at all.
+    ///
+    /// Checked rather than asserted. Computing offsets from a pointer that is not
+    /// in `base` would produce a range that indexes out of bounds later, far from
+    /// the mistake; the bounds test that avoids it is two comparisons against a
+    /// parse that has already walked every byte of the part. The debug assertion
+    /// still fires in the tests, so a new caller that expected to borrow and
+    /// silently copies is a test failure rather than a performance mystery.
+    pub fn of(base: &[u8], part: &[u8]) -> Retained {
+        let (base_start, part_start) = (base.as_ptr() as usize, part.as_ptr() as usize);
+        let within = part_start >= base_start && part_start + part.len() <= base_start + base.len();
+        debug_assert!(
+            within,
+            "retained bytes are not a subslice of the parsed buffer"
+        );
+        if within {
+            let start = part_start - base_start;
+            Retained::Range(start..start + part.len())
+        } else {
+            Retained::Owned(part.to_vec())
+        }
+    }
+
+    /// The bytes, given the buffer they were parsed from.
+    ///
+    /// `base` must be the buffer the parse ran over -- the caller's payload, or
+    /// the repaired copy the result carries when one was made. Indexing a
+    /// `Range` into anything else is a logic error that would silently return
+    /// the wrong bytes, which is why the repaired buffer travels with the result
+    /// instead of being dropped.
+    pub fn slice<'a>(&'a self, base: &'a [u8]) -> &'a [u8] {
+        match self {
+            Retained::Range(range) => &base[range.clone()],
+            Retained::Owned(bytes) => bytes,
+        }
+    }
+
+    /// The number of bytes retained, without needing the base buffer.
+    pub fn len(&self) -> usize {
+        match self {
+            Retained::Range(range) => range.len(),
+            Retained::Owned(bytes) => bytes.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 #[derive(Debug)]
 pub struct LazyAttachment {
     pub mimetype: String,
@@ -782,7 +863,9 @@ pub struct LazyAttachment {
     /// Bytes the part's body occupies before transfer-decoding -- the same value
     /// and the same name as in metadata mode.
     pub encoded_size: usize,
-    pub raw: Vec<u8>,
+    /// Where the part's encoded bytes are, relative to the buffer the parse ran
+    /// over: the caller's payload, or `LazyMail::repaired` when that is set.
+    pub raw: Retained,
 }
 
 /// A message with its bodies decoded and its attachments deferred (#97).
@@ -793,6 +876,13 @@ pub struct LazyAttachment {
 /// which is what lets `strict=True` mean the same thing in both modes.
 #[derive(Debug)]
 pub struct LazyMail {
+    /// The rebuilt payload, when the header block had to be repaired (#150).
+    ///
+    /// Returned rather than dropped because the attachments' `Retained::Range`
+    /// offsets are relative to whatever buffer the parse ran over, and for a
+    /// repaired message that is this copy, not the caller's payload. Dropping it
+    /// would leave ranges indexing a buffer that no longer matches.
+    pub repaired: Option<Vec<u8>>,
     pub subject: String,
     pub text_plain: Vec<String>,
     pub text_html: Vec<String>,
@@ -841,6 +931,9 @@ pub fn parse_email_lazy(payload: &[u8]) -> Result<LazyMail, MailParseError> {
     if repaired.is_some() {
         warn_separator(&mut mail.warnings);
     }
+    // The ranges in `mail.attachments` index whichever buffer was parsed, so the
+    // repaired copy has to travel with the result.
+    mail.repaired = repaired;
     Ok(mail)
 }
 
@@ -920,7 +1013,10 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
                 encoded_size: encoded_size(&body),
                 // The one copy this mode makes, and what makes it a trade rather
                 // than a free win. It is the encoded part, not the decoded one.
-                raw: part.raw_bytes.to_vec(),
+                // A range, not a copy: the bytes are already in the buffer
+                // being parsed, and copying them is what lazy mode exists to
+                // avoid.
+                raw: Retained::of(payload, part.raw_bytes),
             });
             continue;
         }
@@ -954,6 +1050,9 @@ fn lazy_from_payload(payload: &[u8]) -> Result<LazyMail, MailParseError> {
     }
 
     Ok(LazyMail {
+        // Filled by the caller, which is the only place that knows whether a
+        // repair happened.
+        repaired: None,
         subject,
         text_plain,
         text_html,
@@ -1075,9 +1174,15 @@ pub enum NodeBody {
     /// a later `decode_part` reproduce full mode's `content` -- the same
     /// mechanism, and the same claim, as flat lazy mode (#97). Metadata mode
     /// leaves it `None` and keeps only the size.
+    ///
+    /// `Retained` rather than `Vec<u8>`: for a leaf of the message itself those
+    /// bytes are already in the buffer being parsed and are kept as offsets into
+    /// it (#239). A leaf below a `message/rfc822` node is the exception and is
+    /// copied, because the buffer it sits in was produced by decoding and is
+    /// dropped when the walk leaves that subtree.
     Undecoded {
         encoded_size: usize,
-        raw: Option<Vec<u8>>,
+        raw: Option<Retained>,
     },
     /// Decoded during the walk, because the structure below it needed it.
     ///
@@ -1136,7 +1241,7 @@ pub struct TreeNode {
 /// reason: a `message/rfc822` body has to be decoded before the message inside
 /// it can be parsed, and a tree that dropped those children in one mode would
 /// not be the same tree. Nothing else is decoded.
-pub fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<TreeNode, MailParseError> {
+pub fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<DeferredTree, MailParseError> {
     if payload.len() > MAX_INPUT_BYTES {
         return Err(MailParseError::Generic(ERR_INPUT_TOO_LARGE));
     }
@@ -1144,20 +1249,54 @@ pub fn parse_tree_deferred(payload: &[u8], defer: bool) -> Result<TreeNode, Mail
     // The same repair as every other entry point, so no two views of a message
     // whose header block was never terminated can disagree about it (#150).
     let repaired = repair_missing_separator(payload);
-    build_node(
-        &parse_mail(repaired.as_deref().unwrap_or(payload))?,
-        0,
-        defer,
-    )
+    let base = repaired.as_deref().unwrap_or(payload);
+    let retain = if defer {
+        Retain::In(base)
+    } else {
+        Retain::Nothing
+    };
+    let root = build_node(&parse_mail(base)?, 0, retain)?;
+    Ok(DeferredTree { root, repaired })
 }
 
-/// `#[inline(never)]`, like `MimePart::build`: it recurses, it returns a large
-/// struct, and no hot path reaches it.
+/// What a leaf of one walk keeps of itself.
+///
+/// Three states, not two, and that is the point: "keep nothing" and "keep a copy
+/// because there is no buffer to point into" are different answers, and a
+/// parameter that could only say borrow-or-not answered the second with the first
+/// -- which drops the bytes of every leaf inside an embedded message and turns
+/// lazy mode into metadata mode for that subtree.
+#[derive(Clone, Copy)]
+enum Retain<'a> {
+    /// Nothing at all: metadata mode, which keeps sizes and no bytes.
+    Nothing,
+    /// Offsets into this buffer, which the caller of the parse keeps alive.
+    In(&'a [u8]),
+    /// A copy, for a subtree parsed out of a buffer this walk owns and drops.
+    Copy,
+}
+
+/// A tree whose leaves are offsets, and the buffer those offsets index when it
+/// is not the caller's (#239).
+///
+/// The pair travels together for the reason recorded on `LazyMail::repaired`: a
+/// range is only meaningful next to the buffer the parse ran over, and for a
+/// message whose header block had to be repaired that buffer is the rebuilt copy.
+#[derive(Debug)]
+pub struct DeferredTree {
+    pub root: TreeNode,
+    pub repaired: Option<Vec<u8>>,
+}
+
+/// `#[inline(never)]`: it recurses, it returns a large struct, and no hot path
+/// reaches it.
+///
+/// `retain` says what a leaf of this walk keeps of itself -- see `Retain`.
 #[inline(never)]
 fn build_node(
     part: &ParsedMail<'_>,
     depth: usize,
-    defer: bool,
+    retain: Retain<'_>,
 ) -> Result<TreeNode, MailParseError> {
     if depth >= MAX_MIME_DEPTH {
         return Err(MailParseError::Generic(ERR_MIME_DEPTH));
@@ -1170,7 +1309,7 @@ fn build_node(
         let children = part
             .subparts
             .iter()
-            .map(|child| build_node(child, depth + 1, defer))
+            .map(|child| build_node(child, depth + 1, retain))
             .collect::<Result<Vec<_>, _>>()?;
         (NodeBody::Container, children)
     } else if mime == "message/rfc822" {
@@ -1180,7 +1319,18 @@ fn build_node(
         let inner = {
             let repaired = repair_missing_separator(&raw);
             let parsed = parse_mail(repaired.as_deref().unwrap_or(raw.as_slice()))?;
-            build_node(&parsed, depth + 1, defer)?
+            // Copies below here, not offsets: `raw` is a decode of this body and
+            // `repaired` a rebuild of that, and both are dropped at the end of
+            // this block while the nodes built from them outlive it. Leaves below
+            // an embedded message therefore keep what they kept before #239 --
+            // the borrow this mode is about is the borrow of the caller's
+            // payload, and these bytes were never in it. Metadata mode still
+            // keeps nothing, here as everywhere.
+            let inside = match retain {
+                Retain::Nothing => Retain::Nothing,
+                Retain::In(_) | Retain::Copy => Retain::Copy,
+            };
+            build_node(&parsed, depth + 1, inside)?
         };
         let body = NodeBody::Decoded {
             encoded_size: encoded_size(&part.get_body_encoded()),
@@ -1190,12 +1340,15 @@ fn build_node(
     } else {
         let body = NodeBody::Undecoded {
             encoded_size: encoded_size(&part.get_body_encoded()),
-            // The one copy lazy mode makes, and the encoded part rather than the
-            // decoded one. For the root of a single-part message that is the
-            // whole payload, since mailparse's `raw_bytes` for a root is the
-            // message -- see the note in the binding layer. Metadata mode keeps
-            // nothing.
-            raw: defer.then(|| part.raw_bytes.to_vec()),
+            // Offsets into the buffer being parsed, not a copy of it. For the
+            // root of a single-part message that range is the whole payload,
+            // since mailparse's `raw_bytes` for a root is the message -- see the
+            // note in the binding layer. Metadata mode keeps nothing.
+            raw: match retain {
+                Retain::Nothing => None,
+                Retain::In(base) => Some(Retained::of(base, part.raw_bytes)),
+                Retain::Copy => Some(Retained::Owned(part.raw_bytes.to_vec())),
+            },
         };
         (body, Vec::new())
     };
@@ -1565,6 +1718,100 @@ mod tests {
     /// ordering is an internal contract; and the header collector, which Python
     /// only ever sees through a dict.
     const SIMPLE: &[u8] = b"Subject: hi\r\nFrom: a@example.com\r\n\r\nbody\r\n";
+
+    /// The fixtures for the retention tests below. `#[test]` builds run in debug,
+    /// where `Retained::of`'s assertion is live -- so a leaf that stopped being a
+    /// subslice of the parsed buffer and started being copied fails here rather
+    /// than becoming a quiet performance regression.
+    const WITH_ATTACHMENT: &[u8] = b"Subject: has one\r\n\
+        Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n\
+        --b\r\nContent-Type: text/plain\r\n\r\nhello\r\n\
+        --b\r\nContent-Type: application/pdf\r\n\
+        Content-Disposition: attachment; filename=doc.pdf\r\n\
+        Content-Transfer-Encoding: base64\r\n\r\ncGRmIGJ5dGVz\r\n--b--\r\n";
+
+    /// The same message with the blank line after the header block removed, which
+    /// is what makes the parse run over a rebuilt copy (#150).
+    const UNTERMINATED: &[u8] = b"Subject: has one\r\n\
+        Content-Type: multipart/mixed; boundary=\"b\"\r\n\
+        this line has no colon\r\n\
+        --b\r\nContent-Type: text/plain\r\n\r\nhello\r\n\
+        --b\r\nContent-Type: application/pdf\r\n\
+        Content-Disposition: attachment; filename=doc.pdf\r\n\
+        Content-Transfer-Encoding: base64\r\n\r\ncGRmIGJ5dGVz\r\n--b--\r\n";
+
+    #[test]
+    fn a_deferred_attachment_is_a_range_and_not_a_copy() {
+        let mail = parse_email_lazy(WITH_ATTACHMENT).expect("the fixture must parse");
+        let attachment = &mail.attachments[0];
+
+        assert!(
+            matches!(attachment.raw, Retained::Range(_)),
+            "a leaf of a message parsed in one piece must be retained as offsets, \
+             not copied: {:?}",
+            attachment.raw
+        );
+        assert!(mail.repaired.is_none(), "this fixture needs no repair");
+        assert_eq!(
+            decode_part(attachment.raw.slice(WITH_ATTACHMENT)).expect("decodes"),
+            b"pdf bytes",
+        );
+    }
+
+    #[test]
+    fn a_repaired_message_retains_ranges_into_the_rebuilt_buffer() {
+        let mail = parse_email_lazy(UNTERMINATED).expect("the fixture must parse");
+        let repaired = mail
+            .repaired
+            .as_deref()
+            .expect("the header block was unterminated");
+        let attachment = &mail.attachments[0];
+
+        // The offsets index the rebuild, which is one byte longer than the
+        // payload. Resolving them against the payload instead is exactly the
+        // off-by-one this pairing exists to prevent, so assert the right buffer
+        // gives the right bytes rather than merely that some buffer does.
+        assert_eq!(repaired.len(), UNTERMINATED.len() + 1);
+        assert_eq!(
+            decode_part(attachment.raw.slice(repaired)).expect("decodes"),
+            b"pdf bytes",
+        );
+    }
+
+    #[test]
+    fn a_leaf_below_an_embedded_message_is_copied() {
+        // The one case that cannot borrow: the bytes were produced by decoding
+        // the enclosing body, and that buffer is dropped when the walk leaves the
+        // subtree. Asserted so the copy stays deliberate.
+        let mut payload = b"Content-Type: message/rfc822\r\n\r\n".to_vec();
+        payload.extend_from_slice(WITH_ATTACHMENT);
+        let tree = parse_tree_deferred(&payload, true).expect("the fixture must parse");
+
+        let root = match &tree.root.body {
+            NodeBody::Decoded { .. } => &tree.root,
+            other => panic!("the root should have been decoded to reach its child: {other:?}"),
+        };
+        let leaves = collect_undecoded(&root.children[0]);
+
+        assert!(!leaves.is_empty(), "the embedded message must have leaves");
+        for leaf in leaves {
+            assert!(
+                matches!(leaf, Retained::Owned(_)),
+                "a leaf below an embedded message has no buffer to borrow: {leaf:?}"
+            );
+        }
+    }
+
+    fn collect_undecoded(node: &TreeNode) -> Vec<&Retained> {
+        let mut out = Vec::new();
+        if let NodeBody::Undecoded { raw: Some(raw), .. } = &node.body {
+            out.push(raw);
+        }
+        for child in &node.children {
+            out.extend(collect_undecoded(child));
+        }
+        out
+    }
 
     #[test]
     fn a_plain_message_parses_with_no_warnings() {

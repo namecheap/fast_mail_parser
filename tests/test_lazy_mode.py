@@ -8,10 +8,16 @@ has three halves, and this file is organised as them.
 bytes of every attachment in the whole corpus must be equal, and the envelope and
 the warning list must be equal too, because a pipeline that switches modes to save
 work must not switch what it reads. That equality is also what makes the
-implementation trustworthy: lazy mode keeps a copy of each part exactly as it sits
-in the message and re-parses that copy on access, which reproduces the full
-parse's `content` only if `raw_bytes` really is the part and nothing else. The
+implementation trustworthy: lazy mode remembers where each part sits in the buffer
+it was parsed from and re-parses those bytes on access, which reproduces the full
+parse's `content` only if `raw_bytes` really is the part and the offsets really
+are its offsets -- an arithmetic slip reads the right number of bytes from the
+wrong place, and equality against full mode is what catches it. The
 `parse_agreement` fuzz target asserts the same thing on arbitrary input.
+
+**The payload is pinned.** Borrowing rather than copying (#239) means the result
+keeps the message alive. That is a change to the memory contract, so it is
+asserted rather than described -- see the section on `sys.getrefcount` below.
 
 **The cache must be one object.** `a.content is a.content`, and the same across
 threads: a cache that hands back an equal copy is not a cache, it is a decode with
@@ -22,6 +28,7 @@ assertion rather than a timing argument.
 """
 import glob
 import os
+import sys
 import threading
 
 import pytest
@@ -202,9 +209,11 @@ def test__content_is_bytes(attachment_message: str):
 
 def test__attachments_outlive_the_payload(attachment_message: str):
     # `bytes` payloads are borrowed rather than copied (#96), so a mode that
-    # retained a view into the caller's buffer would be a use-after-free waiting
-    # for a garbage collection. Lazy mode copies each part's encoded bytes; this
-    # is what says so.
+    # retained a view into the caller's buffer without keeping that buffer alive
+    # would be a use-after-free waiting for a garbage collection. Since #239 lazy
+    # mode does retain a view -- and keeps the payload alive for exactly as long
+    # as some part still points into it. This is what says so: the caller's last
+    # reference goes and the bytes are still there and still right.
     payload = attachment_message.encode("utf-8")
     expected = [a.content for a in parse_email(payload).attachments]
 
@@ -212,6 +221,134 @@ def test__attachments_outlive_the_payload(attachment_message: str):
     del payload
 
     assert [a.content for a in attachments] == expected
+
+
+# --- what the borrow costs: the payload is pinned (#239) -----------------------
+#
+# Lazy mode stopped copying every deferred part out of the message, which is the
+# opposite of what deferring is for. What it does instead is hold the payload and
+# remember where each part sits in it, and that is a change to the memory contract
+# worth asserting rather than describing: the result keeps the message alive.
+#
+# `sys.getrefcount` is the instrument. It is an implementation detail of CPython
+# and these tests would need rewriting on another runtime, but it is the only way
+# to observe the pin directly -- the alternative is measuring RSS, which says
+# "something is large" and not "this object is held by that one".
+
+
+def _refs(obj) -> int:
+    # One less than `getrefcount` reports, because the argument itself is a
+    # reference. The absolute number is never asserted; only what it does.
+    return sys.getrefcount(obj) - 1
+
+
+def test__an_attachment_pins_the_payload_it_was_parsed_from(attachment_message: str):
+    payload = attachment_message.encode("utf-8")
+    before = _refs(payload)
+
+    mail = parse_email(payload, mode="lazy")
+    assert _refs(payload) > before, (
+        "a lazy parse must hold the payload its attachments point into"
+    )
+
+    # The attachment alone is enough: a caller who keeps the one part they wanted
+    # and drops the message still has bytes to decode.
+    attachment = mail.attachments[0]
+    del mail
+    assert _refs(payload) > before
+
+    assert attachment.content
+    del attachment
+    assert _refs(payload) == before, (
+        "dropping the last part that points into the payload must release it"
+    )
+
+
+def test__a_message_with_no_attachments_pins_nothing(valid_message: str):
+    # The pin is per part, not per parse. A message with nothing deferred has
+    # nothing pointing into the payload, so the parse must not be what keeps a
+    # large message alive when it kept nothing from it.
+    payload = valid_message.encode("utf-8")
+    before = _refs(payload)
+
+    mail = parse_email(payload, mode="lazy")
+
+    assert not mail.attachments, "fixture must have no attachments"
+    assert _refs(payload) == before
+
+
+def test__reading_content_does_not_release_the_payload(attachment_message: str):
+    # `content` caches a decoded copy, but the part still knows where it came
+    # from -- there is no point at which the pin is dropped early, because a
+    # second attachment of the same message may not have been read yet.
+    payload = attachment_message.encode("utf-8")
+    before = _refs(payload)
+
+    attachment = parse_email(payload, mode="lazy").attachments[0]
+    assert attachment.content
+
+    assert _refs(payload) > before
+
+
+def test__each_slot_of_a_batch_pins_only_its_own_payload(attachment_message: str):
+    # A batch must not be all-or-nothing: keeping one attachment out of message
+    # three must not keep messages one and two alive as well.
+    from fast_mail_parser import parse_many
+
+    payloads = [attachment_message.encode("utf-8") for _ in range(3)]
+    before = [_refs(p) for p in payloads]
+
+    parsed = parse_many(payloads, mode="lazy")
+    kept = parsed[2].attachments[0]
+    del parsed
+
+    assert [_refs(p) for p in payloads] == [before[0], before[1], before[2] + 1]
+    assert kept.content
+
+
+REPAIRED_WITH_ATTACHMENT = (
+    b"Subject: no separator\r\n"
+    b'Content-Type: multipart/mixed; boundary="b"\r\n'
+    b"this line has no colon, so the header block never ended\r\n"
+    b"--b\r\n"
+    b"Content-Type: text/plain\r\n"
+    b"\r\n"
+    b"hello\r\n"
+    b"--b\r\n"
+    b"Content-Type: application/pdf\r\n"
+    b"Content-Disposition: attachment; filename=doc.pdf\r\n"
+    b"Content-Transfer-Encoding: base64\r\n"
+    b"\r\n"
+    b"cGRmIGJ5dGVz\r\n"
+    b"--b--\r\n"
+)
+
+
+def test__a_repaired_message_decodes_its_attachments():
+    # The case a range-based retention has to get right and a copy never could
+    # get wrong: a message whose header block was never terminated is parsed from
+    # a rebuilt copy (#150), so the offsets index the rebuild and not the payload
+    # the caller passed. Getting that wrong reads the right number of bytes from
+    # the wrong place -- one byte off, and silently.
+    full = parse_email(REPAIRED_WITH_ATTACHMENT)
+    lazy = parse_email(REPAIRED_WITH_ATTACHMENT, mode="lazy")
+
+    assert full.warnings, "fixture must trigger the separator repair"
+    assert [a.filename for a in lazy.attachments] == [a.filename for a in full.attachments]
+    assert [a.content for a in lazy.attachments] == [a.content for a in full.attachments]
+
+
+def test__a_repaired_message_pins_its_payload_and_still_decodes():
+    # A distinct object, so that the local really is the caller's last reference
+    # and the refcount below is this test's and not the module constant's.
+    payload = bytes(bytearray(REPAIRED_WITH_ATTACHMENT))
+    before = _refs(payload)
+
+    attachments = list(parse_email(payload, mode="lazy").attachments)
+    assert _refs(payload) > before
+
+    del payload
+    assert [a.content for a in attachments] == [b"pdf bytes"]
 
 
 # --- laziness -----------------------------------------------------------------

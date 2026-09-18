@@ -28,6 +28,7 @@ assertion rather than a timing argument.
 """
 import glob
 import os
+import sys
 
 import pytest
 
@@ -302,10 +303,11 @@ def test__the_children_attribute_hands_back_the_same_objects():
 
 
 def test__the_tree_outlives_the_payload():
-    # The parse copies each part rather than borrowing the caller's bytes, so
-    # dropping the payload cannot invalidate a deferred decode.
-    payload = bytearray(MIXED)
-    root = parse_email_tree(bytes(payload), mode="lazy")
+    # The parse borrows the caller's bytes and keeps the payload alive for as long
+    # as the tree is (#239), so dropping the caller's reference cannot invalidate
+    # a deferred decode.
+    payload = bytes(bytearray(MIXED))
+    root = parse_email_tree(payload, mode="lazy")
     del payload
 
     assert list(walk(root))[1].content == b"plain version"
@@ -313,7 +315,7 @@ def test__the_tree_outlives_the_payload():
 
 def test__a_single_part_message_defers_its_root():
     # The root is the leaf here, so there is no subpart to defer -- the whole
-    # payload is what gets retained and re-parsed.
+    # payload is the range that gets retained and re-parsed.
     root = parse_email_tree(SINGLE_PART, mode="lazy")
 
     assert root.children == []
@@ -348,6 +350,80 @@ def test__an_embedded_message_arrives_already_decoded():
     embedded = next(part for part in walk(root) if part.is_message)
     assert embedded.is_decoded
     assert embedded.content == parse_email_tree(_bounce(ORIGINAL)).children[1].content
+
+
+def test__a_leaf_inside_an_embedded_message_still_decodes_in_lazy_mode():
+    # The subtree that cannot borrow. Its bytes were produced by decoding the
+    # `message/rfc822` body, so the buffer they sit in is the parser's own and is
+    # dropped when the walk leaves the subtree -- these leaves keep copies (#239).
+    # Asserted from Python because the distinction is invisible from here and must
+    # stay that way: a leaf inside an embedded message decodes like any other.
+    root = parse_email_tree(_bounce(ORIGINAL), mode="lazy")
+
+    embedded = next(part for part in walk(root) if part.is_message)
+    leaves = [part for part in walk(embedded.children[0]) if not part.children]
+
+    assert leaves, "the embedded message must have leaves"
+    assert all(leaf.content is not None for leaf in leaves), (
+        "a leaf inside an embedded message reported no body at all, which is what "
+        "a container reports -- its bytes were not retained"
+    )
+    assert [leaf.content for leaf in leaves] == [
+        leaf.content
+        for leaf in walk(
+            next(
+                part for part in walk(parse_email_tree(_bounce(ORIGINAL))) if part.is_message
+            ).children[0]
+        )
+        if not leaf.children
+    ]
+
+
+def test__a_lazy_tree_outlives_its_payload():
+    # Every leaf of the tree at once: the ones that point into the payload, which
+    # the tree now pins, and the ones inside the embedded message, which copied.
+    payload = bytes(bytearray(_bounce(ORIGINAL)))
+    expected = [
+        part.content for part in walk(parse_email_tree(payload)) if not part.children
+    ]
+
+    root = parse_email_tree(payload, mode="lazy")
+    del payload
+
+    assert [part.content for part in walk(root) if not part.children] == expected
+
+
+def test__a_leaf_inside_an_embedded_message_pins_nothing():
+    # It owns its bytes -- they were produced by decoding the `message/rfc822`
+    # body and are in no caller buffer -- so it must not keep the payload alive on
+    # their behalf. Keeping one leaf out of a bounce should not keep the bounce.
+    payload = bytes(bytearray(_bounce(ORIGINAL)))
+    before = sys.getrefcount(payload)
+
+    root = parse_email_tree(payload, mode="lazy")
+    embedded = next(part for part in walk(root) if part.is_message)
+    leaf = next(part for part in walk(embedded.children[0]) if not part.children)
+    del root, embedded
+
+    assert sys.getrefcount(payload) == before
+    assert leaf.content is not None
+
+
+def test__a_lazy_tree_pins_the_payload_and_a_metadata_tree_does_not():
+    # The two halves of the trade, in one assertion. A lazy tree keeps offsets, so
+    # it holds the message; a metadata tree keeps sizes, so it holds nothing.
+    payload = bytes(bytearray(_bounce(ORIGINAL)))
+    before = sys.getrefcount(payload)
+
+    lazy = parse_email_tree(payload, mode="lazy")
+    assert sys.getrefcount(payload) > before
+
+    del lazy
+    assert sys.getrefcount(payload) == before
+
+    described = parse_email_tree(payload, mode="metadata")
+    assert sys.getrefcount(payload) == before
+    assert described.encoded_size is None, "the root of this fixture is a container"
 
 
 def test__metadata_mode_can_raise_on_a_broken_embedded_message():

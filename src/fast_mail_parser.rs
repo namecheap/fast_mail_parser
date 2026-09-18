@@ -25,7 +25,7 @@ use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::types::{PyBytes, PyDateTime, PyDict, PyList, PyString, PyTzInfo};
 use pyo3::{create_exception, exceptions, wrap_pyfunction};
 use std::num::NonZeroUsize;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Header pairs in wire order, plus the one Python `dict` they project to.
 ///
@@ -535,10 +535,11 @@ impl PyMimePartMetadata {
 /// re-timing an existing attribute, and moving where it raises, is a change to a
 /// shipped contract that #104 batches into an API-v2 window.
 ///
-/// Memory: a leaf retains a copy of itself as it sits in the message. For a
-/// single-part message that is the whole payload, because the root *is* the leaf
-/// -- so this mode is for walking a large multipart message and decoding one part
-/// of it, which is what the tree is for, and not for small mail in bulk.
+/// Memory: a leaf points at itself where it sits in the caller's payload, so the
+/// tree costs its headers and not its bytes -- but it pins that payload for as
+/// long as any node of it is alive (#239). A leaf below a `message/rfc822` node
+/// is the exception and holds a copy, because the bytes it was parsed from were
+/// produced by decoding that node and exist in no caller buffer.
 #[pyclass(frozen, skip_from_py_object)]
 pub struct PyLazyMimePart {
     #[pyo3(get)]
@@ -560,7 +561,7 @@ pub struct PyLazyMimePart {
     pub encoded_size: Option<usize>,
     /// The part as it sits in the message, still encoded. `None` for a container
     /// and for a `message/rfc822` node, whose bytes are already published below.
-    raw: Option<Vec<u8>>,
+    raw: Option<RetainedBytes>,
     /// The decoded bytes, published exactly once -- as on `PyLazyAttachment`, so
     /// that `part.content is part.content`.
     content: OnceLock<Py<PyBytes>>,
@@ -600,7 +601,7 @@ impl PyLazyMimePart {
         let Some(raw) = self.raw.as_ref() else {
             return Ok(None);
         };
-        self.decode(py, raw).map(Some)
+        self.decode(py, raw.bytes()).map(Some)
     }
 
     /// Whether reading `content` is free.
@@ -668,11 +669,15 @@ fn metadata_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyMime
 }
 
 #[inline(never)]
-fn lazy_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyLazyMimePart> {
+fn lazy_node(
+    py: Python<'_>,
+    node: mail_parser::TreeNode,
+    base: &Arc<Pinned>,
+) -> PyResult<PyLazyMimePart> {
     let children = node
         .children
         .into_iter()
-        .map(|child| Py::new(py, lazy_node(py, child)?))
+        .map(|child| Py::new(py, lazy_node(py, child, base)?))
         .collect::<PyResult<Vec<_>>>()?;
 
     // A `message/rfc822` body was decoded to reach the children below it, so it
@@ -680,9 +685,11 @@ fn lazy_node(py: Python<'_>, node: mail_parser::TreeNode) -> PyResult<PyLazyMime
     // is filled here and `is_decoded` is true from the start.
     let (encoded_size, raw, content) = match node.body {
         mail_parser::NodeBody::Container => (None, None, OnceLock::new()),
-        mail_parser::NodeBody::Undecoded { encoded_size, raw } => {
-            (Some(encoded_size), raw, OnceLock::new())
-        }
+        mail_parser::NodeBody::Undecoded { encoded_size, raw } => (
+            Some(encoded_size),
+            raw.map(|at| RetainedBytes::new(base, at)),
+            OnceLock::new(),
+        ),
         mail_parser::NodeBody::Decoded {
             encoded_size,
             content,
@@ -988,6 +995,11 @@ impl PyMail {
 /// of `PyAttachment` plus `encoded_size` and `is_decoded`, with `content` a
 /// property that does the work rather than a value the parse already paid for.
 ///
+/// Memory: the part points into the payload it was parsed from and keeps it
+/// alive, so holding one attachment of a large message holds the message (#239).
+/// `content` is a decoded copy, so a caller who wants the bytes and not the
+/// message reads it and drops the attachment.
+///
 /// A new type rather than making `PyAttachment.content` lazy. Changing what an
 /// existing attribute costs -- and when it raises -- is a change to a shipped
 /// contract, and #104 batches those into one API-v2 window; adding a type is not
@@ -1015,8 +1027,11 @@ pub struct PyLazyAttachment {
     /// that required a decode to obtain would defeat it.
     #[pyo3(get)]
     pub encoded_size: usize,
-    /// The part as it sits in the message, still encoded.
-    raw: Vec<u8>,
+    /// Where the part sits in the message, still encoded, and the buffer that
+    /// keeps those bytes alive (#239). Offsets rather than a copy: the bytes are
+    /// already in the payload the caller passed in, and duplicating them is what
+    /// deferring the decode is meant to avoid.
+    raw: RetainedBytes,
     /// The decoded bytes, published exactly once.
     ///
     /// `OnceLock<Py<PyBytes>>` rather than `OnceLock<Vec<u8>>` so that repeated
@@ -1083,14 +1098,14 @@ impl PyLazyAttachment {
 }
 
 impl PyLazyAttachment {
-    fn from_lazy(attachment: mail_parser::LazyAttachment) -> Self {
+    fn from_lazy(attachment: mail_parser::LazyAttachment, base: &Arc<Pinned>) -> Self {
         PyLazyAttachment {
             mimetype: attachment.mimetype,
             filename: attachment.filename,
             content_id: attachment.content_id,
             disposition: attachment.disposition,
             encoded_size: attachment.encoded_size,
-            raw: attachment.raw,
+            raw: RetainedBytes::new(base, attachment.raw),
             content: OnceLock::new(),
         }
     }
@@ -1108,16 +1123,17 @@ impl PyLazyAttachment {
     /// object, holds without a lock.
     ///
     /// The GIL is released for the decode, so several threads pulling different
-    /// attachments overlap rather than serialise. `raw` is owned by this object
-    /// and this object is immutable, so nothing can move underneath the slice
-    /// while it is detached.
+    /// attachments overlap rather than serialise. The slice is a range of a buffer
+    /// this object holds an `Arc` to, and that buffer is either an immutable
+    /// Python object or a `Vec` nothing else can reach, so nothing can move
+    /// underneath it while it is detached.
     ///
     /// `#[cold]` and out of line: it runs at most once per attachment, and the
     /// hot path through the getter above is the cached one.
     #[cold]
     #[inline(never)]
     fn decode<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let raw = self.raw.as_slice();
+        let raw = self.raw.bytes();
         let decoded = py
             .detach(|| mail_parser::decode_part(raw))
             .map_err(to_py_err)?;
@@ -1202,11 +1218,16 @@ impl PyLazyMail {
     /// reaches this, and cold binding code in this module has already cost the
     /// hot path 24% through nothing but lost inlining (#99).
     #[inline(never)]
-    fn from_lazy(py: Python<'_>, mail: mail_parser::LazyMail) -> PyResult<Self> {
+    fn from_lazy(py: Python<'_>, mail: mail_parser::LazyMail, payload: Payload) -> PyResult<Self> {
+        // The pin is built here, from this message's own payload and its own
+        // repair, so a batch gets one per slot rather than one shared across the
+        // batch -- reading one attachment out of message 3 must not keep messages
+        // 1 and 2 alive.
+        let base = Pinned::new(payload, mail.repaired);
         let attachments = mail
             .attachments
             .into_iter()
-            .map(|part| Py::new(py, PyLazyAttachment::from_lazy(part)))
+            .map(|part| Py::new(py, PyLazyAttachment::from_lazy(part, &base)))
             .collect::<PyResult<Vec<_>>>()?;
 
         Ok(PyLazyMail {
@@ -1289,6 +1310,84 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
     ))
 }
 
+/// The buffer a deferred part's byte range indexes, kept alive for exactly as
+/// long as some part still points into it (#239).
+///
+/// This is the memory contract lazy mode now has, and it is a real change: a
+/// result that borrows its bytes pins the message it was parsed from. Holding one
+/// attachment of a 100 MB mail holds the 100 MB. That is the right default here
+/// -- the alternative is the copy this mode exists to avoid, and the caller who
+/// wants the bytes without the payload can ask for `content`, which is a copy by
+/// construction, and drop the attachment.
+///
+/// Both fields are needed because the buffer the parse ran over is not always the
+/// one the caller passed: a message whose header block was never terminated is
+/// rebuilt first (#150), and the ranges then index the rebuild. Whichever it is,
+/// its address is stable across the move into this struct -- a `Vec` owns a heap
+/// allocation, and PyO3's backed types point into a Python object -- which is what
+/// makes it sound to take the ranges during the parse and build the pin after it.
+pub(crate) struct Pinned {
+    payload: Payload,
+    repaired: Option<Vec<u8>>,
+}
+
+impl Pinned {
+    fn new(payload: Payload, repaired: Option<Vec<u8>>) -> Arc<Self> {
+        let before = payload.as_ref().as_ptr();
+        let pinned = Pinned { payload, repaired };
+        debug_assert!(
+            std::ptr::eq(pinned.payload.as_ref().as_ptr(), before),
+            "moving the payload moved the bytes it points at, so ranges taken \
+             during the parse no longer index it"
+        );
+        Arc::new(pinned)
+    }
+
+    /// The buffer the parse ran over, which is the one the ranges index.
+    fn base(&self) -> &[u8] {
+        match &self.repaired {
+            Some(repaired) => repaired,
+            None => self.payload.as_ref(),
+        }
+    }
+}
+
+/// One deferred part's bytes: where they are, and what keeps them there.
+///
+/// `Arc` rather than one handle on the message: a part can outlive the
+/// `PyLazyMail` or the tree node that produced it, because Python hands out
+/// references and a caller can keep the one attachment they wanted. Refcounting
+/// the buffer is what makes "keep this attachment, drop everything else" mean the
+/// payload is released when the last of them goes.
+///
+/// An enum rather than a pin plus a `Retained`, so that the part that owns its
+/// bytes holds no pin at all. A leaf inside a `message/rfc822` node is the only
+/// one that does, and its bytes came from decoding that node rather than from the
+/// payload -- pinning the payload for it would keep a whole message alive on
+/// behalf of bytes that are not in it.
+pub(crate) enum RetainedBytes {
+    /// A range of a buffer this part keeps alive.
+    In(Arc<Pinned>, std::ops::Range<usize>),
+    /// Bytes of its own, for a part that was in no caller buffer.
+    Owned(Vec<u8>),
+}
+
+impl RetainedBytes {
+    fn new(base: &Arc<Pinned>, at: mail_parser::Retained) -> Self {
+        match at {
+            mail_parser::Retained::Range(range) => RetainedBytes::In(Arc::clone(base), range),
+            mail_parser::Retained::Owned(bytes) => RetainedBytes::Owned(bytes),
+        }
+    }
+
+    fn bytes(&self) -> &[u8] {
+        match self {
+            RetainedBytes::In(base, range) => &base.base()[range.clone()],
+            RetainedBytes::Owned(bytes) => bytes,
+        }
+    }
+}
+
 /// Parse a raw email (`bytes` or `str`) into a [`PyMail`].
 ///
 /// Raises `ParseError`, or more precisely one of its subtypes:
@@ -1303,8 +1402,10 @@ fn payload_to_bytes(payload: &Py<PyAny>, py: Python<'_>) -> PyResult<Payload> {
 /// that reads the bodies, so `"full"` or `"lazy"`.
 ///
 /// `mode="lazy"` returns a [`PyLazyMail`]: the bodies decoded as today, and each
-/// attachment's content decoded on first access and cached. `mode="metadata"`
-/// returns a [`PyMailMetadata`] and decodes nothing at all.
+/// attachment's content decoded on first access and cached. A deferred
+/// attachment points into `payload` rather than copying itself out of it, so the
+/// result keeps `payload` alive -- see [`Pinned`]. `mode="metadata"` returns a
+/// [`PyMailMetadata`] and decodes nothing at all, and pins nothing.
 #[pyfunction]
 #[pyo3(signature = (payload, *, mode = "full", strict = false))]
 pub fn parse_email(
@@ -1462,14 +1563,13 @@ fn parse_lazy_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyLazyMail> 
     let message = payload_to_bytes(&payload, py)?;
 
     // The GIL is released for the parse, as in every other mode. What the parse
-    // retains per attachment is a copy of that part's encoded bytes, so nothing
-    // borrows from the caller's payload once this returns -- which is what lets
-    // the attachments outlive it.
+    // retains per attachment is that part's offsets in the payload, so the
+    // payload is moved into the result rather than dropped here -- see `Pinned`.
     let mail = py
         .detach(|| mail_parser::parse_email_lazy(message.as_ref()))
         .map_err(to_py_err)?;
 
-    PyLazyMail::from_lazy(py, mail)
+    PyLazyMail::from_lazy(py, mail, message)
 }
 
 fn parse_email_inner(py: Python<'_>, payload: Py<PyAny>) -> PyResult<PyMail> {
@@ -1725,11 +1825,12 @@ fn parse_many_metadata(
 /// per slot the way full mode honours it: lazy mode finds every repair the full
 /// parse finds, so the verdict is the same verdict.
 ///
-/// Worth a caution the single-message mode does not need: this retains the
-/// encoded bytes of every attachment in the *whole batch* until the batch is
-/// dropped, which is the opposite of what the mode saves on one message. Use it
-/// to sweep a batch and pull a few parts out of it, not to hold ten thousand
-/// messages' attachments undecoded.
+/// Worth a caution the single-message mode does not need: each slot's
+/// attachments pin that slot's payload (#239), so holding the whole batch holds
+/// every payload in it. One pin per slot rather than one for the batch, so
+/// keeping one attachment keeps one message -- but the batch as a whole is still
+/// the batch. Use it to sweep a batch and pull a few parts out of it, not to hold
+/// ten thousand messages undecoded.
 #[inline(never)]
 fn parse_many_lazy(
     py: Python<'_>,
@@ -1748,13 +1849,17 @@ fn parse_many_lazy(
     let parsed =
         py.detach(|| mail_parser::parse_many_as(&messages, workers, mail_parser::parse_email_lazy));
 
+    // Zipped, not indexed: each result is paired with the payload it was parsed
+    // from, and that payload is what its attachments' offsets index. The borrow
+    // `parse_many_as` took ended when it returned, so the payloads can be moved
+    // into the results one by one -- one pin per slot, never one for the batch.
     let items = PyList::empty(py);
-    for result in parsed {
+    for (message, result) in messages.into_iter().zip(parsed) {
         // Folded into one `Err` arm as in full mode: one notion of "this slot
         // failed", two ways to reach it.
         let outcome = match result {
             Ok(mail) => {
-                let mail = PyLazyMail::from_lazy(py, mail)?;
+                let mail = PyLazyMail::from_lazy(py, mail, message)?;
                 if strict && !mail.warnings.is_empty() {
                     Err(strict_rejection(&mail.warnings))
                 } else {
@@ -1833,9 +1938,12 @@ fn parse_email_tree_other_mode(
             .map_err(to_py_err)?;
 
         if defer {
-            return Ok(Py::new(py, lazy_node(py, tree)?)?.into_any());
+            let base = Pinned::new(message, tree.repaired);
+            return Ok(Py::new(py, lazy_node(py, tree.root, &base)?)?.into_any());
         }
-        Ok(Py::new(py, metadata_node(py, tree)?)?.into_any())
+        // Metadata mode retains nothing, so the payload is dropped here as it
+        // always was.
+        Ok(Py::new(py, metadata_node(py, tree.root)?)?.into_any())
     })
 }
 

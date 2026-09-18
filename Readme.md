@@ -487,10 +487,14 @@ runner; the ratios are what to read.
 
 Two things to know before choosing it:
 
-**It trades memory for decoding.** The encoded bytes of every attachment are
-retained until the message is dropped, and base64 is about 1.33x the size of what
-it encodes — so a retained part costs *more* than the decoded bytes it avoids
-producing. Right for one attachment out of twenty; wrong for all twenty.
+**It pins the payload.** A deferred attachment does not copy itself out of the
+message; it remembers where it sits in the payload you passed in, and keeps that
+payload alive for as long as it is reachable. So the result holds one message's
+worth of memory rather than two — parsing a 96 MiB message now costs 96 MiB and
+used to cost 192 MiB — but the payload is not released when you drop your own
+reference to it. Keeping one attachment out of a mailbox keeps that message, not
+its attachment. If you want the bytes without the message, read `content`, which
+is a decoded copy, and drop the attachment.
 
 **A `DecodeError` moves.** A part whose `Content-Transfer-Encoding` cannot be
 decoded fails the whole parse in full mode, and fails on `content` here — so a
@@ -574,8 +578,9 @@ data = pdf.content            # decoded here, and only this one
 
 `mode="metadata"` decodes nothing *and retains nothing*: a node reports
 `encoded_size` in place of `content` and there is no way to ask for the bytes.
-That is the difference between the two — lazy mode keeps a copy of every leaf so
-it can decode one later, metadata mode keeps none and is the cheaper sweep.
+That is the difference between the two — a lazy leaf remembers where it sits in
+the payload so it can decode itself later, which keeps that payload alive;
+metadata mode remembers nothing and is the sweep that holds nothing.
 
 On the attachment-heavy fixture (767 KiB), median of three interleaved rounds on
 the CI runner: full tree 0.556 ms, `mode="lazy"` with nothing read 0.077 ms,
@@ -594,6 +599,12 @@ deferred it would be deferring the structure, which is the one thing every mode
 has to deliver eagerly. Its node therefore arrives with `is_decoded` already
 `True`, and unlike `parse_email(mode="metadata")` a deferred tree *can* raise
 `DecodeError` for such a part. Nothing else is decoded.
+
+It is also the one place a lazy leaf holds bytes of its own. The leaves *inside*
+an embedded message were parsed out of that decoded body rather than out of your
+payload, so they keep copies; everywhere else a leaf keeps offsets. The
+difference is not visible from Python — a leaf decodes the same way either way —
+but it is why a lazy tree of a bounce is not quite free.
 
 `walk` accepts a node from any mode and yields nodes of the same type.
 
