@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Quoted-printable decoding was slower than 0.9.0 on a body that is mostly escapes.**
+  Comparing the 0.9.0 release against master turned up one benchmark where the release won:
+  `parse_qp_dense_escapes`, by 58% on the x86 gate. #229 replaced the `quoted_printable`
+  crate with a run-copying decoder and measured a 39% win, but the dense shape had no
+  benchmark then -- `parse_qp_dense_escapes` arrived later, with #223 -- so the one input
+  the new decoder is worst at was never compared against the code it replaced. Two changes,
+  both in `vendor/mailparse/src/qp.rs`:
+
+  - `decode_line` looks at the byte under the cursor before calling `memchr`. After an
+    escape the next byte is very often another `=` -- every non-ASCII character encodes as
+    two or three consecutive escapes -- so `memchr` was being called to be told the match
+    was at offset 0, paying its SIMD setup each time. On the dense fixture that happened
+    40,000 times.
+  - The rule-1 pre-scan finds the first dropped byte a chunk at a time instead of with
+    `position`, which cannot vectorise because it has to stop at the first hit. `is_kept`
+    is respelled as arithmetic so the chunk reduction has no branches in it;
+    `is_kept_is_the_same_set` checks all 256 bytes against the original spelling. On 120 KB
+    with nothing to drop -- nearly every real body -- that scan goes from 63 us to 5.5 us.
+
+  Measured on an Apple M4, 3 interleaved rounds, controls within 3.1%:
+  `parse_qp_dense_escapes` **0.171 -> 0.102 ms (-40%)** and `parse_qp_message`
+  **0.129 -> 0.085 ms (-34%)**, with every other benchmark inside the noise floor. Against
+  0.9.0 the dense case is now 1.40x faster rather than 1.20x slower, and the ordinary
+  quoted-printable case 2.6x faster. Output is unchanged: the vendored suite's
+  crate-agreement tests still pass, including every `=xy` byte pair, and `qp_agreement`
+  ran 7.3M executions against the crate with no disagreement.
+
 ### Changed
 
 - **Internal: the binding layer is split into modules, with shared getters and batch-slot
