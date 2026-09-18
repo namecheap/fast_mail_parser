@@ -461,7 +461,7 @@ impl PyMimePart {
             content_id: part.content_id,
             disposition: part.disposition,
             is_message: part.is_message,
-            content: part.content,
+            content: part.body,
             content_py: OnceLock::new(),
             children,
         })

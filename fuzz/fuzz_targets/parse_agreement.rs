@@ -65,7 +65,7 @@ fn render(part: &mail_parser::MimePart, depth: usize, out: &mut String) {
         part.content_id,
         part.disposition,
         part.is_message,
-        part.content.as_ref().map(|bytes| bytes.len()),
+        part.body.as_ref().map(|bytes| bytes.len()),
     ));
     for (name, values) in &part.headers {
         out.push_str(&format!("{depth}h|{name}|{values:?}\n"));
@@ -134,7 +134,7 @@ fn render_full(part: &mail_parser::MimePart, depth: usize, out: &mut String) {
 
 /// Every node's body as the full parse produced it, in walk order.
 fn full_bodies(part: &mail_parser::MimePart, out: &mut Vec<Option<Vec<u8>>>) {
-    out.push(part.content.clone());
+    out.push(part.body.clone());
     for child in &part.children {
         full_bodies(child, out);
     }
@@ -174,7 +174,7 @@ fn deferred_bodies(
 
 /// Every leaf's content, for the containment check against the flat parse.
 fn leaf_contents(part: &mail_parser::MimePart, out: &mut Vec<Vec<u8>>) {
-    if let Some(content) = &part.content {
+    if let Some(content) = &part.body {
         out.push(content.clone());
     }
     for child in &part.children {
