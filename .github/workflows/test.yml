@@ -585,10 +585,17 @@ jobs:
           # `vendor/mailparse/src/bytescan.rs` is load-bearing and easy to lose: it
           # exists only in this copy, so a mistake in the include glob would drop
           # it and a source build would fall back to the unpatched registry crate.
+          # The binding's modules are named one by one rather than trusted to the
+          # `src/*` glob (#233): a glob that stopped matching would otherwise show
+          # up as a confusing compile failure further down this job, and the point
+          # of this list is to name the file that went missing.
           for needed in Cargo.toml pyproject.toml \
                         crates/fast_mail_parser_core/Cargo.toml \
                         crates/fast_mail_parser_core/src/lib.rs \
-                        src/fast_mail_parser.rs vendor/mailparse/src/bytescan.rs \
+                        src/fast_mail_parser.rs src/api.rs src/convert.rs \
+                        src/errors.rs src/flat.rs src/lazy.rs src/metadata.rs \
+                        src/payload.rs src/tree.rs \
+                        vendor/mailparse/src/bytescan.rs \
                         vendor/mailparse/src/qp.rs vendor/mailparse/upstream.patch; do
             if ! tar -tzf "$sdist" | grep -q "/${needed}$"; then
               echo "::error::the sdist is missing ${needed}"
