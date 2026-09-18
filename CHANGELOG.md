@@ -7,129 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## [0.10.0] - 2026-09-18
 
-- **Quoted-printable decoding was slower than 0.9.0 on a body that is mostly escapes.**
-  Comparing the 0.9.0 release against master turned up one benchmark where the release won:
-  `parse_qp_dense_escapes`, by 58% on the x86 gate. #229 replaced the `quoted_printable`
-  crate with a run-copying decoder and measured a 39% win, but the dense shape had no
-  benchmark then -- `parse_qp_dense_escapes` arrived later, with #223 -- so the one input
-  the new decoder is worst at was never compared against the code it replaced. Two changes,
-  both in `vendor/mailparse/src/qp.rs`:
-
-  - `decode_line` looks at the byte under the cursor before calling `memchr`. After an
-    escape the next byte is very often another `=` -- every non-ASCII character encodes as
-    two or three consecutive escapes -- so `memchr` was being called to be told the match
-    was at offset 0, paying its SIMD setup each time. On the dense fixture that happened
-    40,000 times.
-  - The rule-1 pre-scan finds the first dropped byte a chunk at a time instead of with
-    `position`, which cannot vectorise because it has to stop at the first hit. `is_kept`
-    is respelled as arithmetic so the chunk reduction has no branches in it;
-    `is_kept_is_the_same_set` checks all 256 bytes against the original spelling. On 120 KB
-    with nothing to drop -- nearly every real body -- that scan goes from 63 us to 5.5 us.
-
-  Measured on an Apple M4, 3 interleaved rounds, controls within 3.1%:
-  `parse_qp_dense_escapes` **0.171 -> 0.102 ms (-40%)** and `parse_qp_message`
-  **0.129 -> 0.085 ms (-34%)**, with every other benchmark inside the noise floor. Against
-  0.9.0 the dense case is now 1.40x faster rather than 1.20x slower, and the ordinary
-  quoted-printable case 2.6x faster. Output is unchanged: the vendored suite's
-  crate-agreement tests still pass, including every `=xy` byte pair, and `qp_agreement`
-  ran 7.3M executions against the crate with no disagreement.
-
-### Changed
-
-- **Internal: the binding layer is split into modules, with shared getters and batch-slot
-  helpers** (#233). The crate root was the 2000-line binding file and had one module boundary in
-  it, so a change to one mode could not be reviewed without loading the other seventeen hundred
-  lines. It is now the module list and the `#[pymodule]`, over `errors`, `payload`, `convert`,
-  `metadata`, `flat`, `lazy`, `tree` and `api`. Alongside it, the copies inside the binding are
-  gone: `date_parsed` had three, `children` three, the decode-and-cache body two, the strict gate
-  four and the `parse_many` result loop three. The strict rejection's message and what
-  `raise_on_error=False` puts in a failed slot are part of the API, and four copies of those were
-  four chances for them to stop agreeing. Code was moved, not edited; every `#[inline(never)]`,
-  `#[cold]` and `#[inline(always)]` stayed on the item it was on (21, 5 and 1, unchanged). No
-  behaviour or performance change: measured flat, worst real movement +1.2% against a 2.2% noise
-  floor.
-
-- **One envelope reader and one part classifier across the flat parsers** (#234). `Mail::from_payload`,
-  `lazy_from_payload` and `metadata_from_payload` each carried their own copy of the eleven-statement
-  envelope extraction (header map, Subject, Date, From/To/Cc/Bcc/Reply-To) and of the per-part
-  classification (skip `multipart/*`, apply the RFC 2183 body-vs-attachment rule, derive filename,
-  Content-ID and disposition token). The copies had already drifted: `header_addresses` documented ten
-  call sites when there were fifteen. They are now `envelope()`, `classify_part()` and
-  `part_identity()` -- straight-line and `#[inline]`, so each caller emits the instructions it emitted
-  when it owned a copy. What #100 measured at +47% was threading a runtime *mode* through the parse;
-  there is no mode and no branch here.
-  `DispositionType::Attachment` goes from three occurrences to one, and the `Content-ID` derivation
-  from four to one -- the fourth was the MIME-tree traversal, which now reads a part's identity from
-  the same helper the flat modes do, so a part cannot answer to a different name depending on which
-  API asked. Body parts also stop deriving a filename they never used. No behaviour change, and the
-  RFC 2183 rule gets a direct unit test instead of only three end-to-end ones.
-
-  The part *loop* is now shared too, not just the rule: full and lazy mode ran two copies of the
-  same walk -- one `get_body_encoded()` per part, the quoted-printable escape check, the warning
-  indices, and the `text/plain` vs `text/html` dispatch -- differing only in what an attachment is
-  made of. That is now `flat_parts::<A>` over a `PartSink` trait, with one call site per
-  instantiation so no parse body gains a second chance to inline (the property that cost the flat
-  path 28% when it was lost). `warn_charset` goes from four call sites to one and
-  `warn_transfer_decode` from six to two. The two modes are required to report the *identical*
-  warning list -- that is what lets `strict=True` mean one thing in both -- and it was two
-  hand-maintained copies that had to agree; now it is one. `Mail` and `LazyMail` keep their own
-  shapes rather than becoming one generic struct, because `LazyMail` carries the `repaired` buffer
-  that full mode has no use for. Measured flat.
-
-- **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
-  `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
-  arm: both checked the depth cap, both recursed over `multipart/*`, both carried a verbatim
-  copy of the `message/rfc822` decode → repair → re-parse block, and both ended in the same
-  six-field node literal. Every per-node rule the tree enforces had to be edited twice, and a
-  fuzz invariant existed to notice when the copies drifted. The node is now generic over its
-  body -- `MimePart = Node<Option<Vec<u8>>>`, `TreeNode = Node<NodeBody>` -- and one traversal
-  is driven by a `LeafPolicy`, of which there are two: `Full`, and the `Retain` enum #239
-  already used to say what a leaf keeps of itself. `grep -c 'if depth >= MAX_MIME_DEPTH'` in
-  the core goes from 3 to 2, and the re-parse of an attacker-supplied embedded message exists
-  in one place rather than two. Two instantiations replace two hand-written recursions, so the
-  linker sees what it saw before; measured flat. No behaviour change, and nothing public moves
-  -- `MimePart.content` is renamed to `.body` inside the core, which the binding reads at one
-  line. The fuzz target's shape invariant now has an always-run twin in `cargo test`.
-
-- **Lazy modes borrow the payload instead of copying every deferred part** (#239). Deferring
-  a decode used to copy the part's encoded bytes out of the message, which is the opposite
-  of what deferring is for: parsing a 96 MiB single-attachment message in `mode="lazy"` cost
-  96 MiB *on top of* the payload the caller still held, and base64 is 1.33x what it encodes,
-  so a retained part could cost more than the decoded bytes it avoided producing. A deferred
-  part now keeps its offsets in the buffer it was parsed from, and the result keeps that
-  buffer alive. Measured on a 96 MiB message with one unread attachment: peak RSS 192.3 MiB
-  before, 96.2 MiB after. Counted in the core, on the attachment-heavy fixture: a lazy tree
-  peaked at 798,111 bytes and now peaks at 14,332 -- the same as a metadata tree, because a
-  range is not a copy -- and a flat lazy parse dropped from 790,993 to 23,398.
-
-  **This changes the memory contract, and is the reason to read this entry.** A `PyLazyMail`
-  attachment or a `PyLazyMimePart` leaf pins the payload it was parsed from for as long as it
-  is reachable, so keeping one attachment out of a mailbox keeps that whole message rather
-  than just the part. The pin is per message even in `parse_many`, so one slot never holds
-  another's payload. A caller who wants the bytes without the message reads `content`, which
-  is a decoded copy, and drops the attachment. Nothing about the values changes: every mode
-  returns what it returned, including for a message whose header block had to be repaired
-  (#150), where the offsets index the rebuilt copy that now travels with the result.
-
-  One exception, invisible from Python: the leaves *inside* a `message/rfc822` node still hold
-  copies. Their bytes were produced by decoding that node's body, so they are in no caller
-  buffer to point into.
-
-- **The parsing core is a crate, and has Rust tests for the first time** (#236). It was a
-  `#[path]`-included file: the binding declared it as a module, and both fuzz targets
-  reached across the tree to include the same source again under different cfg. Nothing
-  could depend on it and nothing could test it directly, so a library whose reason to
-  exist is parsing had zero Rust tests for the parsing -- every assertion had to go through
-  Python. It is now `crates/fast_mail_parser_core`, a workspace member with `charset` and
-  `mailparse` declared in its manifest alone, and the fuzz harness links it instead of
-  copying it. Seven tests come with it, covering what is awkward to reach from Python: the
-  input-size cap (no 100 MB object crosses the FFI boundary to test it here), the
-  warning machinery's ordering, per-slot `parse_many` semantics, and metadata mode agreeing
-  with the full parse on the envelope. `cargo tree -p fast_mail_parser_core` now *enforces*
-  the no-PyO3 property the module docs used to merely claim. No behaviour change; the
-  extension is functionally identical.
+The performance release. Against 0.9.0 on the x86 gate a full parse is about **1.95x**
+faster, a batch **1.84x**, and the cached-read paths -- an attachment or a header map read
+more than once -- are 38-81x, because they stopped being re-decoded at all. Nothing in the
+Python API changed; one documented behaviour did, and it is the first entry under Changed.
 
 ### Added
 
@@ -150,8 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what it decodes to. A `profiling` cargo profile (release codegen plus line tables) makes
   the shipped build attributable to a line. No new runtime dependency; nothing under
   `src/`, `vendor/` or `fast_mail_parser/` changes and the wheel is byte-identical.
-
-### Added
 
 - **A dispatch-only PGO A/B** (#241). Profile-guided optimisation is easy to adopt on
   faith -- the compiler gets a real profile and the numbers usually move the right way --
@@ -236,6 +117,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Lazy modes borrow the payload instead of copying every deferred part** (#239). Deferring
+  a decode used to copy the part's encoded bytes out of the message, which is the opposite
+  of what deferring is for: parsing a 96 MiB single-attachment message in `mode="lazy"` cost
+  96 MiB *on top of* the payload the caller still held, and base64 is 1.33x what it encodes,
+  so a retained part could cost more than the decoded bytes it avoided producing. A deferred
+  part now keeps its offsets in the buffer it was parsed from, and the result keeps that
+  buffer alive. Measured on a 96 MiB message with one unread attachment: peak RSS 192.3 MiB
+  before, 96.2 MiB after. Counted in the core, on the attachment-heavy fixture: a lazy tree
+  peaked at 798,111 bytes and now peaks at 14,332 -- the same as a metadata tree, because a
+  range is not a copy -- and a flat lazy parse dropped from 790,993 to 23,398.
+
+  **This changes the memory contract, and is the reason to read this entry.** A `PyLazyMail`
+  attachment or a `PyLazyMimePart` leaf pins the payload it was parsed from for as long as it
+  is reachable, so keeping one attachment out of a mailbox keeps that whole message rather
+  than just the part. The pin is per message even in `parse_many`, so one slot never holds
+  another's payload. A caller who wants the bytes without the message reads `content`, which
+  is a decoded copy, and drops the attachment. Nothing about the values changes: every mode
+  returns what it returned, including for a message whose header block had to be repaired
+  (#150), where the offsets index the rebuilt copy that now travels with the result.
+
+  One exception, invisible from Python: the leaves *inside* a `message/rfc822` node still hold
+  copies. Their bytes were produced by decoding that node's body, so they are in no caller
+  buffer to point into.
+
+- **Internal: the binding layer is split into modules, with shared getters and batch-slot
+  helpers** (#233). The crate root was the 2000-line binding file and had one module boundary in
+  it, so a change to one mode could not be reviewed without loading the other seventeen hundred
+  lines. It is now the module list and the `#[pymodule]`, over `errors`, `payload`, `convert`,
+  `metadata`, `flat`, `lazy`, `tree` and `api`. Alongside it, the copies inside the binding are
+  gone: `date_parsed` had three, `children` three, the decode-and-cache body two, the strict gate
+  four and the `parse_many` result loop three. The strict rejection's message and what
+  `raise_on_error=False` puts in a failed slot are part of the API, and four copies of those were
+  four chances for them to stop agreeing. Code was moved, not edited; every `#[inline(never)]`,
+  `#[cold]` and `#[inline(always)]` stayed on the item it was on (21, 5 and 1, unchanged). No
+  behaviour or performance change: measured flat, worst real movement +1.2% against a 2.2% noise
+  floor.
+
+- **One envelope reader and one part classifier across the flat parsers** (#234). `Mail::from_payload`,
+  `lazy_from_payload` and `metadata_from_payload` each carried their own copy of the eleven-statement
+  envelope extraction (header map, Subject, Date, From/To/Cc/Bcc/Reply-To) and of the per-part
+  classification (skip `multipart/*`, apply the RFC 2183 body-vs-attachment rule, derive filename,
+  Content-ID and disposition token). The copies had already drifted: `header_addresses` documented ten
+  call sites when there were fifteen. They are now `envelope()`, `classify_part()` and
+  `part_identity()` -- straight-line and `#[inline]`, so each caller emits the instructions it emitted
+  when it owned a copy. What #100 measured at +47% was threading a runtime *mode* through the parse;
+  there is no mode and no branch here.
+  `DispositionType::Attachment` goes from three occurrences to one, and the `Content-ID` derivation
+  from four to one -- the fourth was the MIME-tree traversal, which now reads a part's identity from
+  the same helper the flat modes do, so a part cannot answer to a different name depending on which
+  API asked. Body parts also stop deriving a filename they never used. No behaviour change, and the
+  RFC 2183 rule gets a direct unit test instead of only three end-to-end ones.
+
+  The part *loop* is now shared too, not just the rule: full and lazy mode ran two copies of the
+  same walk -- one `get_body_encoded()` per part, the quoted-printable escape check, the warning
+  indices, and the `text/plain` vs `text/html` dispatch -- differing only in what an attachment is
+  made of. That is now `flat_parts::<A>` over a `PartSink` trait, with one call site per
+  instantiation so no parse body gains a second chance to inline (the property that cost the flat
+  path 28% when it was lost). `warn_charset` goes from four call sites to one and
+  `warn_transfer_decode` from six to two. The two modes are required to report the *identical*
+  warning list -- that is what lets `strict=True` mean one thing in both -- and it was two
+  hand-maintained copies that had to agree; now it is one. `Mail` and `LazyMail` keep their own
+  shapes rather than becoming one generic struct, because `LazyMail` carries the `repaired` buffer
+  that full mode has no use for. Measured flat.
+
+- **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
+  `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
+  arm: both checked the depth cap, both recursed over `multipart/*`, both carried a verbatim
+  copy of the `message/rfc822` decode → repair → re-parse block, and both ended in the same
+  six-field node literal. Every per-node rule the tree enforces had to be edited twice, and a
+  fuzz invariant existed to notice when the copies drifted. The node is now generic over its
+  body -- `MimePart = Node<Option<Vec<u8>>>`, `TreeNode = Node<NodeBody>` -- and one traversal
+  is driven by a `LeafPolicy`, of which there are two: `Full`, and the `Retain` enum #239
+  already used to say what a leaf keeps of itself. `grep -c 'if depth >= MAX_MIME_DEPTH'` in
+  the core goes from 3 to 2, and the re-parse of an attacker-supplied embedded message exists
+  in one place rather than two. Two instantiations replace two hand-written recursions, so the
+  linker sees what it saw before; measured flat. No behaviour change, and nothing public moves
+  -- `MimePart.content` is renamed to `.body` inside the core, which the binding reads at one
+  line. The fuzz target's shape invariant now has an always-run twin in `cargo test`.
+
+- **The parsing core is a crate, and has Rust tests for the first time** (#236). It was a
+  `#[path]`-included file: the binding declared it as a module, and both fuzz targets
+  reached across the tree to include the same source again under different cfg. Nothing
+  could depend on it and nothing could test it directly, so a library whose reason to
+  exist is parsing had zero Rust tests for the parsing -- every assertion had to go through
+  Python. It is now `crates/fast_mail_parser_core`, a workspace member with `charset` and
+  `mailparse` declared in its manifest alone, and the fuzz harness links it instead of
+  copying it. Seven tests come with it, covering what is awkward to reach from Python: the
+  input-size cap (no 100 MB object crosses the FFI boundary to test it here), the
+  warning machinery's ordering, per-slot `parse_many` semantics, and metadata mode agreeing
+  with the full parse on the envelope. `cargo tree -p fast_mail_parser_core` now *enforces*
+  the no-PyO3 property the module docs used to merely claim. No behaviour change; the
+  extension is functionally identical.
+
 - **A part's body is evaluated once, and plaintext bodies stop being copied** (#230).
   `get_body_encoded()` re-reads a part's headers to find its transfer encoding, and the
   full and lazy parsers each called it two or three times per part -- for the
@@ -246,25 +220,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attachment bytes are byte-identical. Measured on an Apple M4 (10 vCPU), 5 interleaved
   rounds, pure-Python controls within 2.4%: the quoted-printable fixture
   **0.143 -> 0.131 ms (-9.8%)**, a plain 8bit text body **0.022 -> 0.021 ms (-6.4%)**.
-
-
-### Added
-
-- **The benchmark gate judges more than one message shape** (#223). Every gated benchmark
-  measured `large_message.eml` -- 767 KiB, 99% base64 attachment -- so the gate judged the
-  decode path and nothing else. That is not hypothetical: #238's header work moved the
-  small serial batch 23% while the gate's own benchmark moved 2%. Three gated benchmarks
-  now cover the shapes it could not see: `parse_small` (the per-call floor on ~0.8 KB --
-  FFI, header map, address and date parse), `parse_many_small_serial` (the same cost x2000,
-  serial, in the milliseconds range), and `parse_rfc2047_headers` (a ~30 KB header block
-  with encoded words throughout, the one path no other gated benchmark touches). Each
-  asserts correctness once outside the timed call, including `warnings == []`, so none of
-  them can be timing a repair. The RFC 2047 input is built in the benchmark module rather
-  than committed to `tests/data/`, where every `.eml` is auto-enrolled in eight correctness
-  suites. Quoted-printable coverage arrived earlier with #229. Test-only: the extension is
-  byte-identical.
-
-### Changed
 
 - **Quoted-printable bodies decode a run at a time** (#229). The last transfer decoder in
   this library that still ran byte-at-a-time: `decode_quoted_printable` handed the whole
@@ -402,6 +357,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tree, and `deep-fuzz.yml` seeds from that asset when its cache is cold (lineage moved
   to `v3` so the next run does). `publish.yml` is guarded to `v*` tags so a corpus
   release does not build wheels.
+
+
+### Fixed
+
+- **Quoted-printable decoding was slower than 0.9.0 on a body that is mostly escapes.**
+  Comparing the 0.9.0 release against master turned up one benchmark where the release won:
+  `parse_qp_dense_escapes`, by 58% on the x86 gate. #229 replaced the `quoted_printable`
+  crate with a run-copying decoder and measured a 39% win, but the dense shape had no
+  benchmark then -- `parse_qp_dense_escapes` arrived later, with #223 -- so the one input
+  the new decoder is worst at was never compared against the code it replaced. Two changes,
+  both in `vendor/mailparse/src/qp.rs`:
+
+  - `decode_line` looks at the byte under the cursor before calling `memchr`. After an
+    escape the next byte is very often another `=` -- every non-ASCII character encodes as
+    two or three consecutive escapes -- so `memchr` was being called to be told the match
+    was at offset 0, paying its SIMD setup each time. On the dense fixture that happened
+    40,000 times.
+  - The rule-1 pre-scan finds the first dropped byte a chunk at a time instead of with
+    `position`, which cannot vectorise because it has to stop at the first hit. `is_kept`
+    is respelled as arithmetic so the chunk reduction has no branches in it;
+    `is_kept_is_the_same_set` checks all 256 bytes against the original spelling. On 120 KB
+    with nothing to drop -- nearly every real body -- that scan goes from 63 us to 5.5 us.
+
+  Measured on an Apple M4, 3 interleaved rounds, controls within 3.1%:
+  `parse_qp_dense_escapes` **0.171 -> 0.102 ms (-40%)** and `parse_qp_message`
+  **0.129 -> 0.085 ms (-34%)**, with every other benchmark inside the noise floor. Against
+  0.9.0 the dense case is now 1.40x faster rather than 1.20x slower, and the ordinary
+  quoted-printable case 2.6x faster. Output is unchanged: the vendored suite's
+  crate-agreement tests still pass, including every `=xy` byte pair, and `qp_agreement`
+  ran 7.3M executions against the crate with no disagreement.
 
 ## [0.9.0] - 2026-08-28
 
@@ -1106,6 +1091,7 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
 [Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.9.0...HEAD
+[0.10.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.6.1...v0.7.0
