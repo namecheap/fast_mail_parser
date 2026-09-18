@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **One envelope reader and one part classifier across the flat parsers** (#234). `Mail::from_payload`,
+  `lazy_from_payload` and `metadata_from_payload` each carried their own copy of the eleven-statement
+  envelope extraction (header map, Subject, Date, From/To/Cc/Bcc/Reply-To) and of the per-part
+  classification (skip `multipart/*`, apply the RFC 2183 body-vs-attachment rule, derive filename,
+  Content-ID and disposition token). The copies had already drifted: `header_addresses` documented ten
+  call sites when there were fifteen. They are now `envelope()`, `classify_part()` and
+  `part_identity()` -- straight-line and `#[inline]`, so each caller emits the instructions it emitted
+  when it owned a copy. What #100 measured at +47% was threading a runtime *mode* through the parse;
+  there is no mode and no branch here.
+  `DispositionType::Attachment` goes from three occurrences to one, and the `Content-ID` derivation
+  from four to one -- the fourth was the MIME-tree traversal, which now reads a part's identity from
+  the same helper the flat modes do, so a part cannot answer to a different name depending on which
+  API asked. Body parts also stop deriving a filename they never used. No behaviour change, and the
+  RFC 2183 rule gets a direct unit test instead of only three end-to-end ones.
+
 - **One MIME-tree traversal instead of two** (#237). `MimePart::build` (full mode, #99) and
   `build_node` (the deferred modes, #202) were the same recursive walk with a different leaf
   arm: both checked the depth cap, both recursed over `multipart/*`, both carried a verbatim
