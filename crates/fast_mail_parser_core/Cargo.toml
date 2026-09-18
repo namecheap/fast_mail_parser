@@ -11,7 +11,7 @@
 # obviously one release.
 [package]
 name = "fast_mail_parser_core"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 rust-version = "1.83"
 license = "Apache-2.0"

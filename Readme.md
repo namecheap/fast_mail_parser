@@ -126,9 +126,9 @@ and attachments with their payloads decoded:
 
 | Library | Work performed | Min time | Relative |
 | --- | --- | --- | --- |
-| **fast_mail_parser** | parse + decode bodies + decode attachments | 0.59 ms | 1.00x |
-| mail-parser 4.6.4 | `from_string` + `.parse()` + read attributes | 14.81 ms | 25.08x |
-| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 20.23 ms | 34.27x |
+| **fast_mail_parser** | parse + decode bodies + decode attachments | 0.34 ms | 1.00x |
+| mail-parser 4.6.5 | `from_string` + `.parse()` + read attributes | 14.25 ms | 41.6x |
+| stdlib `email` | `message_from_bytes` + walk + `get_content` / `get_payload` | 21.18 ms | 61.9x |
 
 This table is minimum-of-N (34+ rounds), which is what `make bench-table` prints
 and what most library comparisons quote. Everything below is a median.
@@ -140,27 +140,32 @@ will not read everything, and are priced accordingly:
 
 | Call | Median | vs default | What it skips |
 | --- | --- | --- | --- |
-| `parse_email(payload)` | 0.575 ms | 1.0x | nothing — the default |
-| `parse_email(payload, mode="lazy")`, nothing read | 0.080 ms | **7.2x** | attachment decoding, until asked |
-| `parse_email(payload, mode="lazy")`, every attachment read | 0.594 ms | 0.97x | nothing; same work, deferred |
-| `parse_email(payload, mode="metadata")` | 0.051 ms | **11.3x** | every body and attachment |
-| `parse_email_tree(payload)` | 0.556 ms | 1.03x | nothing — the full MIME tree |
-| `parse_email_tree(payload, mode="lazy")`, nothing read | 0.077 ms | 7.5x | leaf decoding, until asked |
-| `parse_email_tree(payload, mode="metadata")` | 0.054 ms | 10.6x | every leaf's content |
+| `parse_email(payload)` | 0.326 ms | 1.0x | nothing — the default |
+| `parse_email(payload, mode="lazy")`, nothing read | 0.056 ms | **5.8x** | attachment decoding, until asked |
+| `parse_email(payload, mode="lazy")`, every attachment read | 0.348 ms | 0.94x | nothing; same work, deferred |
+| `parse_email(payload, mode="metadata")` | 0.051 ms | **6.4x** | every body and attachment |
+| `parse_email_tree(payload)` | 0.326 ms | 1.0x | nothing — the full MIME tree |
+| `parse_email_tree(payload, mode="lazy")`, nothing read | 0.054 ms | 6.0x | leaf decoding, until asked |
+| `parse_email_tree(payload, mode="metadata")` | 0.054 ms | 6.0x | every leaf's content |
 
-Reading every attachment through lazy mode costs about 3% over the default, so
+Reading every attachment through lazy mode costs about 6% over the default, so
 **if you will read everything, use the default**; lazy mode is for when you will
 not.
+
+These ratios got *smaller* in 0.10.0, and that is the default mode improving
+rather than the others regressing: a full parse roughly halved, so there is less
+of it left to skip. In absolute terms every one of these modes is faster than it
+was in 0.9.0.
 
 ### Batches
 
 | Batch | `parse_many` | Alternative | |
 | --- | --- | --- | --- |
-| 8 × 767 KiB, `threads=1` | 4.48 ms | — | 0.56 ms per message |
-| 8 × 767 KiB, `threads=1`, `mode="metadata"` | 0.41 ms | — | **10.9x** the full batch |
-| 16 × 767 KiB, all cores | 4.62 ms | 4.77 ms, `ThreadPoolExecutor` + `parse_email` | level (1.03x) |
-| 2000 × 0.8 KB, all cores | 4.67 ms | 62.28 ms, `ThreadPoolExecutor` + `parse_email` | **13.3x** |
-| 2000 × 0.8 KB, `mode="metadata"` | 4.20 ms | 4.67 ms, `mode="full"` | 1.11x |
+| 8 × 767 KiB, `threads=1` | 2.63 ms | — | 0.33 ms per message |
+| 8 × 767 KiB, `threads=1`, `mode="metadata"` | 0.42 ms | — | **6.2x** the full batch |
+| 16 × 767 KiB, all cores | 2.70 ms | 2.82 ms, `ThreadPoolExecutor` + `parse_email` | level (1.04x) |
+| 2000 × 0.8 KB, all cores | 5.11 ms | 71.06 ms, `ThreadPoolExecutor` + `parse_email` | **13.9x** |
+| 2000 × 0.8 KB, `mode="metadata"` | 4.65 ms | 5.11 ms, `mode="full"` | 1.10x |
 
 The batch API removes per-call overhead — a fixed cost per message that
 dominates small messages and vanishes into large ones; the GIL was already
@@ -323,8 +328,8 @@ message size. Measured against `ThreadPoolExecutor(max_workers=4)` +
 
 | Messages | Size each | `parse_many` | Thread pool | vs thread pool |
 | --- | --- | --- | --- | --- |
-| 2000 | 0.8 KB | 4.5 ms | 52.5 ms | **11.7x faster** |
-| 16 | 768 KB | 14.1 ms | 14.2 ms | level (1.01x) |
+| 2000 | 0.8 KB | 5.1 ms | 71.1 ms | **13.9x faster** |
+| 16 | 768 KB | 2.7 ms | 2.8 ms | level (1.04x) |
 
 Per message that is **2.3 µs** against **26.2 µs** for the small case: the ~24 µs
 gap is the Python-side cost, and it does not grow with the message. At 768 KB the
@@ -382,10 +387,10 @@ The mode is uniform across the batch, which is what lets it pick the slot type;
 and input order behave exactly as in the default mode.
 
 On the attachment-heavy fixture, a batch of 8 × 767 KiB with `threads=1`, median
-of three interleaved rounds on the CI runner: `mode="full"` 4.48 ms,
-`mode="metadata"` 0.41 ms — **10.9x**, the same ratio the single-message mode gets,
-now available to the batch. On 2000 × 0.8 KB it is 4.20 ms against 4.67 ms — a
-1.11x edge, because small messages are mostly headers and there is little
+of three interleaved rounds on the CI runner: `mode="full"` 2.63 ms,
+`mode="metadata"` 0.42 ms — **6.2x**, the same ratio the single-message mode gets,
+now available to the batch. On 2000 × 0.8 KB it is 4.65 ms against 5.11 ms — a
+1.10x edge, because small messages are mostly headers and there is little
 decoding to skip.
 
 `strict=True` with `mode="metadata"` raises `ValueError`, as it does on
@@ -476,12 +481,12 @@ median of three interleaved rounds on the CI runner:
 | | | |
 | --- | --- | --- |
 | `mode="metadata"` | 0.051 ms | decodes nothing |
-| `mode="lazy"`, nothing read | 0.080 ms | bodies decoded, attachments deferred |
-| `mode="full"` | 0.575 ms | the default |
-| `mode="lazy"`, every attachment read | 0.594 ms | the same work, in a worse order |
+| `mode="lazy"`, nothing read | 0.056 ms | bodies decoded, attachments deferred |
+| `mode="full"` | 0.326 ms | the default |
+| `mode="lazy"`, every attachment read | 0.348 ms | the same work, in a worse order |
 
-So deferring saves about 86% when you were not going to decode everything, and
-costs about 3% when you were. **If you are going to read every attachment, use the
+So deferring saves about 83% when you were not going to decode everything, and
+costs about 6% when you were. **If you are going to read every attachment, use the
 default mode** — this one is for when you are not. Absolute times move with the
 runner; the ratios are what to read.
 
@@ -583,8 +588,8 @@ the payload so it can decode itself later, which keeps that payload alive;
 metadata mode remembers nothing and is the sweep that holds nothing.
 
 On the attachment-heavy fixture (767 KiB), median of three interleaved rounds on
-the CI runner: full tree 0.556 ms, `mode="lazy"` with nothing read 0.077 ms,
-`mode="metadata"` 0.054 ms — **7.2x** and **10.3x**.
+the CI runner: full tree 0.326 ms, `mode="lazy"` with nothing read 0.054 ms,
+`mode="metadata"` 0.054 ms — **6.0x** each.
 
 Two things to know:
 
