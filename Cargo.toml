@@ -48,7 +48,7 @@ exclude = ["fuzz", "vendor/mailparse", "bench"]
 # The parsing core. `charset` and `mailparse` live in its manifest now, so their
 # version requirements appear exactly once in the tree.
 fast_mail_parser_core = { path = "crates/fast_mail_parser_core" }
-pyo3 = "0.29"
+pyo3 = "0.30"
 
 [features]
 # abi3-py311 targets the CPython stable ABI with a 3.11 baseline (matching
