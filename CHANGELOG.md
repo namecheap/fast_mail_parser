@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-30
+
+Maintenance release: dependency and CI-action updates only, no API or behaviour change.
+
+### Changed
+
+- Rust toolchain pin moved to 1.98.1 (#266).
+- Bumped `pyo3` to 0.30.1 (#269, #276) and the dev-only `mail-parser` to 4.8.0 (#271).
+- Bumped GitHub Actions: `dtolnay/rust-toolchain`, `actions/upload-artifact`,
+  `actions/download-artifact`, `actions/setup-python`, `Swatinem/rust-cache` and
+  `pypa/gh-action-pypi-publish` (#267, #268, #272-#275, #277, #278).
+
 ## [0.10.0] - 2026-09-18
 
 The performance release. Against 0.9.0 on the x86 gate a full parse is about **1.95x**
@@ -1090,7 +1102,8 @@ The package version is single-sourced from `Cargo.toml`'s `[package].version`.
 `pyproject.toml` declares `dynamic = ["version"]`, so maturin reads the version
 from `Cargo.toml` at build time. Bump the version in `Cargo.toml` only.
 
-[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/namecheap/fast_mail_parser/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/namecheap/fast_mail_parser/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/namecheap/fast_mail_parser/compare/v0.7.0...v0.8.0
